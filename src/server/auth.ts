@@ -2,7 +2,7 @@ import "server-only";
 
 import { cookies } from "next/headers";
 import type { UserAccount } from "@/lib/domain";
-import { demoUsers } from "@/lib/mock-data";
+import { createSupabaseServiceClient } from "./supabase";
 
 const SESSION_COOKIE = "pt_session";
 
@@ -36,9 +36,45 @@ export async function getSessionUser(): Promise<UserAccount | null> {
   const userId = decodeSession(token);
   if (!userId) return null;
 
-  // Demo: look up in mock data. Production: query Supabase.
-  const user = demoUsers.find((u) => u.id === userId);
-  return user ?? null;
+  const DEMO_UUID_MAP: Record<string, string> = {
+    u_admin: "00000000-0000-0000-0000-000000000001",
+    u_customer_minh: "00000000-0000-0000-0000-000000000002",
+    u_customer_lan: "00000000-0000-0000-0000-000000000003"
+  };
+
+  const uuid = DEMO_UUID_MAP[userId] || userId;
+
+  try {
+    const supabase = createSupabaseServiceClient();
+    const { data, error } = await supabase
+      .from("app_users")
+      .select(`
+        id,
+        full_name,
+        email,
+        organizations (
+          name
+        )
+      `)
+      .eq("id", uuid)
+      .single();
+
+    if (error || !data) return null;
+
+    const isAdmin = data.email === "admin@pettravel.vn";
+    const org: any = data.organizations;
+
+    return {
+      id: data.id,
+      name: data.full_name,
+      company: org?.name ?? "Happy Paws Retail",
+      email: data.email,
+      role: isAdmin ? "super_admin" : "customer_owner",
+      isAdmin
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**

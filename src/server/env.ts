@@ -15,7 +15,14 @@ const serverEnvSchema = z.object({
   PAYMENT_QR_ACCOUNT_NAME: z.string().optional()
 });
 
-export const serverEnv = serverEnvSchema.parse(process.env);
+const rawEnv = Object.fromEntries(
+  Object.entries(process.env).map(([key, val]) => [
+    key,
+    typeof val === "string" ? val.trim().replace(/^['"\s]+|['"\s]+$/g, "") : val
+  ])
+);
+
+export const serverEnv = serverEnvSchema.parse(rawEnv);
 
 export function getRequiredEnv(key: keyof typeof serverEnv): string {
   const value = serverEnv[key];

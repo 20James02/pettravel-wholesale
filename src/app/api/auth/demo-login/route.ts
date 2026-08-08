@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { demoUsers } from "@/lib/mock-data";
 import { encodeSession } from "@/server/auth";
+import { bootstrapDemoUsers } from "@/server/db";
 
 export const runtime = "nodejs";
 
@@ -22,6 +23,7 @@ export async function POST(request: Request) {
     }
 
     const token = encodeSession(userId);
+    await bootstrapDemoUsers();
     const response = NextResponse.json({
       user: {
         id: user.id,

@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "@/server/auth";
-import {
-  getOrdersForUser,
-  sanitizeOrderForCustomer,
-  hasActiveOrder,
-  addDemoOrder,
-  updateDemoOrder,
-  demoOrders
-} from "@/lib/mock-data";
+import { getOrders, saveOrder } from "@/server/db";
 import type { CustomerOrder } from "@/lib/domain";
 
 export const runtime = "nodejs";
+
+// Helper to sanitize orders for customers (masking internal notes/fields)
+function sanitizeOrderForCustomer(order: CustomerOrder): CustomerOrder {
+  return {
+    ...order,
+    comments: order.comments.filter((c) => c.audience !== "internal")
+  };
+}
 
 /**
  * GET /api/orders
@@ -27,12 +28,18 @@ export async function GET() {
     );
   }
 
-  const orders = getOrdersForUser(user);
+  const orders = await getOrders(user);
   const safeOrders = user.isAdmin
     ? orders
     : orders.map(sanitizeOrderForCustomer);
 
-  const canCreateOrder = user.isAdmin ? false : !hasActiveOrder(user.id);
+  const hasActiveOrder = orders.some(
+    (o) =>
+      o.customerId === user.id &&
+      o.commercialStatus !== "cancelled" &&
+      o.fulfillmentStatus !== "delivered"
+  );
+  const canCreateOrder = user.isAdmin ? false : !hasActiveOrder;
 
   return NextResponse.json({
     orders: safeOrders,
@@ -53,8 +60,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Quản trị viên không thể tạo đơn đại lý." }, { status: 403 });
   }
 
-  // Enforce 1 active order rule
-  if (hasActiveOrder(user.id)) {
+  const orders = await getOrders(user);
+  const hasActiveOrder = orders.some(
+    (o) =>
+      o.customerId === user.id &&
+      o.commercialStatus !== "cancelled" &&
+      o.fulfillmentStatus !== "delivered"
+  );
+
+  if (hasActiveOrder) {
     return NextResponse.json(
       { error: "Bạn đang có đơn hàng sỉ đang hoạt động. Không thể tạo thêm đơn hàng mới cùng lúc." },
       { status: 400 }
@@ -63,10 +77,10 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { items, paymentIntent, quoteVersions } = body;
+    const { items, paymentIntent, quoteVersions, recipientName, recipientPhone, recipientAddress } = body;
 
     const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, "");
-    const seq = String(demoOrders.length + 1001);
+    const seq = String(orders.length + 1001);
     const orderNumber = `PTW-${dateStr}-${seq}`;
 
     const newOrder: CustomerOrder = {
@@ -80,6 +94,9 @@ export async function POST(request: Request) {
       fulfillmentStatus: "not_started",
       paymentIntent: paymentIntent ?? "deposit_cod",
       invoiceRequested: false,
+      recipientName: recipientName ?? "",
+      recipientPhone: recipientPhone ?? "",
+      recipientAddress: recipientAddress ?? "",
       items: items ?? [],
       quoteVersions: quoteVersions ?? [],
       paymentRequests: [],
@@ -97,7 +114,7 @@ export async function POST(request: Request) {
       updatedAt: new Date().toISOString()
     };
 
-    addDemoOrder(newOrder);
+    await saveOrder(newOrder, user.id);
 
     return NextResponse.json({ order: sanitizeOrderForCustomer(newOrder) });
   } catch (error) {
@@ -119,7 +136,8 @@ export async function PUT(request: Request) {
     const updatedOrder: CustomerOrder = await request.json();
     
     // Find existing order
-    const existing = demoOrders.find((o) => o.id === updatedOrder.id);
+    const orders = await getOrders(user);
+    const existing = orders.find((o) => o.id === updatedOrder.id);
     if (!existing) {
       return NextResponse.json({ error: "Đơn hàng không tồn tại." }, { status: 404 });
     }
@@ -132,18 +150,16 @@ export async function PUT(request: Request) {
     // If customer updates, sanitize input to prevent tampering with admin fields
     let orderToSave = updatedOrder;
     if (!user.isAdmin) {
-      // Keep admin-only fields from the existing order to prevent cheating
       orderToSave = {
         ...updatedOrder,
         customerId: existing.customerId,
-        // Allow customer to update comments, paymentProofs, paymentStatus (when uploading proof), and recipient info
         fulfillmentGroups: existing.fulfillmentGroups,
         quoteVersions: existing.quoteVersions,
         paymentRequests: existing.paymentRequests
       };
     }
 
-    updateDemoOrder(orderToSave);
+    await saveOrder(orderToSave, user.id);
 
     const result = user.isAdmin ? orderToSave : sanitizeOrderForCustomer(orderToSave);
     return NextResponse.json({ order: result });

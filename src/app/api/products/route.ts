@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUser, requireAdmin } from "@/server/auth";
-import { products, sanitizeProductsForRole, updateDemoProducts } from "@/lib/mock-data";
+import { getProducts, saveProduct, deleteProduct } from "@/server/db";
 import type { Product } from "@/lib/domain";
 
 export const runtime = "nodejs";
@@ -15,7 +15,7 @@ export async function GET() {
     role = "customer";
   }
 
-  const data = sanitizeProductsForRole(products, role);
+  const data = await getProducts(role);
   return NextResponse.json({ products: data, role });
 }
 
@@ -30,11 +30,11 @@ export async function POST(req: Request) {
   try {
     const product: Product = await req.json();
     if (!product.id) product.id = `prod_${Date.now()}`;
-    const updated = [product, ...products];
-    updateDemoProducts(updated);
+    await saveProduct(product);
     return NextResponse.json({ success: true, product });
-  } catch {
-    return NextResponse.json({ error: "Dữ liệu không hợp lệ." }, { status: 400 });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Dữ liệu không hợp lệ.";
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
 
@@ -48,11 +48,11 @@ export async function PUT(req: Request) {
 
   try {
     const product: Product = await req.json();
-    const updated = products.map((p) => (p.id === product.id ? product : p));
-    updateDemoProducts(updated);
+    await saveProduct(product);
     return NextResponse.json({ success: true, product });
-  } catch {
-    return NextResponse.json({ error: "Dữ liệu không hợp lệ." }, { status: 400 });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Dữ liệu không hợp lệ.";
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
 
@@ -70,10 +70,10 @@ export async function DELETE(req: Request) {
     const id = searchParams.get("id");
     if (!id) return NextResponse.json({ error: "Thiếu ID sản phẩm." }, { status: 400 });
 
-    const updated = products.filter((p) => p.id !== id);
-    updateDemoProducts(updated);
+    await deleteProduct(id);
     return NextResponse.json({ success: true });
-  } catch {
-    return NextResponse.json({ error: "Dữ liệu không hợp lệ." }, { status: 400 });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Dữ liệu không hợp lệ.";
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
