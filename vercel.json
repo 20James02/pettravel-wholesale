@@ -1,0 +1,10 @@
+{
+  "framework": "nextjs",
+  "regions": ["sin1"],
+  "crons": [
+    {
+      "path": "/api/health",
+      "schedule": "0 2 * * *"
+    }
+  ]
+}

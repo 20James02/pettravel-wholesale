@@ -1,0 +1,11 @@
+<svg width="640" height="360" viewBox="0 0 640 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="640" height="360" fill="#E8F2EE"/>
+  <rect x="118" y="84" width="404" height="224" rx="18" fill="#1B4F48"/>
+  <path d="M224 92c11-48 181-48 192 0" stroke="#D8A15F" stroke-width="16" stroke-linecap="round"/>
+  <rect x="178" y="138" width="284" height="130" rx="14" fill="#F7FAF7"/>
+  <circle cx="248" cy="203" r="24" fill="#C36F28"/>
+  <circle cx="392" cy="203" r="24" fill="#C36F28"/>
+  <path d="M276 240c31 22 66 22 98 0" stroke="#1B4F48" stroke-width="12" stroke-linecap="round"/>
+  <path d="M158 114h324" stroke="#2C7066" stroke-width="10" stroke-linecap="round"/>
+  <text x="320" y="332" text-anchor="middle" fill="#17201B" font-family="Arial, sans-serif" font-size="24" font-weight="700">AirGo Travel Carrier</text>
+</svg>
