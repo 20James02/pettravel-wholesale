@@ -301,32 +301,33 @@ button:active {
 .catalog-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr); /* 3 sản phẩm 1 hàng trên mobile */
-  gap: 8px;
+  gap: 6px;
 }
 
 @media (min-width: 640px) {
   .catalog-grid {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
+    grid-template-columns: repeat(5, 1fr); /* 5 sản phẩm 1 hàng trên tablet */
+    gap: 8px;
   }
 }
 
 @media (min-width: 1024px) {
   .catalog-grid {
-    grid-template-columns: repeat(6, 1fr); /* 6 sản phẩm 1 hàng trên máy tính */
-    gap: 16px;
+    grid-template-columns: repeat(8, 1fr); /* 8 sản phẩm 1 hàng trên máy tính */
+    gap: 10px;
   }
 }
 
 .product-card {
   background: var(--panel);
-  border-radius: 1.75rem;
+  border-radius: 1.25rem;
   border: 2px solid var(--line);
   box-shadow: var(--clay-card);
   overflow: hidden;
   display: flex;
   flex-direction: column;
   transition: transform 0.2s, box-shadow 0.2s;
+  aspect-ratio: 3 / 4; /* Box tỷ lệ 3:4 */
 }
 .product-card:hover {
   transform: translateY(-6px);

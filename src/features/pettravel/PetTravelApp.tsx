@@ -1068,17 +1068,7 @@ export function PetTravelApp() {
           </div>
         </header>
 
-        {/* SUMMARY METRICS */}
-        <div className="metrics-grid">
-          <div className="metric">
-            <span className="muted text-sm flex items-center gap-1 font-semibold"><Heart size={14} className="text-orange-500 fill-orange-500" /> Tổng tiền hàng sỉ</span>
-            <strong>{formatVnd(quote.finalTotal)}</strong>
-          </div>
-          <div className="metric">
-            <span className="muted text-sm flex items-center gap-1 font-semibold"><WalletCards size={14} className="text-blue-500" /> Khoản cọc tạm tính</span>
-            <strong>{formatVnd(quote.depositAmount)}</strong>
-          </div>
-        </div>
+
 
         {/* --- A. PRODUCT CATALOG TAB --- */}
         {activeTab === "catalog" && (
@@ -1111,28 +1101,28 @@ export function PetTravelApp() {
                       setActiveGalleryIndex(0);
                     }}
                   >
-                    <div className="relative aspect-square w-full bg-[#FFFBEB] border-b-2 border-orange-100">
+                    <div className="relative aspect-square w-full bg-[#FFFBEB] border-b border-orange-100 shrink-0">
                       <Image src={product.imageUrl} alt={product.name} fill className="object-cover" />
-                      <span className="absolute top-3 left-3 bg-[#FFFDF9] border border-orange-100 text-xs px-2.5 py-1 rounded-full font-bold text-orange-950 shadow-sm z-10">
+                      <span className="absolute top-2 left-2 bg-[#FFFDF9] border border-orange-100 text-[9px] px-2 py-0.5 rounded-full font-bold text-orange-950 shadow-sm z-10">
                         {product.category}
                       </span>
                     </div>
 
                     {!isLoggedIn ? (
-                      <div className="product-body text-center p-4">
-                        <h3 className="m-0 text-md font-bold text-[#331B08]">{product.name}</h3>
-                        <span className="text-[11px] text-orange-600 font-bold block mt-2 hover:underline">🐾 Đăng nhập xem giá sỉ & đặt hàng</span>
+                      <div className="product-body text-center p-2 flex flex-col justify-between h-full">
+                        <h3 className="m-0 text-xs font-bold text-[#331B08] line-clamp-2 leading-tight">{product.name}</h3>
+                        <span className="text-[9px] text-orange-600 font-bold block mt-1">🐾 Đăng nhập</span>
                       </div>
                     ) : (
-                      <div className="product-body p-4 flex flex-col gap-2">
+                      <div className="product-body p-2 flex flex-col justify-between h-full gap-1">
                         <div>
-                          <p className="muted m-0 text-xs font-mono font-bold">{product.code}</p>
-                          <h3 className="m-0 text-md font-bold text-[#331B08] mt-0.5">{product.name}</h3>
+                          <p className="muted m-0 text-[8px] font-mono font-bold leading-none">{product.code}</p>
+                          <h3 className="m-0 text-xs font-bold text-[#331B08] mt-1 line-clamp-1 leading-snug">{product.name}</h3>
                         </div>
-                        <div className="flex items-center justify-between mt-1 border-t border-dashed border-orange-100 pt-2">
-                          <span className="tag text-xs">{product.category}</span>
-                          <span className="text-xs text-orange-950 font-bold bg-[#FFEEDD] border border-orange-100 rounded-full px-2.5 py-0.5">
-                            Còn lại: {totalStock} cái
+                        <div className="flex items-center justify-between border-t border-dashed border-orange-100 pt-1.5 mt-auto">
+                          <span className="text-[9px] muted font-bold uppercase">{product.category}</span>
+                          <span className="text-[9px] text-orange-950 font-extrabold bg-[#FFEEDD] border border-orange-100 rounded-full px-1.5 py-0.5 shrink-0">
+                            Còn: {totalStock}
                           </span>
                         </div>
                       </div>
