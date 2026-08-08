@@ -18,6 +18,7 @@ import {
   QrCode,
   ReceiptText,
   Search,
+  MapPin,
   Settings,
   ShieldCheck,
   SplitSquareVertical,
@@ -113,6 +114,19 @@ export function PetTravelApp() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
+  // Admin details & edit state
+  const [adminOrderItems, setAdminOrderItems] = useState<CustomerOrder["items"]>([]);
+  const [isOrderModified, setIsOrderModified] = useState<boolean>(false);
+  const [adminCategoryFilter, setAdminCategoryFilter] = useState<string>("Tất cả");
+  const [adminSupplierFilter, setAdminSupplierFilter] = useState<string>("Tất cả");
+
+  // Cart & Checkout new state
+  const [cartCategoryFilter, setCartCategoryFilter] = useState<string>("Tất cả");
+  const [showCheckoutModal, setShowCheckoutModal] = useState<boolean>(false);
+  const [recipientName, setRecipientName] = useState<string>("");
+  const [recipientPhone, setRecipientPhone] = useState<string>("");
+  const [recipientAddress, setRecipientAddress] = useState<string>("");
+
   // Shop state
   const [categoryFilter, setCategoryFilter] = useState<string>("Tất cả");
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -145,6 +159,44 @@ export function PetTravelApp() {
     variantSku: string; variantLabel: string; quantity: number;
     unitPriceSnapshot: number; supplierId: string;
   }>>([]);
+
+  const cartTotalVal = useMemo(() => {
+    return cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
+  }, [cartItems]);
+
+  const groupedCartItems = useMemo(() => {
+    const groups: Record<string, {
+      productCode: string;
+      productName: string;
+      productImage: string;
+      category: string;
+      brand: string;
+      items: typeof cartItems;
+    }> = {};
+
+    cartItems.forEach((item) => {
+      const parent = allProducts.find((p) => p.code === item.productCode);
+      const category = parent?.category ?? "Tất cả";
+      const brand = parent?.brand ?? "";
+      const image = parent?.imageUrl ?? "/product-food.svg";
+
+      if (!groups[item.productCode]) {
+        groups[item.productCode] = {
+          productCode: item.productCode,
+          productName: item.productName,
+          productImage: image,
+          category,
+          brand,
+          items: []
+        };
+      }
+      groups[item.productCode].items.push(item);
+    });
+
+    return Object.values(groups).filter((group) => {
+      return cartCategoryFilter === "Tất cả" || group.category === cartCategoryFilter;
+    });
+  }, [cartItems, allProducts, cartCategoryFilter]);
 
   // Admin adjustments state
   const [adminDiscount, setAdminDiscount] = useState<number>(0);
@@ -246,7 +298,9 @@ export function PetTravelApp() {
     setSelectedOrderId(orderId);
     setWorkingOrder(order);
     setCartItems(order.items.map((item) => ({ ...item })));
-    // Reset adjustment states for the new order
+    setAdminOrderItems(order.items.map((item) => ({ ...item })));
+    setIsOrderModified(false);
+    
     const q = order.quoteVersions[order.quoteVersions.length - 1];
     if (q) {
       const disc = q.adjustments.find((a) => a.type === "discount");
@@ -259,6 +313,33 @@ export function PetTravelApp() {
       setAdminShippingFee(0);
       setIsQuoteAccepted(false);
     }
+  }
+
+  /** Sync updated order state to server database and local state */
+  async function syncOrder(order: CustomerOrder) {
+    try {
+      const res = await fetch("/api/orders", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(order)
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setAllOrders((prev) => prev.map((o) => (o.id === data.order.id ? data.order : o)));
+      setWorkingOrder(data.order);
+      setAdminOrderItems(data.order.items.map((item: any) => ({ ...item })));
+      setIsOrderModified(false);
+    } catch { /* silent */ }
+  }
+
+  /** Handle Admin updating quantity of an order item */
+  function handleAdminQtyChange(itemId: string, newQty: number) {
+    setAdminOrderItems((prev) =>
+      prev.map((item) =>
+        item.id === itemId ? { ...item, quantity: Math.max(0, newQty) } : item
+      )
+    );
+    setIsOrderModified(true);
   }
 
   // Setup Lenis scroll
@@ -314,209 +395,204 @@ export function PetTravelApp() {
   }
 
   // 1. Customer proposes payment intent
-  function changePaymentIntent(intent: PaymentIntent) {
-    setWorkingOrder((current) => ({
-      ...current,
+  async function changePaymentIntent(intent: PaymentIntent) {
+    const updatedOrder: CustomerOrder = {
+      ...workingOrder,
       paymentIntent: intent,
       paymentStatus: "unrequested",
       paymentRequests: [],
+      comments: [
+        {
+          id: `c_intent_${Date.now()}`,
+          author: workingOrder.customerName,
+          audience: "customer_visible",
+          message: intent === "deposit_cod"
+            ? `Đại lý đề xuất phương án thanh toán: Đặt cọc trước 30% + Nhận hàng trả nốt (COD). Bản báo giá cũ hết hiệu lực, chờ nhân viên thẩm định lại.`
+            : "Đại lý đề xuất phương án thanh toán: Thanh toán trước 100%. Bản báo giá cũ hết hiệu lực, chờ nhân viên thẩm định lại.",
+          createdAt: new Date().toISOString()
+        },
+        ...workingOrder.comments
+      ],
       updatedAt: new Date().toISOString()
-    }));
+    };
     setIsQuoteAccepted(false);
-    addComment(
-      "customer_visible",
-      intent === "deposit_cod"
-        ? `Đại lý đề xuất phương án thanh toán: Đặt cọc ${percent(adminPolicy.defaultDepositRate)} trước + Nhận hàng trả nốt (COD). Bản báo giá cũ hết hiệu lực, chờ nhân viên thẩm định lại.`
-        : "Đại lý đề xuất phương án thanh toán: Thanh toán trước 100%. Bản báo giá cũ hết hiệu lực, chờ nhân viên thẩm định lại."
+    await syncOrder(updatedOrder);
+  }
+
+  // 2. Admin publishes a new Quote Version (Gửi khách xác nhận)
+  async function handlePublishQuote() {
+    const subtotal = adminOrderItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
+
+    const adjustments = [];
+    if (adminDiscount > 0) {
+      adjustments.push({
+        id: `adj_disc_${Date.now()}`,
+        type: "discount" as const,
+        label: "Chiết khấu đặc biệt cho Đại lý sỉ",
+        amount: -adminDiscount,
+        requiresApproval: false
+      });
+    }
+    if (shippingFeeOption === "included" && adminShippingFee > 0) {
+      adjustments.push({
+        id: `adj_ship_${Date.now()}`,
+        type: "shipping_fee" as const,
+        label: "Chi phí vận chuyển tạm tính",
+        amount: adminShippingFee,
+        requiresApproval: false
+      });
+    }
+
+    const totalAdjustments = adjustments.reduce((sum, adj) => sum + adj.amount, 0);
+    const finalTotal = subtotal + totalAdjustments;
+
+    const isDeposit = workingOrder.paymentIntent === "deposit_cod";
+    const depositRate = isDeposit ? adminPolicy.defaultDepositRate : 1.0;
+    const reqAmount = isDeposit
+      ? (customDepositInput ? parseInt(customDepositInput, 10) : Math.round(finalTotal * depositRate))
+      : finalTotal;
+    const codRemaining = isDeposit ? finalTotal - reqAmount : 0;
+
+    const nextVersion = workingOrder.quoteVersions.length + 1;
+    const newQuote = {
+      id: `q_${nextVersion}_${Date.now()}`,
+      version: nextVersion,
+      status: "published" as const,
+      subtotal,
+      adjustments,
+      finalTotal,
+      depositAmount: reqAmount,
+      codRemaining,
+      shippingFeeOption,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    };
+
+    const updatedRequests = workingOrder.paymentRequests.map((req) =>
+      req.status === "active" ? { ...req, status: "superseded" as const } : req
     );
-  }
 
-  // 2. Admin publishes a new Quote Version
-  function publishNewQuote() {
-    setWorkingOrder((current) => {
-      const nextVersion = current.quoteVersions.length + 1;
-      const subtotal = current.items.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
+    const newComment = {
+      id: `c_${Date.now()}`,
+      author: "Ban Quản trị Pet Travel",
+      audience: "customer_visible" as const,
+      message: `Ban vận hành đã kiểm tra đơn hàng và phát hành Bản báo giá chính thức mới (lần ${nextVersion}). Số tiền cọc yêu cầu: ${formatVnd(reqAmount)}. Vui lòng kiểm tra và bấm Thanh toán ngay.`,
+      createdAt: new Date().toISOString()
+    };
 
-      const adjustments = [];
-      if (adminDiscount > 0) {
-        adjustments.push({
-          id: `adj_disc_${Date.now()}`,
-          type: "discount" as const,
-          label: "Chiết khấu đặc biệt cho Đại lý sỉ",
-          amount: -adminDiscount,
-          requiresApproval: false
-        });
-      }
-      if (shippingFeeOption === "included" && adminShippingFee > 0) {
-        adjustments.push({
-          id: `adj_ship_${Date.now()}`,
-          type: "shipping_fee" as const,
-          label: "Chi phí vận chuyển tạm tính",
-          amount: adminShippingFee,
-          requiresApproval: false
-        });
-      }
-
-      const totalAdjustments = adjustments.reduce((sum, adj) => sum + adj.amount, 0);
-      const finalTotal = subtotal + totalAdjustments;
-
-      const isDeposit = current.paymentIntent === "deposit_cod";
-      const depositRate = isDeposit ? adminPolicy.defaultDepositRate : 1.0;
-      const depositAmount = isDeposit ? Math.round(finalTotal * depositRate) : finalTotal;
-      const codRemaining = isDeposit ? finalTotal - depositAmount : 0;
-
-      const newQuote = {
-        id: `q_${nextVersion}_${Date.now()}`,
-        version: nextVersion,
-        status: "published" as const,
-        subtotal,
-        adjustments,
-        finalTotal,
-        depositAmount,
-        codRemaining,
-        shippingFeeOption,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-      };
-
-      const updatedRequests = current.paymentRequests.map((req) =>
-        req.status === "active" ? { ...req, status: "superseded" as const } : req
-      );
-
-      return {
-        ...current,
-        commercialStatus: "quoted",
-        paymentStatus: "unrequested",
-        quoteVersions: [...current.quoteVersions.map(q => ({ ...q, status: "superseded" as const })), newQuote],
-        paymentRequests: updatedRequests,
-        updatedAt: new Date().toISOString()
-      };
-    });
+    const updatedOrder: CustomerOrder = {
+      ...workingOrder,
+      items: adminOrderItems.map((item) => ({ ...item })),
+      commercialStatus: "quoted",
+      paymentStatus: isDeposit ? "deposit_requested" : "full_requested",
+      quoteVersions: [...workingOrder.quoteVersions.map(q => ({ ...q, status: "superseded" as const })), newQuote],
+      paymentRequests: updatedRequests,
+      comments: [newComment, ...workingOrder.comments],
+      updatedAt: new Date().toISOString()
+    };
 
     setIsQuoteAccepted(false);
-    addComment("customer_visible", `Ban vận hành đã phát hành Bản báo giá chính thức mới (lần ${workingOrder.quoteVersions.length + 1}). Vui lòng kiểm tra và bấm Chấp thuận.`);
+    await syncOrder(updatedOrder);
   }
 
-  // 3. Customer accepts the quote version
-  function acceptQuote() {
+  // 3. Customer accepts quote directly (as backup)
+  async function acceptQuote() {
     setIsQuoteAccepted(true);
-    setWorkingOrder((current) => {
-      const updatedQuoteVersions = current.quoteVersions.map((q, idx) =>
-        idx === current.quoteVersions.length - 1 ? { ...q, status: "accepted" as const } : q
-      );
-      return {
-        ...current,
-        quoteVersions: updatedQuoteVersions,
-        updatedAt: new Date().toISOString()
-      };
-    });
-    addComment("customer_visible", `Đại lý đã đồng ý với Bản báo giá lần ${quote.version}. Chờ nhân viên vận hành tạo mã QR thanh toán.`);
+    const updatedQuoteVersions = workingOrder.quoteVersions.map((q, idx) =>
+      idx === workingOrder.quoteVersions.length - 1 ? { ...q, status: "accepted" as const } : q
+    );
+    const updatedOrder: CustomerOrder = {
+      ...workingOrder,
+      quoteVersions: updatedQuoteVersions,
+      comments: [
+        {
+          id: `c_acc_${Date.now()}`,
+          author: workingOrder.customerName,
+          audience: "customer_visible",
+          message: `Đại lý đã đồng ý với Bản báo giá lần ${quote.version}. Tiến hành thanh toán cọc sỉ.`,
+          createdAt: new Date().toISOString()
+        },
+        ...workingOrder.comments
+      ],
+      updatedAt: new Date().toISOString()
+    };
+    await syncOrder(updatedOrder);
   }
 
-  // 4. Admin issues a Payment Request (Generates a static QR)
-  function issuePaymentRequest() {
-    setWorkingOrder((current) => {
-      const activeQuote = current.quoteVersions[current.quoteVersions.length - 1];
-      const isDeposit = current.paymentIntent === "deposit_cod";
+  // 4. Customer uploads proof of payment
+  async function simulateProofUpload() {
+    const activeRequest = workingOrder.paymentRequests[workingOrder.paymentRequests.length - 1];
+    if (!activeRequest || activeRequest.status !== "active") return;
 
-      const reqAmount = isDeposit
-        ? (customDepositInput ? parseInt(customDepositInput, 10) : activeQuote.depositAmount)
-        : activeQuote.finalTotal;
+    const updatedRequests = workingOrder.paymentRequests.map((req, idx) =>
+      idx === workingOrder.paymentRequests.length - 1 ? { ...req, status: "uploaded" as const } : req
+    );
 
-      const timeSuffix = new Date().toISOString().replace(/[^0-9]/g, "").slice(8, 14);
-      const reference = `PTW-${current.number}-Q${activeQuote.version}-${isDeposit ? "DEP" : "FULL"}-${timeSuffix}`.toUpperCase();
-
-      const newRequest = {
-        id: `pay_req_${Date.now()}`,
-        quoteVersion: activeQuote.version,
-        amount: reqAmount,
-        purpose: (isDeposit ? "deposit" : "full") as "deposit" | "full",
-        reference,
-        qrPayload: `PETTRAVEL_WHOLESALE_PAYMENT|account=190356782390|name=PET TRAVEL WHOLESALE|amount=${reqAmount}|reference=${reference}`,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        status: "active" as const
-      };
-
-      const updatedRequests = current.paymentRequests.map((req) =>
-        req.status === "active" ? { ...req, status: "superseded" as const } : req
-      );
-
-      if (isDeposit && customDepositInput) {
-        const customVal = parseInt(customDepositInput, 10);
-        const lastIdx = current.quoteVersions.length - 1;
-        current.quoteVersions[lastIdx].depositAmount = customVal;
-        current.quoteVersions[lastIdx].codRemaining = activeQuote.finalTotal - customVal;
-      }
-
-      return {
-        ...current,
-        paymentStatus: isDeposit ? "deposit_requested" : "full_requested",
-        paymentRequests: [...updatedRequests, newRequest],
-        updatedAt: new Date().toISOString()
-      };
-    });
-
-    addComment("customer_visible", `Mã chuyển khoản QR tĩnh cho yêu cầu thanh toán ${workingOrder.paymentIntent === "deposit_cod" ? "Đặt cọc trước" : "Toàn bộ đơn hàng"} đã được tạo thành công.`);
+    const updatedOrder: CustomerOrder = {
+      ...workingOrder,
+      paymentStatus: workingOrder.paymentIntent === "deposit_cod" ? "deposit_uploaded" : "full_uploaded",
+      paymentRequests: updatedRequests,
+      paymentProofs: [
+        {
+          id: `proof_${Date.now()}`,
+          paymentRequestId: activeRequest.id,
+          fileName: "bien-lai-chuyen-tien-thanh-cong.jpg",
+          uploadedAt: new Date().toISOString(),
+          status: "pending_admin_confirmation" as const
+        },
+        ...workingOrder.paymentProofs
+      ],
+      comments: [
+        {
+          id: `c_upload_${Date.now()}`,
+          author: workingOrder.customerName,
+          audience: "customer_visible",
+          message: "Đại lý đã tải lên hình ảnh biên lai thành công. Đơn hàng hiện đã bị đóng băng chỉnh sửa để kế toán đối soát thực tế.",
+          createdAt: new Date().toISOString()
+        },
+        ...workingOrder.comments
+      ],
+      updatedAt: new Date().toISOString()
+    };
+    await syncOrder(updatedOrder);
   }
 
-  // 5. Customer uploads proof of payment
-  function simulateProofUpload() {
-    setWorkingOrder((current) => {
-      const activeRequest = current.paymentRequests[current.paymentRequests.length - 1];
-      if (!activeRequest || activeRequest.status !== "active") return current;
+  // 5. Accountant confirms payment (Locks order and payments)
+  async function confirmDeposit() {
+    const updatedRequests = workingOrder.paymentRequests.map((req, idx) =>
+      idx === workingOrder.paymentRequests.length - 1 ? { ...req, status: "confirmed" as const } : req
+    );
+    const updatedProofs = workingOrder.paymentProofs.map((proof, idx) =>
+      idx === 0 ? { ...proof, status: "accepted" as const } : proof
+    );
 
-      const updatedRequests = current.paymentRequests.map((req, idx) =>
-        idx === current.paymentRequests.length - 1 ? { ...req, status: "uploaded" as const } : req
-      );
+    const isDeposit = workingOrder.paymentIntent === "deposit_cod";
 
-      return {
-        ...current,
-        paymentStatus: current.paymentIntent === "deposit_cod" ? "deposit_uploaded" : "full_uploaded",
-        paymentRequests: updatedRequests,
-        paymentProofs: [
-          {
-            id: `proof_${Date.now()}`,
-            paymentRequestId: activeRequest.id,
-            fileName: "bien-lai-chuyen-tien-thanh-cong.jpg",
-            uploadedAt: new Date().toISOString(),
-            status: "pending_admin_confirmation" as const
-          },
-          ...current.paymentProofs
-        ],
-        updatedAt: new Date().toISOString()
-      };
-    });
-    addComment("customer_visible", "Đại lý đã tải lên hình ảnh biên lai thành công. Đơn hàng hiện đã bị đóng băng chỉnh sửa để kế toán đối soát thực tế.");
+    const updatedOrder: CustomerOrder = {
+      ...workingOrder,
+      commercialStatus: "locked" as const,
+      paymentStatus: isDeposit ? "deposit_confirmed" : "paid",
+      fulfillmentStatus: "packing" as const,
+      paymentRequests: updatedRequests,
+      paymentProofs: updatedProofs,
+      comments: [
+        {
+          id: `c_conf_${Date.now()}`,
+          author: "Ban Quản trị Pet Travel",
+          audience: "customer_visible",
+          message: "Bộ phận kế toán xác nhận tiền đã vào tài khoản ngân hàng. Đơn hàng đã được khóa giao dịch thành công và chuyển cho kho đóng hàng.",
+          createdAt: new Date().toISOString()
+        },
+        ...workingOrder.comments
+      ],
+      updatedAt: new Date().toISOString()
+    };
+    await syncOrder(updatedOrder);
   }
 
-  // 6. Accountant confirms payment (Locks order and payments)
-  function confirmDeposit() {
-    setWorkingOrder((current) => {
-      const updatedRequests = current.paymentRequests.map((req, idx) =>
-        idx === current.paymentRequests.length - 1 ? { ...req, status: "confirmed" as const } : req
-      );
-      const updatedProofs = current.paymentProofs.map((proof, idx) =>
-        idx === 0 ? { ...proof, status: "accepted" as const } : proof
-      );
-
-      const isDeposit = current.paymentIntent === "deposit_cod";
-
-      return {
-        ...current,
-        commercialStatus: "locked" as const,
-        paymentStatus: isDeposit ? "deposit_confirmed" : "paid",
-        fulfillmentStatus: "packing" as const,
-        paymentRequests: updatedRequests,
-        paymentProofs: updatedProofs,
-        updatedAt: new Date().toISOString()
-      };
-    });
-    addComment("customer_visible", "Bộ phận kế toán xác nhận tiền đã vào tài khoản ngân hàng. Đơn hàng đã được khóa giao dịch thành công và chuyển cho kho đóng hàng.");
-  }
-
-  // 7. Gán mã vận đơn
-  function attachShipment() {
-    setWorkingOrder((current) => ({
-      ...current,
+  // 6. Gán mã vận đơn
+  async function attachShipment() {
+    const updatedOrder: CustomerOrder = {
+      ...workingOrder,
       fulfillmentStatus: "shipped",
       shipment: {
         carrier: "Giao Hàng Nhanh (GHN)",
@@ -525,18 +601,28 @@ export function PetTravelApp() {
         eta: "2026-08-10",
         note: "Giao giờ hành chính, thu hộ phần còn lại COD nếu có."
       },
+      comments: [
+        {
+          id: `c_ship_${Date.now()}`,
+          author: "Ban Quản trị Pet Travel",
+          audience: "customer_visible",
+          message: "Đơn hàng đã được bàn giao cho đối tác vận chuyển GHN. Mã vận đơn: GHN982601448.",
+          createdAt: new Date().toISOString()
+        },
+        ...workingOrder.comments
+      ],
       updatedAt: new Date().toISOString()
-    }));
-    addComment("customer_visible", "Đơn hàng đã được bàn giao cho đối tác vận chuyển GHN. Mã vận đơn: GHN982601448.");
+    };
+    await syncOrder(updatedOrder);
   }
 
   // Shopping Cart handlers
-  function addToCart(variantSku: string, productCode: string, productName: string, variantLabel: string, price: number, supplierId: string) {
+  function addToCart(variantSku: string, productCode: string, productName: string, variantLabel: string, price: number, supplierId: string, qty: number = 1) {
     setCartItems((prev) => {
       const existing = prev.find((item) => item.variantSku === variantSku);
       if (existing) {
         return prev.map((item) =>
-          item.variantSku === variantSku ? { ...item, quantity: item.quantity + 1 } : item
+          item.variantSku === variantSku ? { ...item, quantity: item.quantity + qty } : item
         );
       }
       return [
@@ -547,7 +633,7 @@ export function PetTravelApp() {
           productName,
           variantSku,
           variantLabel,
-          quantity: 1,
+          quantity: qty,
           unitPriceSnapshot: price,
           supplierId
         }
@@ -565,12 +651,50 @@ export function PetTravelApp() {
     );
   }
 
-  function submitCartProposal() {
-    setWorkingOrder((prev) => {
-      const subtotal = cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
-      const isDeposit = prev.paymentIntent === "deposit_cod";
-      const initialDeposit = isDeposit ? Math.round(subtotal * adminPolicy.defaultDepositRate) : subtotal;
+  // 7. Customer submits cart proposal (Initial Confirm or Updated Buy More proposal)
+  async function handleSubmitCartProposal() {
+    const subtotal = cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
+    const isDeposit = workingOrder.paymentIntent === "deposit_cod";
+    const initialDeposit = isDeposit ? Math.round(subtotal * adminPolicy.defaultDepositRate) : subtotal;
 
+    // Check if updating an existing order or creating a new one
+    if (workingOrder.id !== "") {
+      const nextVersion = workingOrder.quoteVersions.length + 1;
+      const nextQuote = {
+        id: `q_${nextVersion}_${Date.now()}`,
+        version: nextVersion,
+        status: "published" as const,
+        subtotal,
+        adjustments: [],
+        finalTotal: subtotal,
+        depositAmount: initialDeposit,
+        codRemaining: isDeposit ? subtotal - initialDeposit : 0,
+        shippingFeeOption: "included" as const,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      };
+
+      const updatedOrder: CustomerOrder = {
+        ...workingOrder,
+        commercialStatus: "submitted",
+        items: cartItems.map((item) => ({ ...item })),
+        quoteVersions: [...workingOrder.quoteVersions.map(q => ({ ...q, status: "superseded" as const })), nextQuote],
+        comments: [
+          {
+            id: `c_sub_${Date.now()}`,
+            author: workingOrder.customerName,
+            audience: "customer_visible",
+            message: `Đại lý đã gửi danh sách đề xuất cập nhật đơn hàng sỉ mới (lần ${nextVersion}). Vui lòng thẩm định báo giá mới.`,
+            createdAt: new Date().toISOString()
+          },
+          ...workingOrder.comments
+        ],
+        updatedAt: new Date().toISOString()
+      };
+
+      await syncOrder(updatedOrder);
+      setIsQuoteAccepted(false);
+      setActiveTab("order");
+    } else {
       const initialQuote = {
         id: `q_1_${Date.now()}`,
         version: 1,
@@ -584,20 +708,106 @@ export function PetTravelApp() {
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
       };
 
-      return {
-        ...prev,
-        commercialStatus: "submitted",
-        paymentStatus: "unrequested",
-        items: cartItems.map(item => ({ ...item })),
-        quoteVersions: [initialQuote],
-        paymentRequests: [],
-        paymentProofs: [],
-        updatedAt: new Date().toISOString()
-      };
-    });
-    setIsQuoteAccepted(false);
-    setActiveTab("order");
-    addComment("customer_visible", "Đại lý vừa gửi danh sách đề xuất đơn hàng sỉ mới. Vui lòng chờ nhân viên kiểm kho và thẩm định báo giá.");
+      try {
+        const res = await fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: cartItems.map((item) => ({ ...item })),
+            paymentIntent: workingOrder.paymentIntent,
+            quoteVersions: [initialQuote]
+          })
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        setWorkingOrder(data.order);
+        setAllOrders((prev) => [data.order, ...prev]);
+        setSelectedOrderId(data.order.id);
+        setCartItems(data.order.items.map((item: any) => ({ ...item })));
+        setIsQuoteAccepted(false);
+        setActiveTab("order");
+      } catch { /* silent */ }
+    }
+  }
+
+  // 8. "Mua thêm" (Buy More) Action
+  async function handleBuyMore() {
+    setCartItems(workingOrder.items.map((item) => ({ ...item })));
+    setActiveTab("catalog");
+    const updatedOrder: CustomerOrder = {
+      ...workingOrder,
+      commercialStatus: "draft",
+      updatedAt: new Date().toISOString()
+    };
+    await syncOrder(updatedOrder);
+  }
+
+  // 9. Customer Checkout Confirmation (Pay Now Form Submission)
+  async function handleConfirmCheckout() {
+    if (!recipientName || !recipientPhone || !recipientAddress) {
+      alert("Vui lòng điền đầy đủ thông tin giao nhận hàng.");
+      return;
+    }
+
+    const activeQuote = workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1];
+    if (!activeQuote) return;
+
+    const isDeposit = workingOrder.paymentIntent === "deposit_cod";
+    const reqAmount = isDeposit ? activeQuote.depositAmount : activeQuote.finalTotal;
+
+    const timeSuffix = new Date().toISOString().replace(/[^0-9]/g, "").slice(8, 14);
+    const reference = `PTW-${workingOrder.number}-Q${activeQuote.version}-${isDeposit ? "DEP" : "FULL"}-${timeSuffix}`.toUpperCase();
+
+    const qrPayload = `PETTRAVEL_WHOLESALE_PAYMENT|account=190356782390|name=PET TRAVEL WHOLESALE|amount=${reqAmount}|reference=${reference}`;
+
+    const newRequest = {
+      id: `pay_req_${Date.now()}`,
+      quoteVersion: activeQuote.version,
+      amount: reqAmount,
+      purpose: (isDeposit ? "deposit" : "full") as "deposit" | "full",
+      reference,
+      qrPayload,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      status: "active" as const
+    };
+
+    const updatedRequests = workingOrder.paymentRequests.map((req) =>
+      req.status === "active" ? { ...req, status: "superseded" as const } : req
+    );
+
+    const updatedOrder: CustomerOrder = {
+      ...workingOrder,
+      recipientName,
+      recipientPhone,
+      recipientAddress,
+      commercialStatus: "locked",
+      paymentStatus: isDeposit ? "deposit_uploaded" : "full_uploaded", // directly upload simulated receipt
+      paymentRequests: [...updatedRequests, newRequest],
+      paymentProofs: [
+        {
+          id: `proof_${Date.now()}`,
+          paymentRequestId: newRequest.id,
+          fileName: "bien-lai-chuyen-khoan-dai-ly.jpg",
+          uploadedAt: new Date().toISOString(),
+          status: "pending_admin_confirmation" as const
+        },
+        ...workingOrder.paymentProofs
+      ],
+      comments: [
+        {
+          id: `c_chk_${Date.now()}`,
+          author: "Hệ thống",
+          audience: "customer_visible",
+          message: `Đại lý đã khóa đơn để thanh toán. Thông tin nhận hàng: ${recipientName} (${recipientPhone}) - ${recipientAddress}. Số tiền chuyển khoản: ${formatVnd(reqAmount)}.`,
+          createdAt: new Date().toISOString()
+        },
+        ...workingOrder.comments
+      ],
+      updatedAt: new Date().toISOString()
+    };
+
+    await syncOrder(updatedOrder);
+    setShowCheckoutModal(false);
   }
 
   const customerVisibleComments = workingOrder.comments.filter((comment) => {
@@ -611,6 +821,18 @@ export function PetTravelApp() {
       return matchCat && matchSearch;
     });
   }, [allProducts, categoryFilter, searchQuery]);
+
+  const filteredAdminOrderItems = useMemo(() => {
+    return adminOrderItems.filter((item) => {
+      const parent = allProducts.find((p) => p.code === item.productCode);
+      const category = parent?.category ?? "Tất cả";
+      
+      const matchCategory = adminCategoryFilter === "Tất cả" || category === adminCategoryFilter;
+      const matchSupplier = adminSupplierFilter === "Tất cả" || item.supplierId === adminSupplierFilter;
+      
+      return matchCategory && matchSupplier;
+    });
+  }, [adminOrderItems, allProducts, adminCategoryFilter, adminSupplierFilter]);
 
   // --- 1. LOGIN/PORTAL SELECTOR VIEW ---
   if (mode === "guest") {
@@ -725,8 +947,8 @@ export function PetTravelApp() {
                 <ShoppingCart size={18} />
                 Giỏ hàng của tôi
                 {cartItems.length > 0 && (
-                  <span className="ml-auto bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full font-bold">
-                    {cartItems.reduce((acc, curr) => acc + curr.quantity, 0)}
+                  <span className="ml-auto bg-orange-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">
+                    {formatVnd(cartTotalVal)}
                   </span>
                 )}
               </button>
@@ -830,6 +1052,16 @@ export function PetTravelApp() {
               />
               <Search className="absolute left-3 top-3 text-orange-400" size={16} />
             </div>
+            {!isAdmin && mode === "customer" && (
+              <button
+                className="tab-button text-xs py-2 px-3 bg-orange-100 hover:bg-orange-200 border-orange-200 font-bold rounded-xl flex items-center gap-1.5 cursor-pointer text-orange-800"
+                type="button"
+                onClick={() => setActiveTab("cart")}
+              >
+                <ShoppingCart size={15} />
+                <span>Giỏ hàng: {formatVnd(cartTotalVal)}</span>
+              </button>
+            )}
             <button className="icon-button" aria-label="Thông báo" type="button">
               <Bell size={18} />
             </button>
@@ -916,50 +1148,83 @@ export function PetTravelApp() {
         {activeTab === "cart" && mode === "customer" && (
           <section className="grid-dashboard">
             <div className="panel flex flex-col gap-4">
-              <div className="section-title">
+              <div className="section-title flex justify-between items-center">
                 <h3 className="text-lg font-bold">🛒 Danh sách hàng sỉ đề xuất</h3>
                 <span className="bg-orange-100 text-orange-700 text-xs px-2.5 py-0.5 rounded-full font-bold">
                   {cartItems.reduce((acc, curr) => acc + curr.quantity, 0)} sản phẩm
                 </span>
               </div>
 
-              {cartItems.length === 0 ? (
+              {/* Lọc giỏ hàng theo category */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                {["Tất cả", "Túi vận chuyển", "Ăn uống du lịch", "Vệ sinh"].map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    className={`tab-button min-h-[32px] text-xs py-1 px-3 ${cartCategoryFilter === cat ? 'bg-orange-500 text-white border-orange-600' : 'bg-white border-orange-100'}`}
+                    onClick={() => setCartCategoryFilter(cat)}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
+              {groupedCartItems.length === 0 ? (
                 <div className="text-center py-8 muted text-sm font-semibold">
                   Giỏ hàng sỉ đang trống. Vui lòng quay lại Cửa hàng để thêm sản phẩm sỉ.
                 </div>
               ) : (
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-2 max-h-[360px] overflow-y-auto pr-1">
-                    {cartItems.map((item) => (
-                      <div className="p-3 border-2 border-orange-100 rounded-2xl bg-white flex items-center justify-between gap-4" key={item.id}>
-                        <div>
-                          <strong className="text-sm text-[#331B08] block">{item.productName}</strong>
-                          <span className="text-xs muted font-semibold">{item.variantLabel} ({item.variantSku})</span>
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-3 max-h-[480px] overflow-y-auto pr-1">
+                    {groupedCartItems.map((group) => (
+                      <div className="p-4 border-2 border-orange-100 rounded-3xl bg-white flex flex-col gap-3" key={group.productCode}>
+                        {/* Header sản phẩm */}
+                        <div className="flex items-center gap-3 pb-2 border-b border-dashed border-orange-100">
+                          <div className="relative w-10 h-10 rounded-xl bg-orange-50 overflow-hidden flex items-center justify-center border border-orange-100 shrink-0">
+                            <Image src={group.productImage} alt={group.productName} fill className="object-cover" />
+                          </div>
+                          <div>
+                            <strong className="text-xs text-[#331B08] block">{group.productName}</strong>
+                            <span className="text-[9px] muted font-bold uppercase tracking-wider">{group.category} · {group.brand}</span>
+                          </div>
                         </div>
-                        
-                        <div className="flex items-center gap-4">
-                          <div className="flex items-center gap-1.5 border border-orange-200 rounded-xl p-1 bg-orange-50/25">
-                            <button
-                              type="button"
-                              className="w-7 h-7 rounded-full bg-white flex items-center justify-center text-xs font-bold text-[#78350F] shadow-sm active:scale-90"
-                              onClick={() => updateCartQty(item.variantSku, -1)}
-                            >
-                              -
-                            </button>
-                            <span className="text-xs font-bold text-[#331B08] min-w-[20px] text-center">{item.quantity}</span>
-                            <button
-                              type="button"
-                              className="w-7 h-7 rounded-full bg-white flex items-center justify-center text-xs font-bold text-[#78350F] shadow-sm active:scale-90"
-                              onClick={() => updateCartQty(item.variantSku, 1)}
-                            >
-                              +
-                            </button>
-                          </div>
-                          
-                          <div className="text-right min-w-[100px]">
-                            <strong className="text-xs text-[#331B08] block">{formatVnd(item.quantity * item.unitPriceSnapshot)}</strong>
-                            <span className="text-[10px] muted font-semibold">{formatVnd(item.unitPriceSnapshot)}/cái</span>
-                          </div>
+
+                        {/* Danh sách phân loại của sản phẩm */}
+                        <div className="flex flex-col gap-2.5">
+                          {group.items.map((item) => (
+                            <div className="flex items-center justify-between gap-4 text-xs pl-1" key={item.variantSku}>
+                              <div className="flex-grow">
+                                <span className="font-semibold text-orange-950">{item.variantLabel}</span>
+                                <br />
+                                <span className="text-[9px] muted">{item.variantSku}</span>
+                              </div>
+                              
+                              <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-1 border border-orange-200 rounded-xl p-0.5 bg-orange-50/25">
+                                  <button
+                                    type="button"
+                                    className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-xs font-bold text-[#78350F] shadow-sm active:scale-90 cursor-pointer"
+                                    onClick={() => updateCartQty(item.variantSku, -1)}
+                                  >
+                                    -
+                                  </button>
+                                  <span className="text-xs font-bold text-[#331B08] min-w-[16px] text-center">{item.quantity}</span>
+                                  <button
+                                    type="button"
+                                    className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-xs font-bold text-[#78350F] shadow-sm active:scale-90 cursor-pointer"
+                                    onClick={() => updateCartQty(item.variantSku, 1)}
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                                
+                                <div className="text-right min-w-[90px]">
+                                  <strong className="text-xs text-[#331B08] block">{formatVnd(item.quantity * item.unitPriceSnapshot)}</strong>
+                                  <span className="text-[9px] muted">{formatVnd(item.unitPriceSnapshot)}/cái</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     ))}
@@ -968,7 +1233,7 @@ export function PetTravelApp() {
                   <div className="border-t border-dashed border-orange-100 pt-3 flex justify-between items-center">
                     <span className="text-sm font-bold text-[#331B08]">Tổng cộng tạm tính:</span>
                     <strong className="text-lg text-orange-600 font-bold">
-                      {formatVnd(cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0))}
+                      {formatVnd(cartTotalVal)}
                     </strong>
                   </div>
                 </div>
@@ -1022,12 +1287,12 @@ export function PetTravelApp() {
                   </div>
 
                   <button
-                    className="primary-button text-xs py-3 w-full justify-center mt-2"
+                    className="primary-button text-xs py-3 w-full justify-center mt-2 font-bold bg-orange-500 text-white border-orange-600 hover:bg-orange-600 rounded-xl cursor-pointer"
                     type="button"
                     disabled={cartItems.length === 0}
-                    onClick={submitCartProposal}
+                    onClick={handleSubmitCartProposal}
                   >
-                    Gửi Đề xuất Đơn hàng sỉ
+                    Xác nhận lần đầu
                   </button>
                 </div>
               </div>
@@ -1146,49 +1411,86 @@ export function PetTravelApp() {
                 )}
 
                 {mode === "customer" && quote.status === "published" && (
-                  <button
-                    className="primary-button text-xs py-3 justify-center w-full"
-                    type="button"
-                    onClick={acceptQuote}
-                  >
-                    Đồng ý báo giá này
-                  </button>
+                  <div className="flex flex-col gap-2 w-full mt-1">
+                    <button
+                      className="primary-button text-xs py-3 justify-center w-full font-bold bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-2xl shadow-lg cursor-pointer"
+                      type="button"
+                      onClick={() => {
+                        setRecipientName(currentUser?.name || "");
+                        setRecipientPhone("");
+                        setRecipientAddress(workingOrder.recipientAddress || "");
+                        setShowCheckoutModal(true);
+                      }}
+                    >
+                      💳 Thanh toán ngay
+                    </button>
+                    
+                    <button
+                      className="tab-button text-xs py-2 px-3 border border-orange-200 hover:bg-orange-50 text-orange-800 rounded-xl justify-center font-bold cursor-pointer"
+                      type="button"
+                      onClick={handleBuyMore}
+                    >
+                      🛍️ Mua thêm sản phẩm
+                    </button>
+                  </div>
                 )}
 
-                {/* Yêu cầu VietQR tĩnh */}
+                {/* Yêu cầu VietQR */}
                 {isLoggedIn && workingOrder.paymentRequests.length > 0 && (
                   <div className="p-4 border-2 border-orange-200 bg-white rounded-2xl flex flex-col items-center gap-3 mt-1 shadow-inner">
                     <div className="flex items-center gap-1.5 text-xs font-bold text-[#78350F] border-b border-dashed border-orange-100 pb-2 w-full justify-center">
                       <QrCode size={16} /> Quét VietQR chuyển khoản nhanh
                     </div>
                     
-                    {/* Simulated VietQR payload details */}
                     {(() => {
                       const activeReq = workingOrder.paymentRequests[workingOrder.paymentRequests.length - 1];
                       return (
                         <>
-                          <div className="w-40 h-40 bg-orange-50 border-2 border-orange-100 rounded-2xl flex items-center justify-center text-center p-2 text-xs relative overflow-hidden">
-                            <span className="text-[10px] text-orange-950 font-bold leading-relaxed">
-                              [ VietQR Tĩnh ]
-                              <br />
-                              Pet Travel
-                              <br />
-                              <strong className="text-sm text-orange-600 block mt-2">{formatVnd(activeReq.amount)}</strong>
-                            </span>
-                            <div className="absolute bottom-1 right-1 text-[8px] bg-orange-500 text-white font-mono px-1 rounded">PTW QR</div>
+                          {/* VietQR Mockup Frame */}
+                          <div className="w-48 p-3 bg-gradient-to-b from-blue-50 to-orange-50 border-2 border-orange-100 rounded-2xl flex flex-col items-center text-center relative overflow-hidden shadow-sm">
+                            <span className="text-[10px] text-blue-900 font-bold tracking-wider mb-2 bg-blue-100/50 px-2 py-0.5 rounded-full">VIETQR · NAPAS247</span>
+                            
+                            <div className="w-32 h-32 bg-white border border-gray-200 rounded-xl flex flex-col items-center justify-center p-2 relative">
+                              {/* QR Pattern visual */}
+                              <div className="w-full h-full bg-[radial-gradient(#000_1px,transparent_1px)] [background-size:8px_8px] opacity-80 flex items-center justify-center">
+                                <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center text-[8px] text-white font-bold shadow-md">
+                                  PET
+                                </div>
+                              </div>
+                              <div className="absolute top-1 left-1 w-4 h-4 border-t-2 border-l-2 border-blue-600"></div>
+                              <div className="absolute top-1 right-1 w-4 h-4 border-t-2 border-r-2 border-blue-600"></div>
+                              <div className="absolute bottom-1 left-1 w-4 h-4 border-b-2 border-l-2 border-blue-600"></div>
+                              <div className="absolute bottom-1 right-1 w-4 h-4 border-b-2 border-r-2 border-blue-600"></div>
+                            </div>
+
+                            <strong className="text-sm text-orange-600 block mt-3 font-extrabold">{formatVnd(activeReq.amount)}</strong>
+                            <span className="text-[8px] text-gray-500 font-mono mt-1">Techcombank · 190356782390</span>
                           </div>
                           
-                          <div className="flex flex-col gap-1 w-full text-center">
-                            <span className="text-[10px] muted font-bold uppercase">Nội dung ghi chú chuyển khoản:</span>
-                            <div className="flex items-center gap-1 justify-center bg-orange-50 border border-orange-100 p-2 rounded-xl">
-                              <span className="font-mono text-xs font-bold text-orange-950 select-all">{activeReq.reference}</span>
+                          {/* Payment information details */}
+                          <div className="flex flex-col gap-2 w-full text-xs text-[#331B08] bg-orange-50/50 p-3 rounded-2xl border border-orange-100">
+                            <div className="flex justify-between">
+                              <span className="muted font-semibold">Ngân hàng:</span>
+                              <strong>Techcombank (TCB)</strong>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="muted font-semibold">Chủ tài khoản:</span>
+                              <strong>PET TRAVEL WHOLESALE</strong>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="muted font-semibold">Số tài khoản:</span>
+                              <strong>1903 5678 2390</strong>
+                            </div>
+                            <div className="flex justify-between items-center border-t border-dashed border-orange-200 pt-2 mt-1">
+                              <span className="muted font-bold text-[10px] uppercase">Nội dung chuyển khoản:</span>
+                              <strong className="font-mono text-xs text-orange-950 bg-white border border-orange-200 px-2 py-0.5 rounded-lg select-all shadow-sm">{activeReq.reference}</strong>
                             </div>
                           </div>
 
                           {workingOrder.paymentStatus.includes("requested") && (
                             <button
                               type="button"
-                              className="tab-button text-xs py-2 w-full justify-center bg-orange-500 text-white border-orange-600 hover:bg-orange-600"
+                              className="tab-button text-xs py-2 w-full justify-center bg-orange-500 text-white border-orange-600 hover:bg-orange-600 cursor-pointer font-bold rounded-xl mt-1"
                               onClick={simulateProofUpload}
                             >
                               <Upload size={14} /> Gửi minh chứng chuyển khoản
@@ -1200,6 +1502,29 @@ export function PetTravelApp() {
                   </div>
                 )}
               </div>
+
+              {/* Địa chỉ giao nhận */}
+              {workingOrder.recipientName && (
+                <div className="panel flex flex-col gap-3">
+                  <div className="section-title">
+                    <h3 className="text-sm font-bold flex items-center gap-1"><MapPin size={15} /> Địa chỉ giao nhận</h3>
+                  </div>
+                  <div className="flex flex-col gap-2 text-xs text-[#331B08]">
+                    <div className="flex justify-between">
+                      <span className="muted font-semibold">Người nhận:</span>
+                      <strong>{workingOrder.recipientName}</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="muted font-semibold">Số điện thoại:</span>
+                      <strong>{workingOrder.recipientPhone}</strong>
+                    </div>
+                    <div className="border-t border-dashed border-orange-100 pt-2 mt-1">
+                      <span className="muted text-[10px] font-bold uppercase block mb-1">Địa chỉ nhận hàng:</span>
+                      <p className="m-0 bg-orange-50/50 p-2 rounded-xl border border-orange-100 leading-relaxed font-semibold">{workingOrder.recipientAddress}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Vận chuyển */}
               {workingOrder.shipment && (
@@ -1318,18 +1643,141 @@ export function PetTravelApp() {
 
               <section className="grid-dashboard">
                 <div className="flex flex-col gap-4">
-                  {/* Thẩm định báo giá */}
+                  {/* Danh sách sản phẩm sỉ trong đơn */}
+                  <div className="panel flex flex-col gap-4">
+                    <div className="section-title flex justify-between items-center">
+                      <h3 className="text-lg font-bold">📦 Sản phẩm sỉ trong đơn hàng</h3>
+                      {isOrderModified && (
+                        <span className="bg-amber-100 text-amber-800 text-[10px] px-2 py-0.5 rounded-full font-bold animate-pulse">
+                          Đã chỉnh sửa (Chưa lưu)
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Bộ lọc sản phẩm sỉ dành cho Admin */}
+                    <div className="grid grid-cols-2 gap-3 p-3 bg-orange-50/30 rounded-2xl border border-orange-100">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-orange-950/80 uppercase">Lọc theo phân loại</label>
+                        <select
+                          className="text-input text-xs py-1.5 px-2 bg-white border border-orange-200 rounded-xl"
+                          value={adminCategoryFilter}
+                          onChange={(e) => setAdminCategoryFilter(e.target.value)}
+                        >
+                          <option value="Tất cả">Tất cả phân loại</option>
+                          <option value="Túi vận chuyển">Túi vận chuyển</option>
+                          <option value="Ăn uống du lịch">Ăn uống du lịch</option>
+                          <option value="Vệ sinh">Vệ sinh</option>
+                        </select>
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-orange-950/80 uppercase">Lọc theo nhà cung cấp</label>
+                        <select
+                          className="text-input text-xs py-1.5 px-2 bg-white border border-orange-200 rounded-xl"
+                          value={adminSupplierFilter}
+                          onChange={(e) => setAdminSupplierFilter(e.target.value)}
+                        >
+                          <option value="Tất cả">Tất cả nhà cung cấp</option>
+                          {suppliers.map((sup) => (
+                            <option key={sup.id} value={sup.id}>{sup.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="variant-table w-full">
+                        <thead>
+                          <tr>
+                            <th>Ảnh/Mã</th>
+                            <th>Sản phẩm sỉ & Nhà cung cấp</th>
+                            <th className="text-center w-28">Số lượng</th>
+                            <th className="text-right">Đơn giá sỉ</th>
+                            <th className="text-right">Thành tiền</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredAdminOrderItems.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="text-center py-6 muted text-xs font-semibold">
+                                Không tìm thấy sản phẩm sỉ phù hợp với bộ lọc.
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredAdminOrderItems.map((item) => {
+                              const parent = allProducts.find((p) => p.code === item.productCode);
+                              const image = parent?.imageUrl ?? "/product-food.svg";
+                              return (
+                                <tr key={item.id} className={item.quantity === 0 ? "opacity-50 bg-gray-50/50" : ""}>
+                                  <td className="w-16">
+                                    <div className="relative w-10 h-10 rounded-xl overflow-hidden border bg-orange-50 flex items-center justify-center p-1 shrink-0">
+                                      <Image src={image} alt={item.productName} fill className="object-cover" />
+                                    </div>
+                                    <span className="text-[8px] font-mono font-bold text-orange-900 block mt-1 text-center">{item.variantSku}</span>
+                                  </td>
+                                  <td>
+                                    <strong className="text-xs text-[#331B08] block">{item.productName}</strong>
+                                    <span className="text-[10px] text-gray-500 font-semibold block">{item.variantLabel}</span>
+                                    <span className="text-[9px] bg-blue-50 text-blue-800 px-2 py-0.5 rounded-full font-bold inline-block mt-1">
+                                      🏭 {visibleSupplierName(item.supplierId)}
+                                    </span>
+                                  </td>
+                                  <td className="text-center">
+                                    <div className="flex items-center justify-center gap-1 border border-orange-200 rounded-xl p-0.5 bg-orange-50/25 max-w-[100px] mx-auto">
+                                      <button
+                                        type="button"
+                                        className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-xs font-bold text-[#78350F] shadow-sm active:scale-90 cursor-pointer disabled:opacity-40"
+                                        disabled={isOrderFrozen}
+                                        onClick={() => handleAdminQtyChange(item.id, item.quantity - 1)}
+                                      >
+                                        -
+                                      </button>
+                                      <input
+                                        type="number"
+                                        className="w-8 text-center text-xs font-bold bg-transparent border-0 focus:ring-0 p-0"
+                                        disabled={isOrderFrozen}
+                                        value={item.quantity}
+                                        onChange={(e) => handleAdminQtyChange(item.id, parseInt(e.target.value, 10) || 0)}
+                                      />
+                                      <button
+                                        type="button"
+                                        className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-xs font-bold text-[#78350F] shadow-sm active:scale-90 cursor-pointer disabled:opacity-40"
+                                        disabled={isOrderFrozen}
+                                        onClick={() => handleAdminQtyChange(item.id, item.quantity + 1)}
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  </td>
+                                  <td className="text-right text-xs text-[#78350F] font-semibold">
+                                    {formatVnd(item.unitPriceSnapshot)}
+                                  </td>
+                                  <td className="text-right text-xs font-bold text-[#331B08]">
+                                    {formatVnd(item.quantity * item.unitPriceSnapshot)}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <aside className="flex flex-col gap-4">
+                  {/* Thẩm định Chi phí, Báo giá & Đặt cọc */}
                   <div className="panel flex flex-col gap-4">
                     <div className="section-title">
-                      <h3 className="text-lg font-bold">1. Thẩm định Chi phí & Báo giá</h3>
+                      <h3 className="text-lg font-bold">1. Chi phí & Báo giá</h3>
                       <StatusPill tone={isOrderFrozen ? "warning" : "info"}>
-                        {isOrderFrozen ? "Đơn đã bị khóa chỉnh sửa" : "Bản nháp báo giá"}
+                        {isOrderFrozen ? "Đơn đã khóa" : "Thẩm định sỉ"}
                       </StatusPill>
                     </div>
 
                     <div className="flex flex-col gap-4">
                       <div className="flex flex-col gap-1">
-                        <label className="text-xs font-bold text-orange-950/80">Chiết khấu giảm giá Đại lý (VND)</label>
+                        <label className="text-xs font-bold text-orange-950/80">Chiết khấu sỉ giảm giá (VND)</label>
                         <input
                           type="number"
                           className="text-input text-xs py-2 px-3"
@@ -1341,7 +1789,7 @@ export function PetTravelApp() {
 
                       <div className="grid grid-cols-2 gap-3">
                         <div className="flex flex-col gap-1">
-                          <label className="text-xs font-bold text-orange-950/80">Phí ship vận chuyển (VND)</label>
+                          <label className="text-xs font-bold text-orange-950/80">Phí vận chuyển (VND)</label>
                           <input
                             type="number"
                             className="text-input text-xs py-2 px-3"
@@ -1352,8 +1800,8 @@ export function PetTravelApp() {
                         </div>
 
                         <div className="flex flex-col gap-1">
-                          <label className="text-xs font-bold text-orange-950/80">Hình thức tính phí ship</label>
-                          <div className="flex items-center gap-2 mt-2">
+                          <label className="text-xs font-bold text-orange-950/80">Phương thức tính phí</label>
+                          <div className="flex flex-col gap-1 mt-1">
                             <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
                               <input
                                 type="radio"
@@ -1362,7 +1810,7 @@ export function PetTravelApp() {
                                 checked={shippingFeeOption === "included"}
                                 onChange={() => setShippingFeeOption("included")}
                               />
-                              Cộng vào đơn sỉ
+                              Cộng vào đơn
                             </label>
                             <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
                               <input
@@ -1375,10 +1823,23 @@ export function PetTravelApp() {
                                   setAdminShippingFee(0);
                                 }}
                               />
-                              Khách trả khi nhận
+                              Khách trả COD
                             </label>
                           </div>
                         </div>
+                      </div>
+
+                      <div className="flex flex-col gap-1 border-t border-dashed border-orange-100 pt-3">
+                        <label className="text-xs font-bold text-orange-950/80">Số tiền cọc gửi (VND)</label>
+                        <input
+                          type="number"
+                          className="text-input text-xs py-2 px-3"
+                          disabled={isOrderFrozen}
+                          placeholder={formatVnd(quote?.depositAmount || 0)}
+                          value={customDepositInput}
+                          onChange={(e) => setCustomDepositInput(e.target.value)}
+                        />
+                        <span className="text-[10px] muted">Mặc định: 30% tổng đơn nếu bỏ trống.</span>
                       </div>
 
                       {requiresManagerApproval && !isManagerApproved && (
@@ -1386,86 +1847,50 @@ export function PetTravelApp() {
                           <div className="flex items-start gap-2">
                             <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={16} />
                             <div>
-                              <strong className="text-xs text-red-950 block">Cảnh báo: Vượt hạn mức phê duyệt của Operator!</strong>
+                              <strong className="text-xs text-red-950 block">Vượt hạn mức chiết khấu Operator!</strong>
                               <p className="text-[10px] text-red-900 m-0 mt-0.5 leading-relaxed font-bold">
-                                Mức chiết khấu hiện tại ({percent(adminDiscount / quote.subtotal)}) vượt quá hạn mức tối đa cho phép ({percent(adminPolicy.maxOperatorDiscountRate)}). Cần Quản lý ký số phê duyệt để tiếp tục.
+                                Cần Quản lý ký số phê duyệt để tiếp tục áp dụng mức giảm giá này.
                               </p>
                             </div>
                           </div>
                           <button
-                            className="tab-button text-xs py-2 w-max text-red-700 border-red-300 hover:bg-red-50"
+                            className="tab-button text-xs py-2 w-max text-red-700 border-red-300 hover:bg-red-50 cursor-pointer"
                             type="button"
                             onClick={() => {
                               setIsManagerApproved(true);
                               addComment("internal", "Quản lý (Manager) đã kiểm tra và phê duyệt mức chiết khấu sỉ đặc biệt cho đơn này.");
                             }}
                           >
-                            <ShieldCheck size={14} /> Ký số Phê duyệt vượt hạn mức
+                            <ShieldCheck size={14} /> Ký phê duyệt
                           </button>
                         </div>
                       )}
 
                       {isManagerApproved && (
                         <div className="p-3 bg-green-50 border border-green-200 rounded-xl flex items-center gap-2 text-xs text-green-800 font-bold">
-                          <CheckCircle2 size={16} className="text-green-600" /> Đơn đã được ký phê duyệt bởi Quản lý!
+                          <CheckCircle2 size={16} className="text-green-600" /> Quản lý đã duyệt hạn mức!
                         </div>
                       )}
 
                       <button
-                        className="primary-button text-xs py-3 justify-center w-full mt-2"
+                        className={`primary-button text-xs py-3 justify-center w-full mt-2 font-bold cursor-pointer transition rounded-xl ${
+                          isOrderModified
+                            ? "bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white shadow-md"
+                            : "bg-orange-500 text-white border-orange-600 hover:bg-orange-600"
+                        }`}
                         type="button"
                         disabled={isOrderFrozen || (requiresManagerApproval && !isManagerApproved)}
-                        onClick={publishNewQuote}
+                        onClick={handlePublishQuote}
                       >
-                        Phát hành Bản báo giá lần {workingOrder.quoteVersions.length + 1}
+                        📬 Gửi khách xác nhận
                       </button>
                     </div>
                   </div>
 
-                  {/* Tạo VietQR chuyển khoản */}
-                  <div className="panel flex flex-col gap-4">
-                    <div className="section-title">
-                      <h3 className="text-lg font-bold">2. Yêu cầu Thanh toán & VietQR</h3>
-                    </div>
-
-                    <div className="flex flex-col gap-3">
-                      {workingOrder.paymentIntent === "deposit_cod" && (
-                        <div className="flex flex-col gap-1">
-                          <label className="text-xs font-bold text-orange-950/80">Số tiền đặt cọc tùy chỉnh (VND) - Bỏ trống nếu lấy 30% mặc định</label>
-                          <input
-                            type="number"
-                            className="text-input text-xs py-2 px-3"
-                            disabled={isOrderFrozen || !isQuoteAccepted}
-                            placeholder={formatVnd(quote.depositAmount)}
-                            value={customDepositInput}
-                            onChange={(e) => setCustomDepositInput(e.target.value)}
-                          />
-                        </div>
-                      )}
-
-                      {!isQuoteAccepted && (
-                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 font-semibold leading-relaxed">
-                          Chờ đại lý chấp thuận Bản báo giá lần {quote.version} trước khi phát hành VietQR chính thức.
-                        </div>
-                      )}
-
-                      <button
-                        className="tab-button text-xs py-3 justify-center w-full bg-orange-500 text-white border-orange-600 hover:bg-orange-600"
-                        type="button"
-                        disabled={isOrderFrozen || !isQuoteAccepted}
-                        onClick={issuePaymentRequest}
-                      >
-                        <QrCode size={15} /> Phát hành Yêu cầu & QR tĩnh
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <aside className="flex flex-col gap-4">
                   {/* Kế toán đối soát */}
                   <div className="panel flex flex-col gap-4">
                     <div className="section-title">
-                      <h3 className="text-lg font-bold">3. Phòng Kế toán & Đối soát</h3>
+                      <h3 className="text-lg font-bold">2. Đối soát dòng tiền</h3>
                     </div>
 
                     <div className="flex flex-col gap-3 text-xs">
@@ -1481,9 +1906,9 @@ export function PetTravelApp() {
                             {workingOrder.paymentStatus === "deposit_uploaded" || workingOrder.paymentStatus === "full_uploaded" ? (
                               <span className="status-pill warning text-[9px]">Chờ đối soát biên lai</span>
                             ) : workingOrder.paymentStatus.includes("confirmed") || workingOrder.paymentStatus === "paid" ? (
-                              <span className="status-pill success text-[9px]">Đã xác nhận tiền vào</span>
+                              <span className="status-pill success text-[9px]">Đã nhận tiền sỉ</span>
                             ) : (
-                              <span className="status-pill info text-[9px]">Chờ đại lý chuyển khoản</span>
+                              <span className="status-pill info text-[9px]">Chờ thanh toán</span>
                             )}
                           </div>
                         </div>
@@ -1503,14 +1928,14 @@ export function PetTravelApp() {
                           {workingOrder.paymentProofs[0].status === "pending_admin_confirmation" ? (
                             <button
                               type="button"
-                              className="tab-button py-2 w-full justify-center bg-green-500 text-white border-green-600 hover:bg-green-600 font-bold"
+                              className="tab-button py-2 w-full justify-center bg-green-500 text-white border-green-600 hover:bg-green-600 font-bold cursor-pointer"
                               onClick={confirmDeposit}
                             >
-                              Xác nhận Đã nhận đủ tiền sỉ
+                              Xác nhận Nhận đủ tiền
                             </button>
                           ) : (
                             <div className="p-2.5 bg-green-50 border border-green-200 rounded-xl text-green-800 font-bold text-center">
-                              ✓ Giao dịch cọc/tiền đã khóa
+                              ✓ Giao dịch đã xác nhận thành công
                             </div>
                           )}
                         </div>
@@ -1521,17 +1946,17 @@ export function PetTravelApp() {
                   {/* Bàn giao vận chuyển */}
                   <div className="panel flex flex-col gap-4">
                     <div className="section-title">
-                      <h3 className="text-lg font-bold">4. Kho hàng & Vận chuyển</h3>
+                      <h3 className="text-lg font-bold">3. Kho hàng & Vận chuyển</h3>
                     </div>
 
                     <div className="flex flex-col gap-3">
                       <button
                         type="button"
-                        className="tab-button text-xs py-3 justify-center w-full bg-blue-600 text-white border-blue-700 hover:bg-blue-700"
+                        className="tab-button text-xs py-3 justify-center w-full bg-blue-600 text-white border-blue-700 hover:bg-blue-700 cursor-pointer font-bold rounded-xl"
                         disabled={workingOrder.fulfillmentStatus === "shipped" || (!workingOrder.paymentStatus.includes("confirmed") && workingOrder.paymentStatus !== "paid")}
                         onClick={attachShipment}
                       >
-                        <Truck size={15} /> Bàn giao Đối tác GHN (Mã vận đơn)
+                        <Truck size={15} /> Bàn giao GHN (Mã vận đơn)
                       </button>
                     </div>
                   </div>
@@ -2397,6 +2822,82 @@ export function PetTravelApp() {
                   }}
                 >
                   Lưu thay đổi
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- E. CUSTOMER CHECKOUT INFO MODAL --- */}
+      {showCheckoutModal && (
+        <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowCheckoutModal(false)}>
+          <div 
+            className="panel max-w-md w-full flex flex-col gap-4 p-6 relative overflow-hidden bg-[#FFFDF9] animate-scale-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button 
+              type="button" 
+              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 font-bold hover:bg-orange-200 transition active:scale-90 cursor-pointer"
+              onClick={() => setShowCheckoutModal(false)}
+            >
+              ✕
+            </button>
+
+            <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-1.5">
+              🚚 Thông tin Giao nhận sỉ & Thanh toán
+            </h3>
+            <p className="muted text-xs leading-relaxed">
+              Vui lòng cung cấp chính xác thông tin giao nhận hàng. Đơn hàng sỉ sẽ được khóa và phát hành thông tin chuyển khoản VietQR ngay sau khi xác nhận.
+            </p>
+
+            <div className="flex flex-col gap-3 mt-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-bold text-orange-950/80">Họ và tên người nhận:</label>
+                <input 
+                  type="text" 
+                  className="text-input text-xs py-2 px-3" 
+                  value={recipientName} 
+                  onChange={(e) => setRecipientName(e.target.value)} 
+                  placeholder="Ví dụ: Nguyễn Văn A..." 
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-bold text-orange-950/80">Số điện thoại liên hệ:</label>
+                <input 
+                  type="text" 
+                  className="text-input text-xs py-2 px-3" 
+                  value={recipientPhone} 
+                  onChange={(e) => setRecipientPhone(e.target.value)} 
+                  placeholder="Ví dụ: 0987654321..." 
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-bold text-orange-950/80">Địa chỉ giao hàng sỉ:</label>
+                <textarea 
+                  className="text-input text-xs py-2 px-3 min-h-[80px]" 
+                  value={recipientAddress} 
+                  onChange={(e) => setRecipientAddress(e.target.value)} 
+                  placeholder="Số nhà, tên đường, phường/xã, quận/huyện, tỉnh/thành phố..." 
+                />
+              </div>
+
+              <div className="flex gap-2 justify-end mt-4">
+                <button
+                  type="button"
+                  className="tab-button text-xs py-2 px-4 cursor-pointer font-bold rounded-xl"
+                  onClick={() => setShowCheckoutModal(false)}
+                >
+                  Quay lại
+                </button>
+                <button
+                  type="button"
+                  className="primary-button text-xs py-2 px-6 font-bold bg-orange-500 text-white border-orange-600 hover:bg-orange-600 cursor-pointer rounded-xl"
+                  onClick={handleConfirmCheckout}
+                >
+                  Xác nhận & Thanh toán sỉ
                 </button>
               </div>
             </div>

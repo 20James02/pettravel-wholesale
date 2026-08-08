@@ -174,7 +174,7 @@ export const products: Product[] = [
    (status NOT in ["cancelled", "delivered"]) at any given time.
    ────────────────────────────────────────────────────── */
 
-export const demoOrders: CustomerOrder[] = [
+export let demoOrders: CustomerOrder[] = [
   {
     id: "ord_1001",
     number: "PTW-260808-001",
@@ -402,4 +402,12 @@ export function sanitizeProductsForRole(
     // Admin: full data
     return p;
   });
+}
+
+export function updateDemoOrder(updatedOrder: CustomerOrder) {
+  demoOrders = demoOrders.map(o => o.id === updatedOrder.id ? updatedOrder : o);
+}
+
+export function addDemoOrder(newOrder: CustomerOrder) {
+  demoOrders.push(newOrder);
 }

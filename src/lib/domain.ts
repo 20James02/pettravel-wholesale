@@ -183,6 +183,9 @@ export interface CustomerOrder {
   paymentProofs: PaymentProof[];
   fulfillmentGroups: FulfillmentGroup[];
   shipment?: Shipment;
+  recipientName?: string;
+  recipientPhone?: string;
+  recipientAddress?: string;
   comments: OrderComment[];
   updatedAt: string;
 }
