@@ -10,3 +10,4 @@ coverage
 *.log
 Thumbs.db
 Desktop.ini
+.agents/
