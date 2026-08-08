@@ -171,6 +171,7 @@ export interface CustomerOrder {
   number: string;
   customerName: string;
   customerCompany: string;
+  customerId: string;
   commercialStatus: CommercialStatus;
   paymentStatus: PaymentStatus;
   fulfillmentStatus: FulfillmentStatus;

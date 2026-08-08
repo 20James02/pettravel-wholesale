@@ -34,7 +34,7 @@ import {
   Check,
   Clock
 } from "lucide-react";
-import { type ComponentType, type ReactNode, useMemo, useState, useEffect } from "react";
+import { type ComponentType, type ReactNode, useMemo, useState, useEffect, useCallback } from "react";
 import Lenis from "lenis";
 import type {
   AdminPolicy,
@@ -54,14 +54,26 @@ import { formatVnd, percent } from "@/lib/money";
 type AppMode = "guest" | "customer" | "admin";
 type TabKey = "catalog" | "cart" | "order" | "admin" | "admin_products" | "admin_reconciliation" | "admin_invoices" | "settings";
 
-interface PetTravelAppProps {
-  users: UserAccount[];
-  products: Product[];
-  suppliers: Supplier[];
-  order: CustomerOrder;
-  rolePermissions: Record<RoleKey, PermissionKey[]>;
-  adminPolicy: AdminPolicy;
+interface ApiUser {
+  id: string;
+  name: string;
+  company: string;
+  email: string;
+  role: RoleKey;
+  isAdmin: boolean;
 }
+
+const EMPTY_ORDER: CustomerOrder = {
+  id: "", number: "", customerName: "", customerCompany: "", customerId: "",
+  commercialStatus: "draft", paymentStatus: "unrequested", fulfillmentStatus: "not_started",
+  paymentIntent: "deposit_cod", invoiceRequested: false, updatedAt: new Date().toISOString(),
+  items: [], quoteVersions: [], paymentRequests: [], paymentProofs: [], fulfillmentGroups: [], comments: []
+};
+
+const DEFAULT_POLICY: AdminPolicy = {
+  freeShippingThreshold: 5000000, defaultDepositRate: 0.3,
+  maxOperatorDiscountRate: 0.08, requireManagerApprovalAbove: 500000
+};
 
 const paymentIntentLabels: Record<PaymentIntent, string> = {
   deposit_cod: "Đặt cọc trước 30% + Thanh toán phần còn lại khi nhận hàng (COD)",
@@ -80,20 +92,26 @@ function StatusPill({
 }
 
 function latestQuote(order: CustomerOrder) {
+  if (order.quoteVersions.length === 0) {
+    return { id: "", version: 0, status: "draft" as const, subtotal: 0, adjustments: [], finalTotal: 0, depositAmount: 0, codRemaining: 0, expiresAt: "" };
+  }
   return order.quoteVersions[order.quoteVersions.length - 1];
 }
 
-export function PetTravelApp({
-  users,
-  products,
-  suppliers,
-  order,
-  rolePermissions,
-  adminPolicy
-}: PetTravelAppProps) {
+export function PetTravelApp() {
   const [mode, setMode] = useState<AppMode>("guest");
   const [activeTab, setActiveTab] = useState<TabKey>("catalog");
-  const [workingOrder, setWorkingOrder] = useState<CustomerOrder>(order);
+  const [workingOrder, setWorkingOrder] = useState<CustomerOrder>(EMPTY_ORDER);
+
+  // Auth & data state
+  const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
+  const [allOrders, setAllOrders] = useState<CustomerOrder[]>([]);
+  const [canCreateOrder, setCanCreateOrder] = useState<boolean>(true);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [adminPolicy, setAdminPolicy] = useState<AdminPolicy>(DEFAULT_POLICY);
+  const [rolePermissions, setRolePermissions] = useState<Record<RoleKey, PermissionKey[]>>({} as Record<RoleKey, PermissionKey[]>);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
   // Shop state
   const [categoryFilter, setCategoryFilter] = useState<string>("Tất cả");
@@ -111,7 +129,7 @@ export function PetTravelApp({
   const [isInternalComment, setIsInternalComment] = useState<boolean>(false);
 
   // Product Management states
-  const [allProducts, setAllProducts] = useState<Product[]>(products);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [showProductForm, setShowProductForm] = useState<boolean>(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formName, setFormName] = useState<string>("");
@@ -121,27 +139,127 @@ export function PetTravelApp({
   const [formTags, setFormTags] = useState<string>("");
   const [formVariants, setFormVariants] = useState<ProductVariant[]>([]);
   
-  // Cart state - syncs with initial workingOrder items
-  const [cartItems, setCartItems] = useState(
-    workingOrder.items.map(item => ({
-      id: item.id,
-      productCode: item.productCode,
-      productName: item.productName,
-      variantSku: item.variantSku,
-      variantLabel: item.variantLabel,
-      quantity: item.quantity,
-      unitPriceSnapshot: item.unitPriceSnapshot,
-      supplierId: item.supplierId
-    }))
-  );
+  // Cart state
+  const [cartItems, setCartItems] = useState<Array<{
+    id: string; productCode: string; productName: string;
+    variantSku: string; variantLabel: string; quantity: number;
+    unitPriceSnapshot: number; supplierId: string;
+  }>>([]);
 
   // Admin adjustments state
-  const [adminDiscount, setAdminDiscount] = useState<number>(320000); // initial mock discount
-  const [adminShippingFee, setAdminShippingFee] = useState<number>(90000); // initial mock shipping
+  const [adminDiscount, setAdminDiscount] = useState<number>(0);
+  const [adminShippingFee, setAdminShippingFee] = useState<number>(0);
   const [shippingFeeOption, setShippingFeeOption] = useState<"included" | "separate_cod">("included");
   const [customDepositInput, setCustomDepositInput] = useState<string>("");
-  const [isQuoteAccepted, setIsQuoteAccepted] = useState<boolean>(true); // default accepted for initial mock
+  const [isQuoteAccepted, setIsQuoteAccepted] = useState<boolean>(false);
   const [isManagerApproved, setIsManagerApproved] = useState<boolean>(false);
+
+  // ── API fetch helpers ──────────────────────────────────────
+  const fetchProducts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/products");
+      const data = await res.json();
+      setAllProducts(data.products ?? []);
+    } catch { /* silent */ }
+  }, []);
+
+  const fetchOrders = useCallback(async () => {
+    try {
+      const res = await fetch("/api/orders");
+      if (!res.ok) return;
+      const data = await res.json();
+      setAllOrders(data.orders ?? []);
+      setCanCreateOrder(data.canCreateOrder ?? true);
+      // Auto-select first order for customer, or keep selected for admin
+      if (data.orders?.length > 0) {
+        const firstOrder = data.orders[0];
+        if (!selectedOrderId) {
+          setSelectedOrderId(firstOrder.id);
+          setWorkingOrder(firstOrder);
+          setCartItems(firstOrder.items?.map((item: CustomerOrder["items"][number]) => ({ ...item })) ?? []);
+        }
+      }
+    } catch { /* silent */ }
+  }, [selectedOrderId]);
+
+  const fetchAdminData = useCallback(async () => {
+    try {
+      const [suppRes, polRes] = await Promise.all([
+        fetch("/api/suppliers"),
+        fetch("/api/admin/policy")
+      ]);
+      if (suppRes.ok) {
+        const suppData = await suppRes.json();
+        setSuppliers(suppData.suppliers ?? []);
+      }
+      if (polRes.ok) {
+        const polData = await polRes.json();
+        setAdminPolicy(polData.adminPolicy ?? DEFAULT_POLICY);
+        setRolePermissions(polData.rolePermissions ?? {} as Record<RoleKey, PermissionKey[]>);
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  /** Login via demo API, then fetch relevant data */
+  async function handleLogin(userId: string, targetMode: AppMode) {
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/auth/demo-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId })
+      });
+      if (!res.ok) { setIsLoading(false); return; }
+      const data = await res.json();
+      setCurrentUser(data.user);
+      setMode(targetMode);
+      setActiveTab(targetMode === "admin" ? "admin" : "catalog");
+
+      // Fetch data in parallel
+      await fetchProducts();
+      await fetchOrders();
+      if (targetMode === "admin") {
+        await fetchAdminData();
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  /** Logout: clear cookie + reset state */
+  async function handleLogout() {
+    await fetch("/api/auth/me", { method: "DELETE" });
+    setMode("guest");
+    setCurrentUser(null);
+    setAllOrders([]);
+    setWorkingOrder(EMPTY_ORDER);
+    setCartItems([]);
+    setAllProducts([]);
+    setSuppliers([]);
+    setSelectedOrderId(null);
+  }
+
+  /** Admin selects a specific order to work on */
+  function selectOrder(orderId: string) {
+    const order = allOrders.find((o) => o.id === orderId);
+    if (!order) return;
+    setSelectedOrderId(orderId);
+    setWorkingOrder(order);
+    setCartItems(order.items.map((item) => ({ ...item })));
+    // Reset adjustment states for the new order
+    const q = order.quoteVersions[order.quoteVersions.length - 1];
+    if (q) {
+      const disc = q.adjustments.find((a) => a.type === "discount");
+      const ship = q.adjustments.find((a) => a.type === "shipping_fee");
+      setAdminDiscount(disc ? Math.abs(disc.amount) : 0);
+      setAdminShippingFee(ship ? ship.amount : 0);
+      setIsQuoteAccepted(q.status === "accepted");
+    } else {
+      setAdminDiscount(0);
+      setAdminShippingFee(0);
+      setIsQuoteAccepted(false);
+    }
+  }
 
   // Setup Lenis scroll
   useEffect(() => {
@@ -156,13 +274,16 @@ export function PetTravelApp({
     };
   }, []);
 
-  const activeUser = mode === "admin" ? users.find((user) => user.isAdmin) : users.find((user) => !user.isAdmin);
+  const activeUser = currentUser ? {
+    id: currentUser.id, name: currentUser.name, company: currentUser.company,
+    email: currentUser.email, role: currentUser.role, isAdmin: currentUser.isAdmin
+  } as UserAccount : undefined;
   const isLoggedIn = mode !== "guest";
   const isAdmin = mode === "admin";
   const quote = latestQuote(workingOrder);
 
   // Computed values
-  const requiresManagerApproval = (adminDiscount / (quote.subtotal || 1) > adminPolicy.maxOperatorDiscountRate) || (adminDiscount > adminPolicy.requireManagerApprovalAbove);
+  const requiresManagerApproval = (adminDiscount / (quote?.subtotal || 1) > adminPolicy.maxOperatorDiscountRate) || (adminDiscount > adminPolicy.requireManagerApprovalAbove);
   const isOrderFrozen = workingOrder.paymentStatus.includes("uploaded") || workingOrder.paymentStatus.includes("confirmed") || workingOrder.paymentStatus === "paid";
 
   const supplierById = useMemo(
@@ -517,12 +638,10 @@ export function PetTravelApp({
               <button
                 type="button"
                 className="panel p-6 border-2 border-orange-200 bg-white hover:border-orange-500 hover:-translate-y-1 transition text-left flex flex-col gap-3 group relative cursor-pointer"
-                onClick={() => {
-                  setMode("customer");
-                  setActiveTab("catalog");
-                }}
+                disabled={isLoading}
+                onClick={() => handleLogin("u_customer_minh", "customer")}
               >
-                <div className="w-12 h-12 rounded-2xl bg-orange-100 flex items-center justify-center text-2xl group-hover:scale-110 transition">🛒</div>
+                <div className="w-12 h-12 rounded-2xl bg-orange-100 flex items-center justify-center text-2xl group-hover:scale-110 transition">{isLoading ? "⏳" : "🛒"}</div>
                 <div>
                   <h3 className="m-0 text-md font-bold text-[#331B08]">Đại lý lấy sỉ</h3>
                   <p className="muted m-0 text-xs mt-1">Lên đơn đề xuất, tải chứng từ cọc, theo dõi hành trình.</p>
@@ -533,12 +652,10 @@ export function PetTravelApp({
               <button
                 type="button"
                 className="panel p-6 border-2 border-orange-200 bg-white hover:border-orange-500 hover:-translate-y-1 transition text-left flex flex-col gap-3 group relative cursor-pointer"
-                onClick={() => {
-                  setMode("admin");
-                  setActiveTab("admin");
-                }}
+                disabled={isLoading}
+                onClick={() => handleLogin("u_admin", "admin")}
               >
-                <div className="w-12 h-12 rounded-2xl bg-orange-100 flex items-center justify-center text-2xl group-hover:scale-110 transition">⚙️</div>
+                <div className="w-12 h-12 rounded-2xl bg-orange-100 flex items-center justify-center text-2xl group-hover:scale-110 transition">{isLoading ? "⏳" : "⚙️"}</div>
                 <div>
                   <h3 className="m-0 text-md font-bold text-[#331B08]">Nhân viên Vận hành</h3>
                   <p className="muted m-0 text-xs mt-1">Thẩm định giá sỉ, quản lý kho, phát hành VietQR và đối soát.</p>
@@ -580,7 +697,7 @@ export function PetTravelApp({
             className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-red-50 text-red-500 hover:text-red-600 transition"
             title="Đăng xuất"
             type="button"
-            onClick={() => setMode("guest")}
+            onClick={handleLogout}
           >
             <LogOut size={16} />
           </button>
@@ -1115,227 +1232,313 @@ export function PetTravelApp({
 
         {/* --- D. ADMIN OPERATIONS TAB (ADMIN ONLY) --- */}
         {activeTab === "admin" && isAdmin && (
-          <section className="grid-dashboard">
-            <div className="flex flex-col gap-4">
-              {/* Thẩm định báo giá */}
-              <div className="panel flex flex-col gap-4">
-                <div className="section-title">
-                  <h3 className="text-lg font-bold">1. Thẩm định Chi phí & Báo giá</h3>
-                  <StatusPill tone={isOrderFrozen ? "warning" : "info"}>
-                    {isOrderFrozen ? "Đơn đã bị khóa chỉnh sửa" : "Bản nháp báo giá"}
-                  </StatusPill>
-                </div>
+          workingOrder.id === "" ? (
+            <div className="panel flex flex-col gap-6 w-full">
+              <div className="flex flex-col gap-1">
+                <h2 className="text-xl font-bold text-[#331B08] flex items-center gap-2">📋 Danh sách Đơn hàng sỉ</h2>
+                <p className="muted text-xs">Chọn một đơn hàng từ danh sách dưới đây để tiến hành thẩm định chi phí, báo giá, phát hành VietQR hoặc đối soát dòng tiền thực tế.</p>
+              </div>
 
-                <div className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-bold text-orange-950/80">Chiết khấu giảm giá Đại lý (VND)</label>
-                    <input
-                      type="number"
-                      className="text-input text-xs py-2 px-3"
-                      disabled={isOrderFrozen}
-                      value={adminDiscount}
-                      onChange={(e) => setAdminDiscount(parseInt(e.target.value, 10) || 0)}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-orange-950/80">Phí ship vận chuyển (VND)</label>
-                      <input
-                        type="number"
-                        className="text-input text-xs py-2 px-3"
-                        disabled={isOrderFrozen || shippingFeeOption === "separate_cod"}
-                        value={shippingFeeOption === "separate_cod" ? 0 : adminShippingFee}
-                        onChange={(e) => setAdminShippingFee(parseInt(e.target.value, 10) || 0)}
-                      />
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-orange-950/80">Hình thức tính phí ship</label>
-                      <div className="flex items-center gap-2 mt-2">
-                        <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
-                          <input
-                            type="radio"
-                            name="ship_opt"
-                            disabled={isOrderFrozen}
-                            checked={shippingFeeOption === "included"}
-                            onChange={() => setShippingFeeOption("included")}
-                          />
-                          Cộng vào đơn sỉ
-                        </label>
-                        <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
-                          <input
-                            type="radio"
-                            name="ship_opt"
-                            disabled={isOrderFrozen}
-                            checked={shippingFeeOption === "separate_cod"}
-                            onChange={() => {
-                              setShippingFeeOption("separate_cod");
-                              setAdminShippingFee(0);
-                            }}
-                          />
-                          Khách trả khi nhận
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-
-                  {requiresManagerApproval && !isManagerApproved && (
-                    <div className="p-3 border-2 border-dashed border-red-200 bg-red-50/20 rounded-2xl flex flex-col gap-2 mt-2">
-                      <div className="flex items-start gap-2">
-                        <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={16} />
-                        <div>
-                          <strong className="text-xs text-red-950 block">Cảnh báo: Vượt hạn mức phê duyệt của Operator!</strong>
-                          <p className="text-[10px] text-red-900 m-0 mt-0.5 leading-relaxed font-bold">
-                            Mức chiết khấu hiện tại ({percent(adminDiscount / quote.subtotal)}) vượt quá hạn mức tối đa cho phép ({percent(adminPolicy.maxOperatorDiscountRate)}). Cần Quản lý ký số phê duyệt để tiếp tục.
-                          </p>
+              <div className="grid grid-cols-1 gap-3">
+                {allOrders.map((ord) => {
+                  const q = latestQuote(ord);
+                  return (
+                    <div
+                      key={ord.id}
+                      className="p-5 border-2 border-orange-100 hover:border-orange-500 rounded-2xl bg-white hover:-translate-y-0.5 transition flex flex-col md:flex-row justify-between items-start md:items-center gap-4 cursor-pointer"
+                      onClick={() => selectOrder(ord.id)}
+                    >
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-extrabold text-[#331B08]">{ord.number}</span>
+                          <span className={`status-pill text-[10px] ${
+                            ord.commercialStatus === "locked" ? "success" :
+                            ord.commercialStatus === "quoted" ? "info" : "warning"
+                          }`}>
+                            {ord.commercialStatus === "submitted" ? "Chờ duyệt giá" :
+                             ord.commercialStatus === "quoted" ? "Đã báo giá" :
+                             ord.commercialStatus === "customer_accepted" ? "Chờ cọc" :
+                             ord.commercialStatus === "locked" ? "Chờ đóng hàng" : "Hoàn tất"}
+                          </span>
                         </div>
+                        <span className="text-xs font-semibold text-[#78350F]">{ord.customerName} · {ord.customerCompany}</span>
+                        <span className="muted text-[10px]">{ord.items.length} mặt hàng sỉ · Cập nhật: {new Date(ord.updatedAt).toLocaleTimeString("vi-VN")} {new Date(ord.updatedAt).toLocaleDateString("vi-VN")}</span>
                       </div>
-                      <button
-                        className="tab-button text-xs py-2 w-max text-red-700 border-red-300 hover:bg-red-50"
-                        type="button"
-                        onClick={() => {
-                          setIsManagerApproved(true);
-                          addComment("internal", "Quản lý (Manager) đã kiểm tra và phê duyệt mức chiết khấu sỉ đặc biệt cho đơn này.");
-                        }}
-                      >
-                        <ShieldCheck size={14} /> Ký số Phê duyệt vượt hạn mức
-                      </button>
-                    </div>
-                  )}
-
-                  {isManagerApproved && (
-                    <div className="p-3 bg-green-50 border border-green-200 rounded-xl flex items-center gap-2 text-xs text-green-800 font-bold">
-                      <CheckCircle2 size={16} className="text-green-600" /> Đơn đã được ký phê duyệt bởi Quản lý!
-                    </div>
-                  )}
-
-                  <button
-                    className="primary-button text-xs py-3 justify-center w-full mt-2"
-                    type="button"
-                    disabled={isOrderFrozen || (requiresManagerApproval && !isManagerApproved)}
-                    onClick={publishNewQuote}
-                  >
-                    Phát hành Bản báo giá lần {workingOrder.quoteVersions.length + 1}
-                  </button>
-                </div>
-              </div>
-
-              {/* Tạo VietQR chuyển khoản */}
-              <div className="panel flex flex-col gap-4">
-                <div className="section-title">
-                  <h3 className="text-lg font-bold">2. Yêu cầu Thanh toán & VietQR</h3>
-                </div>
-
-                <div className="flex flex-col gap-3">
-                  {workingOrder.paymentIntent === "deposit_cod" && (
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-orange-950/80">Số tiền đặt cọc tùy chỉnh (VND) - Bỏ trống nếu lấy 30% mặc định</label>
-                      <input
-                        type="number"
-                        className="text-input text-xs py-2 px-3"
-                        disabled={isOrderFrozen || !isQuoteAccepted}
-                        placeholder={formatVnd(quote.depositAmount)}
-                        value={customDepositInput}
-                        onChange={(e) => setCustomDepositInput(e.target.value)}
-                      />
-                    </div>
-                  )}
-
-                  {!isQuoteAccepted && (
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 font-semibold leading-relaxed">
-                      Chờ đại lý chấp thuận Bản báo giá lần {quote.version} trước khi phát hành VietQR chính thức.
-                    </div>
-                  )}
-
-                  <button
-                    className="tab-button text-xs py-3 justify-center w-full bg-orange-500 text-white border-orange-600 hover:bg-orange-600"
-                    type="button"
-                    disabled={isOrderFrozen || !isQuoteAccepted}
-                    onClick={issuePaymentRequest}
-                  >
-                    <QrCode size={15} /> Phát hành Yêu cầu & QR tĩnh
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <aside className="flex flex-col gap-4">
-              {/* Kế toán đối soát */}
-              <div className="panel flex flex-col gap-4">
-                <div className="section-title">
-                  <h3 className="text-lg font-bold">3. Phòng Kế toán & Đối soát</h3>
-                </div>
-
-                <div className="flex flex-col gap-3 text-xs">
-                  <div className="p-3 border-2 border-orange-100 rounded-2xl bg-[#FFFDF9] flex flex-col gap-2">
-                    <strong className="text-xs text-[#331B08] block">Trạng thái dòng tiền sỉ:</strong>
-                    <div className="flex justify-between items-center py-1 border-b border-dashed border-orange-100">
-                      <span>Yêu cầu chuyển khoản:</span>
-                      <strong>{formatVnd(workingOrder.paymentRequests[workingOrder.paymentRequests.length - 1]?.amount || 0)}</strong>
-                    </div>
-                    <div className="flex justify-between items-center py-1">
-                      <span>Trạng thái chứng từ:</span>
-                      <div>
-                        {workingOrder.paymentStatus === "deposit_uploaded" || workingOrder.paymentStatus === "full_uploaded" ? (
-                          <span className="status-pill warning text-[9px]">Chờ đối soát biên lai</span>
-                        ) : workingOrder.paymentStatus.includes("confirmed") || workingOrder.paymentStatus === "paid" ? (
-                          <span className="status-pill success text-[9px]">Đã xác nhận tiền vào</span>
-                        ) : (
-                          <span className="status-pill info text-[9px]">Chờ đại lý chuyển khoản</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {workingOrder.paymentProofs.length > 0 && (
-                    <div className="p-3 border-2 border-orange-100 rounded-2xl bg-[#FFFDF9] flex flex-col gap-3">
-                      <div>
-                        <strong className="text-xs text-[#331B08] block">Ảnh biên lai đại lý gửi:</strong>
-                        <p className="muted text-[10px] m-0 mt-0.5">{workingOrder.paymentProofs[0].fileName}</p>
-                      </div>
-                      
-                      <div className="aspect-video w-full rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center font-bold text-orange-950/70 text-xs">
-                        [ HÌNH ẢNH BIÊN LAI ]
-                      </div>
-
-                      {workingOrder.paymentProofs[0].status === "pending_admin_confirmation" ? (
+                      <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
+                        <div className="text-right flex flex-col">
+                          <span className="text-[10px] muted font-bold">TỔNG ĐƠN SỈ</span>
+                          <strong className="text-sm text-orange-950 font-extrabold">{formatVnd(q.finalTotal)}</strong>
+                        </div>
                         <button
                           type="button"
-                          className="tab-button py-2 w-full justify-center bg-green-500 text-white border-green-600 hover:bg-green-600 font-bold"
-                          onClick={confirmDeposit}
+                          className="tab-button bg-orange-500 text-white border-orange-600 hover:bg-orange-600 text-xs py-2 px-4 cursor-pointer font-bold rounded-xl"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            selectOrder(ord.id);
+                          }}
                         >
-                          Xác nhận Đã nhận đủ tiền sỉ
+                          Xử lý đơn
                         </button>
-                      ) : (
-                        <div className="p-2.5 bg-green-50 border border-green-200 rounded-xl text-green-800 font-bold text-center">
-                          ✓ Giao dịch cọc/tiền đã khóa
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-4 w-full">
+              {/* Back to list and quick switcher */}
+              <div className="panel p-4 bg-orange-50/50 border border-orange-100 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    className="tab-button text-xs py-1.5 px-3 bg-white hover:bg-orange-100 font-bold border-orange-200 rounded-xl"
+                    onClick={() => {
+                      setSelectedOrderId(null);
+                      setWorkingOrder(EMPTY_ORDER);
+                    }}
+                  >
+                    ← Quay lại danh sách
+                  </button>
+                  <span className="text-sm font-bold text-[#331B08]">Đang xử lý đơn: <span className="text-orange-600">{workingOrder.number}</span> ({workingOrder.customerName})</span>
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <span className="text-xs font-semibold text-orange-950 shrink-0">Chuyển nhanh đơn:</span>
+                  <select
+                    className="text-input text-xs py-1.5 px-2 bg-white border border-orange-200 rounded-xl flex-grow sm:flex-none sm:w-[200px] font-semibold"
+                    value={workingOrder.id}
+                    onChange={(e) => selectOrder(e.target.value)}
+                  >
+                    {allOrders.map((o) => (
+                      <option key={o.id} value={o.id}>{o.number} - {o.customerName}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <section className="grid-dashboard">
+                <div className="flex flex-col gap-4">
+                  {/* Thẩm định báo giá */}
+                  <div className="panel flex flex-col gap-4">
+                    <div className="section-title">
+                      <h3 className="text-lg font-bold">1. Thẩm định Chi phí & Báo giá</h3>
+                      <StatusPill tone={isOrderFrozen ? "warning" : "info"}>
+                        {isOrderFrozen ? "Đơn đã bị khóa chỉnh sửa" : "Bản nháp báo giá"}
+                      </StatusPill>
+                    </div>
+
+                    <div className="flex flex-col gap-4">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-xs font-bold text-orange-950/80">Chiết khấu giảm giá Đại lý (VND)</label>
+                        <input
+                          type="number"
+                          className="text-input text-xs py-2 px-3"
+                          disabled={isOrderFrozen}
+                          value={adminDiscount}
+                          onChange={(e) => setAdminDiscount(parseInt(e.target.value, 10) || 0)}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-bold text-orange-950/80">Phí ship vận chuyển (VND)</label>
+                          <input
+                            type="number"
+                            className="text-input text-xs py-2 px-3"
+                            disabled={isOrderFrozen || shippingFeeOption === "separate_cod"}
+                            value={shippingFeeOption === "separate_cod" ? 0 : adminShippingFee}
+                            onChange={(e) => setAdminShippingFee(parseInt(e.target.value, 10) || 0)}
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-bold text-orange-950/80">Hình thức tính phí ship</label>
+                          <div className="flex items-center gap-2 mt-2">
+                            <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
+                              <input
+                                type="radio"
+                                name="ship_opt"
+                                disabled={isOrderFrozen}
+                                checked={shippingFeeOption === "included"}
+                                onChange={() => setShippingFeeOption("included")}
+                              />
+                              Cộng vào đơn sỉ
+                            </label>
+                            <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
+                              <input
+                                type="radio"
+                                name="ship_opt"
+                                disabled={isOrderFrozen}
+                                checked={shippingFeeOption === "separate_cod"}
+                                onChange={() => {
+                                  setShippingFeeOption("separate_cod");
+                                  setAdminShippingFee(0);
+                                }}
+                              />
+                              Khách trả khi nhận
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      {requiresManagerApproval && !isManagerApproved && (
+                        <div className="p-3 border-2 border-dashed border-red-200 bg-red-50/20 rounded-2xl flex flex-col gap-2 mt-2">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={16} />
+                            <div>
+                              <strong className="text-xs text-red-950 block">Cảnh báo: Vượt hạn mức phê duyệt của Operator!</strong>
+                              <p className="text-[10px] text-red-900 m-0 mt-0.5 leading-relaxed font-bold">
+                                Mức chiết khấu hiện tại ({percent(adminDiscount / quote.subtotal)}) vượt quá hạn mức tối đa cho phép ({percent(adminPolicy.maxOperatorDiscountRate)}). Cần Quản lý ký số phê duyệt để tiếp tục.
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            className="tab-button text-xs py-2 w-max text-red-700 border-red-300 hover:bg-red-50"
+                            type="button"
+                            onClick={() => {
+                              setIsManagerApproved(true);
+                              addComment("internal", "Quản lý (Manager) đã kiểm tra và phê duyệt mức chiết khấu sỉ đặc biệt cho đơn này.");
+                            }}
+                          >
+                            <ShieldCheck size={14} /> Ký số Phê duyệt vượt hạn mức
+                          </button>
+                        </div>
+                      )}
+
+                      {isManagerApproved && (
+                        <div className="p-3 bg-green-50 border border-green-200 rounded-xl flex items-center gap-2 text-xs text-green-800 font-bold">
+                          <CheckCircle2 size={16} className="text-green-600" /> Đơn đã được ký phê duyệt bởi Quản lý!
+                        </div>
+                      )}
+
+                      <button
+                        className="primary-button text-xs py-3 justify-center w-full mt-2"
+                        type="button"
+                        disabled={isOrderFrozen || (requiresManagerApproval && !isManagerApproved)}
+                        onClick={publishNewQuote}
+                      >
+                        Phát hành Bản báo giá lần {workingOrder.quoteVersions.length + 1}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Tạo VietQR chuyển khoản */}
+                  <div className="panel flex flex-col gap-4">
+                    <div className="section-title">
+                      <h3 className="text-lg font-bold">2. Yêu cầu Thanh toán & VietQR</h3>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      {workingOrder.paymentIntent === "deposit_cod" && (
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-bold text-orange-950/80">Số tiền đặt cọc tùy chỉnh (VND) - Bỏ trống nếu lấy 30% mặc định</label>
+                          <input
+                            type="number"
+                            className="text-input text-xs py-2 px-3"
+                            disabled={isOrderFrozen || !isQuoteAccepted}
+                            placeholder={formatVnd(quote.depositAmount)}
+                            value={customDepositInput}
+                            onChange={(e) => setCustomDepositInput(e.target.value)}
+                          />
+                        </div>
+                      )}
+
+                      {!isQuoteAccepted && (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 font-semibold leading-relaxed">
+                          Chờ đại lý chấp thuận Bản báo giá lần {quote.version} trước khi phát hành VietQR chính thức.
+                        </div>
+                      )}
+
+                      <button
+                        className="tab-button text-xs py-3 justify-center w-full bg-orange-500 text-white border-orange-600 hover:bg-orange-600"
+                        type="button"
+                        disabled={isOrderFrozen || !isQuoteAccepted}
+                        onClick={issuePaymentRequest}
+                      >
+                        <QrCode size={15} /> Phát hành Yêu cầu & QR tĩnh
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <aside className="flex flex-col gap-4">
+                  {/* Kế toán đối soát */}
+                  <div className="panel flex flex-col gap-4">
+                    <div className="section-title">
+                      <h3 className="text-lg font-bold">3. Phòng Kế toán & Đối soát</h3>
+                    </div>
+
+                    <div className="flex flex-col gap-3 text-xs">
+                      <div className="p-3 border-2 border-orange-100 rounded-2xl bg-[#FFFDF9] flex flex-col gap-2">
+                        <strong className="text-xs text-[#331B08] block">Trạng thái dòng tiền sỉ:</strong>
+                        <div className="flex justify-between items-center py-1 border-b border-dashed border-orange-100">
+                          <span>Yêu cầu chuyển khoản:</span>
+                          <strong>{formatVnd(workingOrder.paymentRequests[workingOrder.paymentRequests.length - 1]?.amount || 0)}</strong>
+                        </div>
+                        <div className="flex justify-between items-center py-1">
+                          <span>Trạng thái chứng từ:</span>
+                          <div>
+                            {workingOrder.paymentStatus === "deposit_uploaded" || workingOrder.paymentStatus === "full_uploaded" ? (
+                              <span className="status-pill warning text-[9px]">Chờ đối soát biên lai</span>
+                            ) : workingOrder.paymentStatus.includes("confirmed") || workingOrder.paymentStatus === "paid" ? (
+                              <span className="status-pill success text-[9px]">Đã xác nhận tiền vào</span>
+                            ) : (
+                              <span className="status-pill info text-[9px]">Chờ đại lý chuyển khoản</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {workingOrder.paymentProofs.length > 0 && (
+                        <div className="p-3 border-2 border-orange-100 rounded-2xl bg-[#FFFDF9] flex flex-col gap-3">
+                          <div>
+                            <strong className="text-xs text-[#331B08] block">Ảnh biên lai đại lý gửi:</strong>
+                            <p className="muted text-[10px] m-0 mt-0.5">{workingOrder.paymentProofs[0].fileName}</p>
+                          </div>
+                          
+                          <div className="aspect-video w-full rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center font-bold text-orange-950/70 text-xs">
+                            [ HÌNH ẢNH BIÊN LAI ]
+                          </div>
+
+                          {workingOrder.paymentProofs[0].status === "pending_admin_confirmation" ? (
+                            <button
+                              type="button"
+                              className="tab-button py-2 w-full justify-center bg-green-500 text-white border-green-600 hover:bg-green-600 font-bold"
+                              onClick={confirmDeposit}
+                            >
+                              Xác nhận Đã nhận đủ tiền sỉ
+                            </button>
+                          ) : (
+                            <div className="p-2.5 bg-green-50 border border-green-200 rounded-xl text-green-800 font-bold text-center">
+                              ✓ Giao dịch cọc/tiền đã khóa
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
 
-              {/* Bàn giao vận chuyển */}
-              <div className="panel flex flex-col gap-4">
-                <div className="section-title">
-                  <h3 className="text-lg font-bold">4. Kho hàng & Vận chuyển</h3>
-                </div>
+                  {/* Bàn giao vận chuyển */}
+                  <div className="panel flex flex-col gap-4">
+                    <div className="section-title">
+                      <h3 className="text-lg font-bold">4. Kho hàng & Vận chuyển</h3>
+                    </div>
 
-                <div className="flex flex-col gap-3">
-                  <button
-                    type="button"
-                    className="tab-button text-xs py-3 justify-center w-full bg-blue-600 text-white border-blue-700 hover:bg-blue-700"
-                    disabled={workingOrder.fulfillmentStatus === "shipped" || (!workingOrder.paymentStatus.includes("confirmed") && workingOrder.paymentStatus !== "paid")}
-                    onClick={attachShipment}
-                  >
-                    <Truck size={15} /> Bàn giao Đối tác GHN (Mã vận đơn)
-                  </button>
-                </div>
-              </div>
-            </aside>
-          </section>
+                    <div className="flex flex-col gap-3">
+                      <button
+                        type="button"
+                        className="tab-button text-xs py-3 justify-center w-full bg-blue-600 text-white border-blue-700 hover:bg-blue-700"
+                        disabled={workingOrder.fulfillmentStatus === "shipped" || (!workingOrder.paymentStatus.includes("confirmed") && workingOrder.paymentStatus !== "paid")}
+                        onClick={attachShipment}
+                      >
+                        <Truck size={15} /> Bàn giao Đối tác GHN (Mã vận đơn)
+                      </button>
+                    </div>
+                  </div>
+                </aside>
+              </section>
+            </div>
+          )
         )}
 
         {/* --- D2. PRODUCT MANAGEMENT TAB (ADMIN ONLY) --- */}
