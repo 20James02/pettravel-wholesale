@@ -14,11 +14,13 @@ import type {
    SUPPLIERS (admin-only except Pet Travel branding)
    ────────────────────────────────────────────────────── */
 
-export const suppliers: Supplier[] = [
+export let suppliers: Supplier[] = [
   { id: "sup_pettravel", code: "PT", name: "Pet Travel", leadTimeDays: 1, adminOnly: false },
   { id: "sup_pawcare", code: "PC", name: "PawCare Vietnam", leadTimeDays: 3, adminOnly: true },
   { id: "sup_meowline", code: "ML", name: "MeowLine Supply", leadTimeDays: 2, adminOnly: true }
 ];
+
+export let categories: string[] = ["Túi vận chuyển", "Ăn uống du lịch", "Vệ sinh"];
 
 /* ──────────────────────────────────────────────────────
    USERS
@@ -96,7 +98,7 @@ export const adminPolicy: AdminPolicy = {
    PRODUCTS
    ────────────────────────────────────────────────────── */
 
-export const products: Product[] = [
+export let products: Product[] = [
   {
     id: "p_1",
     code: "PT-BAG-001",
@@ -410,4 +412,16 @@ export function updateDemoOrder(updatedOrder: CustomerOrder) {
 
 export function addDemoOrder(newOrder: CustomerOrder) {
   demoOrders.push(newOrder);
+}
+
+export function updateDemoSuppliers(newSuppliers: Supplier[]) {
+  suppliers = newSuppliers;
+}
+
+export function updateDemoCategories(newCategories: string[]) {
+  categories = newCategories;
+}
+
+export function updateDemoProducts(newProducts: Product[]) {
+  products = newProducts;
 }

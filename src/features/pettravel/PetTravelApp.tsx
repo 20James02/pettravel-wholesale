@@ -53,7 +53,7 @@ import type {
 import { formatVnd, percent } from "@/lib/money";
 
 type AppMode = "guest" | "customer" | "admin";
-type TabKey = "catalog" | "cart" | "order" | "admin" | "admin_products" | "admin_reconciliation" | "admin_invoices" | "settings";
+type TabKey = "catalog" | "cart" | "order" | "admin" | "admin_products" | "admin_reconciliation" | "admin_invoices" | "settings" | "admin_suppliers" | "admin_categories";
 
 interface ApiUser {
   id: string;
@@ -142,17 +142,62 @@ export function PetTravelApp() {
   const [chatInput, setChatInput] = useState<string>("");
   const [isInternalComment, setIsInternalComment] = useState<boolean>(false);
 
+  // Dynamic Categories state
+  const [allCategories, setAllCategories] = useState<string[]>([]);
+  const [newCategoryName, setNewCategoryName] = useState<string>("");
+  const [editingCategoryOld, setEditingCategoryOld] = useState<string | null>(null);
+  const [editingCategoryNew, setEditingCategoryNew] = useState<string>("");
+
+  // Dynamic Suppliers management state
+  const [showSupplierForm, setShowSupplierForm] = useState<boolean>(false);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [supCode, setSupCode] = useState<string>("");
+  const [supName, setSupName] = useState<string>("");
+  const [supLeadTime, setSupLeadTime] = useState<number>(3);
+  const [supAdminOnly, setSupAdminOnly] = useState<boolean>(true);
+
   // Product Management states
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [showProductForm, setShowProductForm] = useState<boolean>(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formName, setFormName] = useState<string>("");
   const [formCode, setFormCode] = useState<string>("");
-  const [formCategory, setFormCategory] = useState<string>("Thức ăn");
+  const [formCategory, setFormCategory] = useState<string>("");
+  const [formProductSupplier, setFormProductSupplier] = useState<string>("");
   const [formImage, setFormImage] = useState<string>("/product-food.svg");
+  const [formImages, setFormImages] = useState<string[]>([]);
+  const [newImageUrlInput, setNewImageUrlInput] = useState<string>("");
+  const [formDimensions, setFormDimensions] = useState<string>("");
+  const [formWeight, setFormWeight] = useState<number>(0);
+  const [formDescription, setFormDescription] = useState<string>("");
   const [formTags, setFormTags] = useState<string>("");
   const [formVariants, setFormVariants] = useState<ProductVariant[]>([]);
   
+  // Auto-generate SKUs on code / variant labels change
+  useEffect(() => {
+    if (showProductForm && formCode) {
+      setFormVariants((prev) =>
+        prev.map((v, index) => {
+          const cleanLabel = v.label
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9]/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .toUpperCase();
+          const cleanCode = formCode.toUpperCase().replace(/[^A-Z0-9-]/g, "");
+          const suffix = cleanLabel ? `-${cleanLabel}` : `-${index + 1}`;
+          const generatedSku = `${cleanCode}${suffix}`;
+          if (v.sku === generatedSku) return v;
+          return {
+            ...v,
+            sku: generatedSku
+          };
+        })
+      );
+    }
+  }, [formCode, formVariants.map(v => v.label).join(','), showProductForm]);
+
   // Cart state
   const [cartItems, setCartItems] = useState<Array<{
     id: string; productCode: string; productName: string;
@@ -234,6 +279,15 @@ export function PetTravelApp() {
     } catch { /* silent */ }
   }, [selectedOrderId]);
 
+  const fetchCategories = useCallback(async () => {
+    try {
+      const res = await fetch("/api/categories");
+      if (!res.ok) return;
+      const data = await res.json();
+      setAllCategories(data.categories ?? []);
+    } catch { /* silent */ }
+  }, []);
+
   const fetchAdminData = useCallback(async () => {
     try {
       const [suppRes, polRes] = await Promise.all([
@@ -251,6 +305,116 @@ export function PetTravelApp() {
       }
     } catch { /* silent */ }
   }, []);
+
+  async function handleAddCategory(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newCategoryName.trim()) return;
+    try {
+      const res = await fetch("/api/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category: newCategoryName.trim() })
+      });
+      if (res.ok) {
+        setNewCategoryName("");
+        await fetchCategories();
+      }
+    } catch { /* silent */ }
+  }
+
+  async function handleEditCategory(oldCat: string, newCat: string) {
+    if (!newCat.trim()) return;
+    try {
+      const res = await fetch("/api/categories", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ oldCategory: oldCat, newCategory: newCat.trim() })
+      });
+      if (res.ok) {
+        setEditingCategoryOld(null);
+        await fetchCategories();
+      }
+    } catch { /* silent */ }
+  }
+
+  async function handleDeleteCategory(cat: string) {
+    if (confirm(`Bạn có chắc muốn xóa danh mục "${cat}"? Các sản phẩm thuộc danh mục này có thể cần cập nhật lại.`)) {
+      try {
+        const res = await fetch(`/api/categories?category=${encodeURIComponent(cat)}`, {
+          method: "DELETE"
+        });
+        if (res.ok) {
+          await fetchCategories();
+        }
+      } catch { /* silent */ }
+    }
+  }
+
+  async function handleSaveSupplier(e: React.FormEvent) {
+    e.preventDefault();
+    if (!supCode.trim() || !supName.trim()) {
+      alert("Vui lòng nhập đầy đủ Mã và Tên nhà cung cấp!");
+      return;
+    }
+    const supplierData: Supplier = {
+      id: editingSupplier?.id || `sup_${Date.now()}`,
+      code: supCode.trim(),
+      name: supName.trim(),
+      leadTimeDays: Number(supLeadTime) || 3,
+      adminOnly: supAdminOnly
+    };
+    try {
+      const res = await fetch("/api/suppliers", {
+        method: editingSupplier ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(supplierData)
+      });
+      if (res.ok) {
+        setShowSupplierForm(false);
+        setEditingSupplier(null);
+        setSupCode("");
+        setSupName("");
+        setSupLeadTime(3);
+        setSupAdminOnly(true);
+        
+        // Re-fetch suppliers
+        const suppRes = await fetch("/api/suppliers");
+        if (suppRes.ok) {
+          const suppData = await suppRes.json();
+          setSuppliers(suppData.suppliers ?? []);
+        }
+      }
+    } catch { /* silent */ }
+  }
+
+  async function handleDeleteSupplier(id: string, name: string) {
+    if (confirm(`Bạn có chắc muốn xóa nhà cung cấp "${name}"?`)) {
+      try {
+        const res = await fetch(`/api/suppliers?id=${id}`, {
+          method: "DELETE"
+        });
+        if (res.ok) {
+          const suppRes = await fetch("/api/suppliers");
+          if (suppRes.ok) {
+            const suppData = await suppRes.json();
+            setSuppliers(suppData.suppliers ?? []);
+          }
+        }
+      } catch { /* silent */ }
+    }
+  }
+
+  const handleAddImage = () => {
+    if (!newImageUrlInput.trim()) return;
+    if (!formImages.includes(newImageUrlInput.trim())) {
+      const updated = [...formImages, newImageUrlInput.trim()];
+      setFormImages(updated);
+      if (!formImage || formImages.length === 0) {
+        setFormImage(newImageUrlInput.trim());
+      }
+    }
+    setNewImageUrlInput("");
+  };
 
   /** Login via demo API, then fetch relevant data */
   async function handleLogin(userId: string, targetMode: AppMode) {
@@ -270,6 +434,7 @@ export function PetTravelApp() {
       // Fetch data in parallel
       await fetchProducts();
       await fetchOrders();
+      await fetchCategories();
       if (targetMode === "admin") {
         await fetchAdminData();
       }
@@ -981,6 +1146,24 @@ export function PetTravelApp() {
               >
                 <Boxes size={18} />
                 Quản lý sản phẩm
+              </button>
+              <button
+                className="tab-button w-full justify-start"
+                type="button"
+                data-active={activeTab === "admin_suppliers"}
+                onClick={() => setActiveTab("admin_suppliers")}
+              >
+                <Building2 size={18} />
+                Quản lý nhà cung cấp
+              </button>
+              <button
+                className="tab-button w-full justify-start"
+                type="button"
+                data-active={activeTab === "admin_categories"}
+                onClick={() => setActiveTab("admin_categories")}
+              >
+                <Boxes size={18} />
+                Quản lý danh mục
               </button>
               <button
                 className="tab-button w-full justify-start"
@@ -1973,12 +2156,17 @@ export function PetTravelApp() {
                   // Setup empty form
                   setFormCode(`PRO-${Date.now().toString().slice(-4)}`);
                   setFormName("");
-                  setFormCategory("Thức ăn");
+                  setFormCategory(allCategories[0] || "");
+                  setFormProductSupplier(suppliers[0]?.id || "");
                   setFormImage("/product-food.svg");
-                  setFormTags("Thức ăn, Hạt");
+                  setFormImages(["/product-food.svg"]);
+                  setFormDimensions("");
+                  setFormWeight(0);
+                  setFormDescription("");
+                  setFormTags("");
                   setFormVariants([
-                    { id: `v_${Date.now()}_1`, sku: `SKU-${Date.now().toString().slice(-3)}-1`, label: "Túi 1.5kg", wholesalePrice: 150000, minOrderQty: 10, stock: 100, supplierId: "sup_1" },
-                    { id: `v_${Date.now()}_2`, sku: `SKU-${Date.now().toString().slice(-3)}-2`, label: "Túi 5kg", wholesalePrice: 420000, minOrderQty: 5, stock: 50, supplierId: "sup_2" }
+                    { id: `v_${Date.now()}_1`, sku: "", label: "Túi 1.5kg", wholesalePrice: 150000, minOrderQty: 10, stock: 100, supplierId: suppliers[0]?.id || "sup_pettravel" },
+                    { id: `v_${Date.now()}_2`, sku: "", label: "Túi 5kg", wholesalePrice: 420000, minOrderQty: 5, stock: 50, supplierId: suppliers[0]?.id || "sup_pettravel" }
                   ]);
                 }}
               >
@@ -2038,7 +2226,12 @@ export function PetTravelApp() {
                               setFormCode(p.code);
                               setFormName(p.name);
                               setFormCategory(p.category);
+                              setFormProductSupplier(p.variants[0]?.supplierId || "");
                               setFormImage(p.imageUrl);
+                              setFormImages(p.images ?? [p.imageUrl]);
+                              setFormDimensions(p.dimensions ?? "");
+                              setFormWeight(p.weight ?? 0);
+                              setFormDescription(p.description ?? "");
                               setFormTags(p.tags.join(", "));
                               setFormVariants(p.variants.map(v => ({ ...v })));
                             }}
@@ -2048,9 +2241,14 @@ export function PetTravelApp() {
                           <button
                             type="button"
                             className="tab-button text-xs py-1 px-3 text-red-600 border-red-200 bg-red-50/30 hover:bg-red-50"
-                            onClick={() => {
+                            onClick={async () => {
                               if (confirm(`Bạn có chắc chắn muốn xóa sản phẩm ${p.name}?`)) {
-                                setAllProducts(prev => prev.filter(item => item.id !== p.id));
+                                const res = await fetch(`/api/products?id=${p.id}`, { method: "DELETE" });
+                                if (res.ok) {
+                                  await fetchProducts();
+                                } else {
+                                  alert("Lỗi khi xóa sản phẩm.");
+                                }
                               }
                             }}
                           >
@@ -2060,6 +2258,248 @@ export function PetTravelApp() {
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* --- D2-C. CATEGORY MANAGEMENT TAB (ADMIN ONLY) --- */}
+        {activeTab === "admin_categories" && isAdmin && (
+          <div className="flex flex-col gap-6">
+            <div>
+              <h2 className="text-xl font-bold text-[#331B08]">🏷️ Quản lý Danh mục Sản phẩm sỉ</h2>
+              <p className="muted text-xs">Quản lý danh sách các danh mục hàng sỉ (Thức ăn, Túi vận chuyển, Đồ chơi...).</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+              {/* Form thêm mới */}
+              <div className="panel p-4 flex flex-col gap-4">
+                <h3 className="text-sm font-bold text-orange-950 border-b pb-2">Thêm danh mục mới</h3>
+                <form onSubmit={handleAddCategory} className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-bold text-orange-900">Tên danh mục:</label>
+                    <input
+                      type="text"
+                      className="text-input text-xs py-2 px-3"
+                      placeholder="Nhập tên danh mục..."
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                    />
+                  </div>
+                  <button type="submit" className="primary-button text-xs py-2 w-full">
+                    + Thêm danh mục
+                  </button>
+                </form>
+              </div>
+
+              {/* Danh sách danh mục */}
+              <div className="panel p-4 md:col-span-2 flex flex-col gap-4">
+                <h3 className="text-sm font-bold text-orange-950 border-b pb-2">Danh sách danh mục hiện có</h3>
+                <div className="flex flex-col gap-2">
+                  {allCategories.map((cat) => (
+                    <div key={cat} className="flex items-center justify-between p-3 border border-orange-100 bg-[#FFFDF9] rounded-xl">
+                      {editingCategoryOld === cat ? (
+                        <div className="flex items-center gap-2 w-full mr-4">
+                          <input
+                            type="text"
+                            className="text-input text-xs py-1 px-2 flex-grow"
+                            value={editingCategoryNew}
+                            onChange={(e) => setEditingCategoryNew(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="tab-button bg-green-500 text-white border-green-600 px-3 py-1 text-xs cursor-pointer"
+                            onClick={() => handleEditCategory(cat, editingCategoryNew)}
+                          >
+                            Lưu
+                          </button>
+                          <button
+                            type="button"
+                            className="tab-button bg-gray-200 text-gray-800 px-3 py-1 text-xs cursor-pointer"
+                            onClick={() => setEditingCategoryOld(null)}
+                          >
+                            Hủy
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <span className="font-bold text-sm text-orange-950">{cat}</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="tab-button px-2.5 py-1 text-xs cursor-pointer border-orange-200 text-orange-800"
+                              onClick={() => {
+                                setEditingCategoryOld(cat);
+                                setEditingCategoryNew(cat);
+                              }}
+                            >
+                              Sửa
+                            </button>
+                            <button
+                              type="button"
+                              className="tab-button px-2.5 py-1 text-xs cursor-pointer bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
+                              onClick={() => handleDeleteCategory(cat)}
+                            >
+                              Xóa
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {allCategories.length === 0 && (
+                    <p className="muted text-xs text-center py-4">Chưa có danh mục nào.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* --- D2-S. SUPPLIER MANAGEMENT TAB (ADMIN ONLY) --- */}
+        {activeTab === "admin_suppliers" && isAdmin && (
+          <div className="flex flex-col gap-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-[#331B08]">🏢 Quản lý Đối tác Nhà cung cấp sỉ</h2>
+                <p className="muted text-xs">Quản lý các nhà cung cấp sỉ, thời gian chuẩn bị hàng (lead time) và cài đặt hiển thị.</p>
+              </div>
+              <button
+                type="button"
+                className="primary-button text-xs py-2"
+                onClick={() => {
+                  setEditingSupplier(null);
+                  setSupCode("");
+                  setSupName("");
+                  setSupLeadTime(3);
+                  setSupAdminOnly(true);
+                  setShowSupplierForm(true);
+                }}
+              >
+                + Thêm nhà cung cấp
+              </button>
+            </div>
+
+            {/* Form modal/panel */}
+            {showSupplierForm && (
+              <div className="panel p-4 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200">
+                <h3 className="text-sm font-bold text-orange-950 border-b pb-2">
+                  {editingSupplier ? `Cập nhật nhà cung cấp: ${editingSupplier.name}` : "Thêm nhà cung cấp sỉ mới"}
+                </h3>
+                <form onSubmit={handleSaveSupplier} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-bold text-orange-900">Mã nhà cung cấp (Code):</label>
+                    <input
+                      type="text"
+                      className="text-input text-xs py-2 px-3"
+                      placeholder="Ví dụ: PT, PC, ML..."
+                      value={supCode}
+                      onChange={(e) => setSupCode(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1 md:col-span-2">
+                    <label className="text-xs font-bold text-orange-900">Tên nhà cung cấp:</label>
+                    <input
+                      type="text"
+                      className="text-input text-xs py-2 px-3"
+                      placeholder="Nhập tên nhà cung cấp..."
+                      value={supName}
+                      onChange={(e) => setSupName(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-bold text-orange-900">Chuẩn bị hàng (Lead time ngày):</label>
+                    <input
+                      type="number"
+                      className="text-input text-xs py-2 px-3"
+                      value={supLeadTime}
+                      onChange={(e) => setSupLeadTime(Number(e.target.value))}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 pb-3">
+                    <input
+                      type="checkbox"
+                      id="supAdminOnly"
+                      checked={supAdminOnly}
+                      onChange={(e) => setSupAdminOnly(e.target.checked)}
+                    />
+                    <label htmlFor="supAdminOnly" className="text-xs font-bold text-orange-900 cursor-pointer">
+                      Chỉ hiển thị với Admin
+                    </label>
+                  </div>
+                  <div className="md:col-span-4 flex justify-end gap-2 mt-2 border-t pt-3">
+                    <button
+                      type="button"
+                      className="tab-button text-xs py-1.5 px-3 cursor-pointer"
+                      onClick={() => setShowSupplierForm(false)}
+                    >
+                      Hủy bỏ
+                    </button>
+                    <button type="submit" className="primary-button text-xs py-1.5 px-4">
+                      Lưu thay đổi
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            <div className="panel p-4 overflow-x-auto">
+              <table className="variant-table w-full">
+                <thead>
+                  <tr>
+                    <th>Mã NCC</th>
+                    <th>Tên nhà cung cấp sỉ</th>
+                    <th>Lead-time chuẩn bị</th>
+                    <th>Hiển thị sỉ</th>
+                    <th className="text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {suppliers.map((s) => (
+                    <tr key={s.id}>
+                      <td className="font-mono font-bold text-orange-900 text-xs">{s.code}</td>
+                      <td>
+                        <strong className="text-orange-950 text-sm">{s.name}</strong>
+                      </td>
+                      <td className="text-xs font-bold">{s.leadTimeDays} ngày</td>
+                      <td>
+                        <span className={`tag text-[10px] px-2 py-0.5 rounded-full font-bold ${s.adminOnly ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"}`}>
+                          {s.adminOnly ? "Chỉ Admin thấy" : "Công khai với Khách"}
+                        </span>
+                      </td>
+                      <td className="text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            className="tab-button px-2.5 py-1 text-xs cursor-pointer border-orange-200 text-orange-800"
+                            onClick={() => {
+                              setEditingSupplier(s);
+                              setSupCode(s.code);
+                              setSupName(s.name);
+                              setSupLeadTime(s.leadTimeDays);
+                              setSupAdminOnly(s.adminOnly);
+                              setShowSupplierForm(true);
+                            }}
+                          >
+                            Sửa
+                          </button>
+                          <button
+                            type="button"
+                            className="tab-button px-2.5 py-1 text-xs cursor-pointer bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
+                            onClick={() => handleDeleteSupplier(s.id, s.name)}
+                          >
+                            Xóa
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {suppliers.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="muted text-xs text-center py-6">Chưa có nhà cung cấp nào.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -2618,7 +3058,7 @@ export function PetTravelApp() {
       {showProductForm && (
         <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowProductForm(false)}>
           <div 
-            className="panel max-w-2xl w-full flex flex-col gap-4 p-6 relative overflow-hidden bg-[#FFFDF9] animate-scale-in max-h-[90vh] overflow-y-auto"
+            className="panel max-w-2xl w-full flex flex-col gap-4 p-6 relative overflow-hidden bg-[#FFFDF9] animate-scale-in max-h-[95vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Close button */}
@@ -2632,183 +3072,299 @@ export function PetTravelApp() {
 
             <h3 className="text-lg font-bold text-[#331B08]">{editingProduct ? "✍️ Chỉnh sửa sản phẩm sỉ" : "➕ Thêm sản phẩm sỉ mới"}</h3>
             
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-4">
+              {/* Row 1: Tên, Mã */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-bold text-orange-950/80">Tên sản phẩm:</label>
+                  <label className="text-xs font-bold text-orange-950/80">Tên sản phẩm sỉ:</label>
                   <input type="text" className="text-input text-xs py-2 px-3" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="Nhập tên sản phẩm..." />
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-bold text-orange-950/80">Mã sản phẩm (Code):</label>
-                  <input type="text" className="text-input text-xs py-2 px-3" value={formCode} onChange={(e) => setFormCode(e.target.value)} />
+                  <input type="text" className="text-input text-xs py-2 px-3" value={formCode} onChange={(e) => setFormCode(e.target.value)} placeholder="Ví dụ: PRO-102" />
                 </div>
               </div>
 
+              {/* Row 2: Danh mục, Nhà cung cấp */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-bold text-orange-950/80">Danh mục:</label>
                   <select className="text-input text-xs py-2 px-3 bg-white" value={formCategory} onChange={(e) => setFormCategory(e.target.value)}>
-                    <option value="Thức ăn">Thức ăn</option>
-                    <option value="Đồ chơi">Đồ chơi</option>
-                    <option value="Vệ sinh">Vệ sinh</option>
+                    <option value="">-- Chọn danh mục --</option>
+                    {allCategories.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-bold text-orange-950/80">Tags (Ngăn cách bởi dấu phẩy):</label>
-                  <input type="text" className="text-input text-xs py-2 px-3" value={formTags} onChange={(e) => setFormTags(e.target.value)} placeholder="Ví dụ: Dành cho mèo, Cát vệ sinh..." />
+                  <label className="text-xs font-bold text-orange-950/80">Nhà cung cấp sỉ chính:</label>
+                  <select className="text-input text-xs py-2 px-3 bg-white" value={formProductSupplier} onChange={(e) => setFormProductSupplier(e.target.value)}>
+                    <option value="">-- Chọn nhà cung cấp --</option>
+                    {suppliers.map(s => (
+                      <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-orange-950/80">Đường dẫn ảnh:</label>
-                <select className="text-input text-xs py-2 px-3 bg-white" value={formImage} onChange={(e) => setFormImage(e.target.value)}>
-                  <option value="/product-food.svg">Thức ăn hạt sỉ (/product-food.svg)</option>
-                  <option value="/product-bowl.svg">Bát ăn sỉ (/product-bowl.svg)</option>
-                  <option value="/product-wipes.svg">Khăn ướt lau thú cưng sỉ (/product-wipes.svg)</option>
-                  <option value="/product-bag.svg">Balo vận chuyển sỉ (/product-bag.svg)</option>
-                </select>
+              {/* Row 3: Kích thước, Khối lượng */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-bold text-orange-950/80">Kích thước (Dài x Rộng x Cao cm):</label>
+                  <input type="text" className="text-input text-xs py-2 px-3" value={formDimensions} onChange={(e) => setFormDimensions(e.target.value)} placeholder="Ví dụ: 30x20x15 cm" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-bold text-orange-950/80">Khối lượng (kg):</label>
+                  <input type="number" step="0.1" className="text-input text-xs py-2 px-3" value={formWeight || ""} onChange={(e) => setFormWeight(Number(e.target.value))} placeholder="Ví dụ: 1.5" />
+                </div>
               </div>
 
-              <div className="border-t border-dashed border-orange-100 my-1"></div>
-
-              <div className="flex justify-between items-center">
-                <h4 className="text-xs font-bold text-orange-950">Quản lý phân loại sản phẩm (Variants):</h4>
-                <button
-                  type="button"
-                  className="tab-button text-[10px] py-1 px-2 border-orange-200 bg-orange-50/50"
-                  onClick={() => {
-                    setFormVariants(prev => [
-                      ...prev,
-                      {
-                        id: `v_${Date.now()}`,
-                        sku: `SKU-${Date.now().toString().slice(-3)}`,
-                        label: "Phân loại mới",
-                        wholesalePrice: 100000,
-                        minOrderQty: 10,
-                        stock: 100,
-                        supplierId: "sup_1"
+              {/* TikTok-style Image Gallery Manager */}
+              <div className="flex flex-col gap-1.5 p-3 border border-orange-100 rounded-2xl bg-orange-50/5">
+                <label className="text-xs font-bold text-orange-950/80">Ảnh sản phẩm (Chọn 1 ảnh làm ảnh chính):</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="text-input text-xs py-2 px-3 flex-grow"
+                    placeholder="Nhập đường dẫn ảnh sản phẩm (URL)..."
+                    value={newImageUrlInput}
+                    onChange={(e) => setNewImageUrlInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddImage();
                       }
-                    ]);
-                  }}
-                >
-                  + Thêm phân loại
-                </button>
-              </div>
+                    }}
+                  />
+                  <button type="button" className="tab-button text-xs py-2 px-4 cursor-pointer" onClick={handleAddImage}>
+                    + Thêm ảnh
+                  </button>
+                </div>
 
-              <div className="flex flex-col gap-2 max-h-[200px] overflow-y-auto border border-orange-100 rounded-2xl p-2 bg-orange-50/10">
-                {formVariants.map((v, index) => (
-                  <div key={v.id} className="grid grid-cols-5 gap-2 items-center bg-[#FFFDF9] border border-orange-100 p-2 rounded-xl">
-                    <div className="col-span-1">
-                      <label className="text-[10px] font-bold text-gray-500">Nhãn:</label>
-                      <input 
-                        type="text" 
-                        className="text-input text-[10px] py-1 px-2 w-full" 
-                        value={v.label} 
-                        onChange={(e) => {
-                          const updated = [...formVariants];
-                          updated[index].label = e.target.value;
-                          setFormVariants(updated);
-                        }} 
-                      />
-                    </div>
-                    <div className="col-span-1">
-                      <label className="text-[10px] font-bold text-gray-500">Giá sỉ (VND):</label>
-                      <input 
-                        type="number" 
-                        className="text-input text-[10px] py-1 px-2 w-full" 
-                        value={v.wholesalePrice} 
-                        onChange={(e) => {
-                          const updated = [...formVariants];
-                          updated[index].wholesalePrice = parseInt(e.target.value) || 0;
-                          setFormVariants(updated);
-                        }} 
-                      />
-                    </div>
-                    <div className="col-span-1">
-                      <label className="text-[10px] font-bold text-gray-500">MOQ:</label>
-                      <input 
-                        type="number" 
-                        className="text-input text-[10px] py-1 px-2 w-full" 
-                        value={v.minOrderQty} 
-                        onChange={(e) => {
-                          const updated = [...formVariants];
-                          updated[index].minOrderQty = parseInt(e.target.value) || 0;
-                          setFormVariants(updated);
-                        }} 
-                      />
-                    </div>
-                    <div className="col-span-1">
-                      <label className="text-[10px] font-bold text-gray-500">Tồn kho:</label>
-                      <input 
-                        type="number" 
-                        className="text-input text-[10px] py-1 px-2 w-full" 
-                        value={v.stock} 
-                        onChange={(e) => {
-                          const updated = [...formVariants];
-                          updated[index].stock = parseInt(e.target.value) || 0;
-                          setFormVariants(updated);
-                        }} 
-                      />
-                    </div>
-                    <div className="col-span-1 text-center">
-                      <button
-                        type="button"
-                        className="text-[10px] font-bold text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded border border-red-100 mt-4"
-                        onClick={() => {
-                          setFormVariants(prev => prev.filter((_, i) => i !== index));
-                        }}
+                {/* Gallery Previews */}
+                <div className="flex flex-wrap gap-2.5 mt-2.5">
+                  {formImages.map((imgUrl, idx) => {
+                    const isMain = imgUrl === formImage;
+                    return (
+                      <div
+                        key={idx}
+                        className={`relative w-20 h-20 rounded-xl overflow-hidden border-2 cursor-pointer bg-[#FFFBEB] flex items-center justify-center group ${isMain ? 'border-orange-500 ring-2 ring-orange-200' : 'border-orange-100 hover:border-orange-300'}`}
+                        onClick={() => setFormImage(imgUrl)}
+                        title="Click để chọn làm ảnh chính"
                       >
-                        Xóa
-                      </button>
+                        <Image src={imgUrl} alt={`Thumb ${idx}`} fill className="object-cover" />
+                        
+                        {/* Main Image Indicator */}
+                        {isMain && (
+                          <div className="absolute top-1 left-1 bg-orange-500 text-white text-[8px] font-extrabold px-1 py-0.5 rounded shadow-sm z-10">
+                            Ảnh chính
+                          </div>
+                        )}
+
+                        {/* Remove Image Button */}
+                        <button
+                          type="button"
+                          className="absolute top-1 right-1 w-4.5 h-4.5 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold opacity-0 group-hover:opacity-100 transition shadow-sm z-20 hover:bg-red-600"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const updated = formImages.filter(img => img !== imgUrl);
+                            setFormImages(updated);
+                            if (isMain) {
+                              setFormImage(updated[0] || "");
+                            }
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {formImages.length === 0 && (
+                    <div className="w-20 h-20 border-2 border-dashed border-orange-200 rounded-xl flex items-center justify-center text-[10px] text-orange-900/60 font-bold bg-orange-50/10">
+                      Chưa có ảnh
                     </div>
-                  </div>
-                ))}
+                  )}
+                </div>
               </div>
 
-              <div className="flex gap-2 justify-end mt-2">
+              {/* Phân loại (Variants) */}
+              <div className="flex flex-col gap-2">
+                <div className="flex justify-between items-center">
+                  <h4 className="text-xs font-bold text-orange-950">Quản lý phân loại sản phẩm (Variants):</h4>
+                  <button
+                    type="button"
+                    className="tab-button text-[10px] py-1 px-2 border-orange-200 bg-orange-50/50 cursor-pointer"
+                    onClick={() => {
+                      setFormVariants(prev => [
+                        ...prev,
+                        {
+                          id: `v_${Date.now()}`,
+                          sku: "",
+                          label: "Phân loại mới",
+                          wholesalePrice: 100000,
+                          minOrderQty: 10,
+                          stock: 100,
+                          supplierId: formProductSupplier || suppliers[0]?.id || "sup_pettravel"
+                        }
+                      ]);
+                    }}
+                  >
+                    + Thêm phân loại
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-2 max-h-[160px] overflow-y-auto border border-orange-100 rounded-2xl p-2 bg-orange-50/10">
+                  {formVariants.map((v, index) => (
+                    <div key={v.id} className="grid grid-cols-6 gap-2 items-center bg-[#FFFDF9] border border-orange-100 p-2 rounded-xl">
+                      <div className="col-span-1">
+                        <label className="text-[10px] font-bold text-gray-500">Tên phân loại:</label>
+                        <input 
+                          type="text" 
+                          className="text-input text-[10px] py-1 px-2 w-full" 
+                          value={v.label} 
+                          onChange={(e) => {
+                            const updated = [...formVariants];
+                            updated[index].label = e.target.value;
+                            setFormVariants(updated);
+                          }} 
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <label className="text-[10px] font-bold text-gray-500">SKU (Tự sinh):</label>
+                        <input 
+                          type="text" 
+                          className="text-input text-[9px] py-1 px-2 w-full bg-gray-50 border-gray-200 cursor-not-allowed font-mono" 
+                          value={v.sku} 
+                          readOnly
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <label className="text-[10px] font-bold text-gray-500">Giá sỉ (VND):</label>
+                        <input 
+                          type="number" 
+                          className="text-input text-[10px] py-1 px-2 w-full" 
+                          value={v.wholesalePrice} 
+                          onChange={(e) => {
+                            const updated = [...formVariants];
+                            updated[index].wholesalePrice = parseInt(e.target.value) || 0;
+                            setFormVariants(updated);
+                          }} 
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <label className="text-[10px] font-bold text-gray-500">MOQ:</label>
+                        <input 
+                          type="number" 
+                          className="text-input text-[10px] py-1 px-2 w-full" 
+                          value={v.minOrderQty} 
+                          onChange={(e) => {
+                            const updated = [...formVariants];
+                            updated[index].minOrderQty = parseInt(e.target.value) || 0;
+                            setFormVariants(updated);
+                          }} 
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <label className="text-[10px] font-bold text-gray-500">Tồn kho:</label>
+                        <input 
+                          type="number" 
+                          className="text-input text-[10px] py-1 px-2 w-full" 
+                          value={v.stock} 
+                          onChange={(e) => {
+                            const updated = [...formVariants];
+                            updated[index].stock = parseInt(e.target.value) || 0;
+                            setFormVariants(updated);
+                          }} 
+                        />
+                      </div>
+                      <div className="col-span-1 text-center">
+                        <button
+                          type="button"
+                          className="text-[10px] font-bold text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded border border-red-100 mt-4 cursor-pointer"
+                          onClick={() => {
+                            setFormVariants(prev => prev.filter((_, i) => i !== index));
+                          }}
+                        >
+                          Xóa
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Mô tả sản phẩm */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-bold text-orange-950/80">Mô tả sản phẩm chi tiết:</label>
+                <textarea
+                  className="text-input text-xs py-2 px-3 min-h-[80px]"
+                  placeholder="Nhập mô tả sản phẩm chi tiết..."
+                  value={formDescription}
+                  onChange={(e) => setFormDescription(e.target.value)}
+                />
+              </div>
+
+              {/* Tags */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-bold text-orange-950/80">Tags (Ngăn cách bởi dấu phẩy):</label>
+                <input type="text" className="text-input text-xs py-2 px-3" value={formTags} onChange={(e) => setFormTags(e.target.value)} placeholder="Ví dụ: Dành cho mèo, Cát vệ sinh..." />
+              </div>
+
+              {/* Submit Buttons */}
+              <div className="flex gap-2 justify-end mt-2 border-t pt-3">
                 <button
                   type="button"
-                  className="tab-button text-xs py-2 px-4"
+                  className="tab-button text-xs py-2 px-4 cursor-pointer"
                   onClick={() => setShowProductForm(false)}
                 >
                   Hủy bỏ
                 </button>
                 <button
                   type="button"
-                  className="primary-button text-xs py-2 px-6"
-                  onClick={() => {
+                  className="primary-button text-xs py-2 px-6 cursor-pointer"
+                  onClick={async () => {
                     if (!formName.trim() || !formCode.trim()) {
                       alert("Vui lòng điền đầy đủ Tên và Mã sản phẩm!");
                       return;
                     }
-                    if (editingProduct) {
-                      setAllProducts(prev => prev.map(p => 
-                        p.id === editingProduct.id 
-                          ? {
-                              ...p,
-                              code: formCode,
-                              name: formName,
-                              category: formCategory,
-                              imageUrl: formImage,
-                              tags: formTags.split(",").map(t => t.trim()).filter(Boolean),
-                              variants: formVariants
-                            }
-                          : p
-                      ));
-                    } else {
-                      const newProd: Product = {
-                        id: `prod_${Date.now()}`,
-                        code: formCode,
-                        name: formName,
-                        category: formCategory,
-                        imageUrl: formImage,
-                        brand: "Pet Travel",
-                        tags: formTags.split(",").map(t => t.trim()).filter(Boolean),
-                        variants: formVariants
-                      };
-                      setAllProducts(prev => [...prev, newProd]);
+                    if (!formCategory) {
+                      alert("Vui lòng chọn danh mục sản phẩm!");
+                      return;
                     }
-                    setShowProductForm(false);
+
+                    const productData = {
+                      id: editingProduct?.id || `p_${Date.now()}`,
+                      code: formCode,
+                      name: formName,
+                      category: formCategory,
+                      brand: "Pet Travel",
+                      imageUrl: formImage || "/product-food.svg",
+                      images: formImages.length > 0 ? formImages : [formImage || "/product-food.svg"],
+                      dimensions: formDimensions,
+                      weight: Number(formWeight) || 0,
+                      description: formDescription,
+                      tags: formTags.split(",").map(t => t.trim()).filter(Boolean),
+                      variants: formVariants.map((v) => ({
+                        ...v,
+                        supplierId: formProductSupplier || v.supplierId || suppliers[0]?.id || "sup_pettravel"
+                      }))
+                    };
+
+                    try {
+                      const res = await fetch("/api/products", {
+                        method: editingProduct ? "PUT" : "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(productData)
+                      });
+                      if (res.ok) {
+                        await fetchProducts();
+                        setShowProductForm(false);
+                      } else {
+                        alert("Lỗi khi lưu sản phẩm.");
+                      }
+                    } catch {
+                      alert("Lỗi kết nối máy chủ.");
+                    }
                   }}
                 >
                   Lưu thay đổi

@@ -86,6 +86,10 @@ export interface Product {
   category: string;
   brand: string;
   imageUrl: string;
+  images?: string[];
+  dimensions?: string;
+  weight?: number;
+  description?: string;
   tags: string[];
   variants: ProductVariant[];
 }
