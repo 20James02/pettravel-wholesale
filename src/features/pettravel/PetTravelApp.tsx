@@ -2106,7 +2106,7 @@ export function PetTravelApp() {
                     onClick={() => {
                       setSelectedProduct(product);
                       setSelectedVariantSku(product.variants[0]?.sku || "");
-                      setModalQty(product.variants[0]?.minOrderQty || 1);
+                      setModalQty(1);
                       setSelectedMainImage("");
                     }}
                   >
@@ -5089,7 +5089,7 @@ export function PetTravelApp() {
                             className={`tab-button min-h-[36px] text-xs ${selectedVariantSku === v.sku ? 'bg-orange-500 text-white border-orange-600' : ''}`}
                             onClick={() => {
                               setSelectedVariantSku(v.sku);
-                              setModalQty(v.minOrderQty);
+                              setModalQty(1);
                               if (v.imageUrl) {
                                 setSelectedMainImage(v.imageUrl);
                               }
@@ -5132,10 +5132,6 @@ export function PetTravelApp() {
                             <span>Đơn giá bán sỉ:</span>
                             <span className="text-orange-600 text-lg font-bold">{formatVnd(activeV.wholesalePrice)}</span>
                           </div>
-                          <div className="flex justify-between text-xs text-[#78350F] mt-1 font-semibold">
-                            <span>Số lượng mua sỉ tối thiểu (MOQ):</span>
-                            <span>{activeV.minOrderQty} cái</span>
-                          </div>
                           <div className="flex justify-between text-xs text-[#78350F] font-semibold">
                             <span>Số lượng sẵn có tại kho:</span>
                             <span>{activeV.stock} cái</span>
@@ -5161,7 +5157,7 @@ export function PetTravelApp() {
                             <button
                               type="button"
                               className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 font-bold hover:bg-orange-200 active:scale-90"
-                              onClick={() => setModalQty(prev => Math.max(activeV.minOrderQty, prev - 1))}
+                              onClick={() => setModalQty(prev => Math.max(1, prev - 1))}
                             >
                               -
                             </button>
@@ -5179,7 +5175,7 @@ export function PetTravelApp() {
                             type="button"
                             className="primary-button text-xs py-3 flex-1 justify-center flex items-center gap-2"
                             onClick={() => {
-                              addToCart(activeV.sku, selectedProduct.code, selectedProduct.name, activeV.label, activeV.wholesalePrice, activeV.supplierId);
+                              addToCart(activeV.sku, selectedProduct.code, selectedProduct.name, activeV.label, activeV.wholesalePrice, activeV.supplierId, modalQty);
                               setSelectedProduct(null);
                             }}
                           >
