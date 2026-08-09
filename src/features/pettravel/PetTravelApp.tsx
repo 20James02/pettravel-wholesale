@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import {
   AlertTriangle,
   BarChart3,
@@ -96,6 +95,10 @@ const DEFAULT_POLICY: AdminPolicy = {
   freeShippingThreshold: 5000000, defaultDepositRate: 0.3,
   maxOperatorDiscountRate: 0.08, requireManagerApprovalAbove: 500000
 };
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 function StatusPill({
   tone = "success",
@@ -827,8 +830,8 @@ export function PetTravelApp() {
 
         setFormImage((prev) => prev || uploadedUrls[0]);
       }
-    } catch (error: any) {
-      alert(`Lỗi tải ảnh: ${error.message || "Có lỗi xảy ra."}`);
+    } catch (error: unknown) {
+      alert(`Lỗi tải ảnh: ${getErrorMessage(error, "Có lỗi xảy ra.")}`);
     } finally {
       setIsUploadingImage(false);
       if (fileInputRef.current) {
@@ -898,8 +901,8 @@ export function PetTravelApp() {
           idx === variantIndex ? { ...variant, imageUrl: finalUrl } : variant
         ));
       }
-    } catch (error: any) {
-      alert(`Lỗi tải ảnh phân loại: ${error.message || "Có lỗi xảy ra."}`);
+    } catch (error: unknown) {
+      alert(`Lỗi tải ảnh phân loại: ${getErrorMessage(error, "Có lỗi xảy ra.")}`);
     } finally {
       setVariantUploadingIndex(null);
     }
@@ -1488,6 +1491,38 @@ export function PetTravelApp() {
     }
   }
 
+  async function handlePostOrderAccounting(
+    mode: "post_all" | "post_confirmed_payments" | "recognize_sale" = "post_all"
+  ) {
+    if (!workingOrder?.id) return;
+
+    try {
+      const res = await fetch("/api/admin/accounting/order-posting", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: workingOrder.id,
+          mode,
+          vatRateBps: 0,
+          requireConsumedStock: mode !== "post_confirmed_payments"
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Không thể ghi sổ kế toán cho đơn hàng.");
+        return;
+      }
+
+      await Promise.all([fetchAccountingOverview(), fetchReportsOverview()]);
+      alert(
+        `Đã ghi sổ: ${data.result?.createdEntries ?? 0} bút toán mới, ` +
+        `${data.result?.skippedEntries ?? 0} bút toán đã tồn tại.`
+      );
+    } catch {
+      alert("Không thể kết nối máy chủ khi ghi sổ kế toán.");
+    }
+  }
+
   // Shopping Cart handlers
   function addToCart(variantSku: string, productCode: string, productName: string, variantLabel: string, price: number, supplierId: string, qty: number = 1) {
     setCartItems((prev) => {
@@ -1606,7 +1641,7 @@ export function PetTravelApp() {
         setSelectedOrderId(data.order.id);
         setCartItems(data.order.items.map((item) => ({ ...item })));
         setActiveTab("order");
-      } catch (err) {
+      } catch {
         alert("Lỗi kết nối. Vui lòng kiểm tra mạng và thử lại.");
       }
     }
@@ -3268,6 +3303,32 @@ export function PetTravelApp() {
                         >
                           Chốt đã xuất
                         </button>
+                      </div>
+                      <div className="p-3 rounded-2xl border border-emerald-100 bg-emerald-50/50 flex flex-col gap-2">
+                        <div>
+                          <strong className="text-xs text-emerald-950 block">Ghi sổ kế toán đơn hiện tại</strong>
+                          <p className="text-[10px] muted m-0 mt-0.5">
+                            Tự post thu tiền đã xác nhận, công nợ phải thu, doanh thu và giá vốn nếu đơn đã chốt xuất kho.
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2">
+                          <button
+                            type="button"
+                            className="tab-button text-[10px] py-2 justify-center border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer font-bold rounded-xl"
+                            disabled={!workingOrder.id || !["deposit_confirmed", "paid", "cod_remaining"].includes(workingOrder.paymentStatus)}
+                            onClick={() => handlePostOrderAccounting("post_all")}
+                          >
+                            Ghi sổ toàn bộ đơn
+                          </button>
+                          <button
+                            type="button"
+                            className="tab-button text-[10px] py-2 justify-center border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-50 cursor-pointer font-bold rounded-xl"
+                            disabled={!workingOrder.id || !["deposit_confirmed", "paid", "cod_remaining"].includes(workingOrder.paymentStatus)}
+                            onClick={() => handlePostOrderAccounting("post_confirmed_payments")}
+                          >
+                            Chỉ ghi nhận tiền đã thu
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -5816,8 +5877,8 @@ export function PetTravelApp() {
                         const errData = await res.json();
                         alert(errData.error || "Lỗi khi lưu sản phẩm.");
                       }
-                    } catch (err: any) {
-                      alert(`Lỗi kết nối máy chủ: ${err.message || "Không thể thực hiện yêu cầu."}`);
+                    } catch (err: unknown) {
+                      alert(`Lỗi kết nối máy chủ: ${getErrorMessage(err, "Không thể thực hiện yêu cầu.")}`);
                     }
                   }}
                 >

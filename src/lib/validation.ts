@@ -225,6 +225,18 @@ export const stockReservationCommandSchema = z.object({
   }
 });
 
+export const accountingOrderPostingSchema = z.object({
+  orderId: idSchema,
+  mode: z.enum(["post_all", "post_confirmed_payments", "recognize_sale"]).default("post_all"),
+  vatRateBps: z
+    .number({ invalid_type_error: "VAT phải là số basis points." })
+    .int("VAT phải là số nguyên basis points.")
+    .min(0, "VAT không được âm.")
+    .max(10000, "VAT không được vượt quá 100%.")
+    .default(0),
+  requireConsumedStock: z.boolean().default(true)
+});
+
 export const getValidationErrorMessage = (error: unknown, fallback = "Dữ liệu nhập không hợp lệ."): string => {
   if (error instanceof z.ZodError) {
     return error.issues[0]?.message ?? fallback;

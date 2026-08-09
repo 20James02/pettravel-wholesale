@@ -27,7 +27,9 @@ const customerOrderItemSchema = z.object({
 const createCustomerOrderSchema = z.object({
   items: z.array(customerOrderItemSchema).min(1, "Đơn hàng phải có ít nhất 1 sản phẩm.").max(200, "Đơn hàng tối đa 200 dòng sản phẩm."),
   paymentIntent: z.enum(["deposit_cod", "pay_full"]).default("deposit_cod"),
-  ...recipientSchema.shape
+  recipientName: recipientSchema.shape.recipientName.optional().or(z.literal("")),
+  recipientPhone: phoneSchema.optional().or(z.literal("")),
+  recipientAddress: recipientSchema.shape.recipientAddress.optional().or(z.literal(""))
 });
 
 const customerCommentSchema = z.object({

@@ -515,12 +515,13 @@ export async function saveProduct(product: Product): Promise<void> {
         active: true
       });
       if (varErr) throw varErr;
-    } catch (err: any) {
-      const isMissingColError = err.message && (
-        err.message.includes("image_url") || 
-        err.message.includes("does not exist") || 
-        err.message.includes("column") ||
-        err.message.includes("schema cache")
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "";
+      const isMissingColError = message && (
+        message.includes("image_url") ||
+        message.includes("does not exist") ||
+        message.includes("column") ||
+        message.includes("schema cache")
       );
       if (isMissingColError) {
         console.log("Self-healing DB: Missing variant image_url column. Attempting migration & fail-safe fallback...");
@@ -553,7 +554,7 @@ export async function saveProduct(product: Product): Promise<void> {
           if (safeErr) throw new Error(safeErr.message);
         }
       } else {
-        throw new Error(err.message || String(err));
+        throw new Error(message || String(err));
       }
     }
 
