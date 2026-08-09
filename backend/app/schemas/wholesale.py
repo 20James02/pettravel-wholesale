@@ -79,3 +79,115 @@ class ProductResponse(ProductBase):
 
     class Config:
         from_attributes = True
+
+# --- ORDER ITEM SCHEMAS ---
+class OrderItemCreate(BaseModel):
+    productCode: str
+    productName: str
+    variantSku: str
+    variantLabel: str
+    quantity: int
+    unitPriceSnapshot: int
+    supplierId: Optional[str] = None
+
+class OrderItemResponse(BaseModel):
+    id: str
+    order_id: str
+    product_code: str
+    product_name: str
+    variant_sku: str
+    variant_label: str
+    quantity: int
+    unit_price_snapshot: int
+    supplier_id: str
+
+    class Config:
+        from_attributes = True
+
+# --- ORDER SCHEMAS ---
+class OrderCreate(BaseModel):
+    items: List[OrderItemCreate]
+    recipientName: Optional[str] = None
+    recipientPhone: Optional[str] = None
+    recipientAddress: Optional[str] = None
+    paymentIntent: Optional[str] = "deposit_cod"
+    customerId: Optional[str] = None
+
+class OrderResponse(BaseModel):
+    id: str
+    number: str
+    customer_name: str
+    customer_company: Optional[str] = None
+    customer_id: str
+    commercial_status: str
+    payment_status: str
+    fulfillment_status: str
+    payment_intent: str
+    recipient_name: Optional[str] = None
+    recipient_phone: Optional[str] = None
+    recipient_address: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# --- QUOTE SCHEMAS ---
+class QuoteVersionResponse(BaseModel):
+    id: str
+    order_id: str
+    version: int
+    status: str
+    subtotal: int
+    final_total: int
+    deposit_amount: int
+    cod_remaining: int
+    shipping_fee_option: str
+    expires_at: datetime
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# --- RESERVATION SCHEMAS ---
+class StockReservationResponse(BaseModel):
+    id: str
+    order_id: str
+    variant_sku: str
+    quantity: int
+    status: str
+    reason: Optional[str] = None
+    expires_at: datetime
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# --- JOURNAL SCHEMAS ---
+class JournalLineResponse(BaseModel):
+    id: str
+    line_no: int
+    account_code: str
+    account_name: str
+    debit_amount_vnd: int
+    credit_amount_vnd: int
+    memo: Optional[str] = None
+    order_id: Optional[str] = None
+    supplier_id: Optional[str] = None
+    partner_org_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class JournalEntryResponse(BaseModel):
+    id: str
+    entry_no: str
+    description: str
+    status: str
+    source_type: str
+    source_id: str
+    created_at: datetime
+    posted_at: Optional[datetime] = None
+    lines: List[JournalLineResponse] = []
+
+    class Config:
+        from_attributes = True
