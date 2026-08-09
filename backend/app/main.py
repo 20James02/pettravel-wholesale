@@ -12,26 +12,23 @@ app = FastAPI(
 
 @app.middleware("http")
 async def vercel_path_rewrite(request: Request, call_next):
-    original_path = request.scope.get("path", "")
-    # Try multiple Vercel headers to find original path
-    forwarded = (
-        request.headers.get("x-matched-path")
-        or request.headers.get("x-invoke-path")
-        or request.headers.get("x-forwarded-path")
-        or request.headers.get("x-original-url")
-    )
-    if forwarded:
-        clean = forwarded.split("?")[0]
-        request.scope["path"] = clean
-    elif original_path.startswith("/api/index.py"):
-        request.scope["path"] = original_path.replace("/api/index.py", "", 1) or "/"
-    elif original_path == "/api":
+    """
+    Vercel rewrites /(.*) → /api/$1, so:
+    - User visits /            → function receives /api/
+    - User visits /api/v1/...  → function receives /api/api/v1/...
+    - User visits /debug       → function receives /api/debug
+    
+    We strip the leading /api to restore the original path.
+    """
+    path = request.scope.get("path", "")
+    if path.startswith("/api/"):
+        request.scope["path"] = path[4:]  # strip "/api" prefix, keep "/"
+    elif path == "/api":
         request.scope["path"] = "/"
     
     response = await call_next(request)
-    # Inject debug headers
-    response.headers["X-Debug-Original-Path"] = original_path
-    response.headers["X-Debug-Forwarded"] = str(forwarded)
+    # Temporary debug headers
+    response.headers["X-Debug-Original-Path"] = path
     response.headers["X-Debug-Final-Path"] = request.scope.get("path", "")
     return response
 
