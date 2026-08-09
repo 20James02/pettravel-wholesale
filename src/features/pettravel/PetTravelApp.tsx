@@ -2107,7 +2107,7 @@ export function PetTravelApp() {
                       setSelectedProduct(product);
                       setSelectedVariantSku(product.variants[0]?.sku || "");
                       setModalQty(product.variants[0]?.minOrderQty || 1);
-                      setActiveGalleryIndex(0);
+                      setSelectedMainImage("");
                     }}
                   >
                     <div className="relative aspect-square w-full bg-[#FFFBEB] border-b border-orange-100 shrink-0">
