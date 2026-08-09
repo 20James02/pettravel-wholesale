@@ -340,6 +340,18 @@ export function PetTravelApp() {
     unitPriceSnapshot: number; supplierId: string;
   }>>([]);
 
+  // Persist cart to localStorage (keyed per user)
+  const cartStorageKey = currentUser ? `ptw_cart_${currentUser.id}` : null;
+
+  useEffect(() => {
+    if (!cartStorageKey) return;
+    if (cartItems.length > 0) {
+      localStorage.setItem(cartStorageKey, JSON.stringify(cartItems));
+    } else {
+      localStorage.removeItem(cartStorageKey);
+    }
+  }, [cartItems, cartStorageKey]);
+
   const cartTotalVal = useMemo(() => {
     return cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
   }, [cartItems]);
@@ -915,6 +927,11 @@ export function PetTravelApp() {
         return;
       }
       setCurrentUser(data.user);
+      // Restore persisted cart from localStorage
+      try {
+        const savedCart = localStorage.getItem(`ptw_cart_${data.user.id}`);
+        if (savedCart) setCartItems(JSON.parse(savedCart));
+      } catch { /* ignore corrupted data */ }
       const targetMode = data.user.isAdmin ? "admin" : "customer";
       setMode(targetMode);
       setActiveTab(targetMode === "admin" ? "admin" : "catalog");
@@ -1047,6 +1064,10 @@ export function PetTravelApp() {
 
   /** Logout: clear cookie + reset state */
   async function handleLogout() {
+    // Clear persisted cart before resetting user
+    if (currentUser) {
+      localStorage.removeItem(`ptw_cart_${currentUser.id}`);
+    }
     await fetch("/api/auth/me", { method: "DELETE" });
     setMode("guest");
     setCurrentUser(null);
@@ -1129,6 +1150,11 @@ export function PetTravelApp() {
           const data = await res.json();
           if (data.user) {
             setCurrentUser(data.user);
+            // Restore persisted cart from localStorage
+            try {
+              const savedCart = localStorage.getItem(`ptw_cart_${data.user.id}`);
+              if (savedCart) setCartItems(JSON.parse(savedCart));
+            } catch { /* ignore corrupted data */ }
             const targetMode = data.user.isAdmin ? "admin" : "customer";
             setMode(targetMode);
             setActiveTab(prev => {
@@ -1495,6 +1521,10 @@ export function PetTravelApp() {
         )
         .filter((item) => item.quantity > 0)
     );
+  }
+
+  function removeCartItem(sku: string) {
+    setCartItems((prev) => prev.filter((item) => item.variantSku !== sku));
   }
 
   // 7. Customer submits cart proposal (Initial Confirm or Updated Buy More proposal)
@@ -2238,6 +2268,15 @@ export function PetTravelApp() {
                                   <strong className="text-xs text-[#331B08] block">{formatVnd(item.quantity * item.unitPriceSnapshot)}</strong>
                                   <span className="text-[9px] muted">{formatVnd(item.unitPriceSnapshot)}/cái</span>
                                 </div>
+
+                                <button
+                                  type="button"
+                                  title="Xóa khỏi giỏ"
+                                  className="w-5 h-5 rounded-full bg-red-50 hover:bg-red-100 flex items-center justify-center text-red-500 hover:text-red-700 text-[10px] font-bold transition active:scale-90 cursor-pointer shrink-0"
+                                  onClick={() => removeCartItem(item.variantSku)}
+                                >
+                                  ✕
+                                </button>
                               </div>
                             </div>
                           ))}
