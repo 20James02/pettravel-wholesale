@@ -3,7 +3,7 @@ from typing import AsyncGenerator
 from app.core.config import settings
 
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    settings.async_database_url,
     echo=False,
     future=True,
     pool_pre_ping=True
