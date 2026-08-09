@@ -54,6 +54,13 @@ interface BankTransactionReportRow {
   amount: number | string;
 }
 
+interface StockReservationReportRow {
+  sku_snapshot: string;
+  quantity: number;
+  status: string;
+  expires_at?: string | null;
+}
+
 function latestQuote(order: CustomerOrder) {
   return [...order.quoteVersions].sort((a, b) => b.version - a.version)[0];
 }
@@ -201,6 +208,65 @@ async function readInventory(user: UserAccount, alerts: ReportAlert[]) {
     availableQty,
     defectiveQty,
     inventoryBySku: inventoryBySku.sort((a, b) => b.amountVnd - a.amountVnd).slice(0, 12)
+  };
+}
+
+async function readStockReservations(user: UserAccount, alerts: ReportAlert[]) {
+  const supabase = createSupabaseServiceClient();
+  let query = supabase
+    .from("stock_reservations")
+    .select("sku_snapshot, quantity, status, expires_at")
+    .in("status", ["active", "expired"]);
+
+  if (user.organizationId) {
+    query = query.eq("organization_id", user.organizationId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    alerts.push({
+      severity: "warning",
+      area: "inventory",
+      message: `Chưa đọc được giữ hàng theo đơn: ${error.message}. Hãy chạy supabase/update_v6_stock_reservations.sql.`
+    });
+    return {
+      reservationOpenQty: 0,
+      reservationExpiredQty: 0,
+      reservationsBySku: [] as ReportBreakdownRow[]
+    };
+  }
+
+  const now = new Date().toISOString();
+  const bySku = new Map<string, ReportBreakdownRow>();
+  let openQty = 0;
+  let expiredQty = 0;
+
+  for (const row of (data ?? []) as StockReservationReportRow[]) {
+    const isExpired = row.status === "expired" || Boolean(row.expires_at && row.expires_at < now);
+    if (isExpired) expiredQty += Number(row.quantity ?? 0);
+    if (!isExpired && row.status === "active") openQty += Number(row.quantity ?? 0);
+
+    const current = bySku.get(row.sku_snapshot) ?? {
+      key: row.sku_snapshot,
+      label: row.sku_snapshot,
+      quantity: 0,
+      amountVnd: 0,
+      secondaryAmountVnd: 0
+    };
+    if (!isExpired && row.status === "active") {
+      current.quantity = (current.quantity ?? 0) + Number(row.quantity ?? 0);
+    } else {
+      current.secondaryAmountVnd = (current.secondaryAmountVnd ?? 0) + Number(row.quantity ?? 0);
+    }
+    bySku.set(row.sku_snapshot, current);
+  }
+
+  return {
+    reservationOpenQty: openQty,
+    reservationExpiredQty: expiredQty,
+    reservationsBySku: [...bySku.values()]
+      .sort((a, b) => ((b.quantity ?? 0) + (b.secondaryAmountVnd ?? 0)) - ((a.quantity ?? 0) + (a.secondaryAmountVnd ?? 0)))
+      .slice(0, 12)
   };
 }
 
@@ -447,8 +513,9 @@ export async function getAdminReportsOverview(user: UserAccount): Promise<AdminR
 
   const orders = await getOrders(user);
   const sales = summarizeOrders(orders);
-  const [inventory, accounting, receivables, payables, reconciliation] = await Promise.all([
+  const [inventory, reservations, accounting, receivables, payables, reconciliation] = await Promise.all([
     readInventory(user, alerts),
+    readStockReservations(user, alerts),
     readAccounting(user, alerts),
     readReceivables(user, alerts),
     readPayables(user, alerts),
@@ -467,6 +534,13 @@ export async function getAdminReportsOverview(user: UserAccount): Promise<AdminR
       severity: "warning",
       area: "inventory",
       message: `Đang có ${inventory.defectiveQty} sản phẩm lỗi cần luồng xử lý: trả NCC, sửa/đóng gói lại, thanh lý hoặc ghi giảm.`
+    });
+  }
+  if (reservations.reservationExpiredQty > 0) {
+    alerts.push({
+      severity: "warning",
+      area: "inventory",
+      message: `Có ${reservations.reservationExpiredQty} sản phẩm đang bị giữ hàng quá hạn. Cần release hoặc gia hạn để tồn khả dụng không bị sai.`
     });
   }
   if (accounting.trialBalanceDifferenceVnd !== 0) {
@@ -524,6 +598,8 @@ export async function getAdminReportsOverview(user: UserAccount): Promise<AdminR
       onHandQty: inventory.onHandQty,
       availableQty: inventory.availableQty,
       defectiveQty: inventory.defectiveQty,
+      reservationOpenQty: reservations.reservationOpenQty,
+      reservationExpiredQty: reservations.reservationExpiredQty,
       postedJournalEntries: accounting.postedJournalEntries,
       draftJournalEntries: accounting.draftJournalEntries,
       trialBalanceDebitVnd: accounting.trialBalanceDebitVnd,
@@ -535,6 +611,7 @@ export async function getAdminReportsOverview(user: UserAccount): Promise<AdminR
     receivableByCustomer: receivables.receivableByCustomer,
     payableByPartner: payables.payableByPartner,
     reconciliationByType: reconciliation.reconciliationByType,
+    reservationsBySku: reservations.reservationsBySku,
     inventoryBySku: inventory.inventoryBySku,
     accountingByAccount: accounting.accountingByAccount,
     alerts

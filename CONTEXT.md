@@ -42,6 +42,10 @@ A new journal entry that reverses a previously posted journal entry. Reversal en
 
 An immutable inventory movement that changes warehouse quantity, reserved quantity, or defective quantity for a product variant. Stock movement totals must be derived server-side from an approved operations document.
 
+### Stock Reservation
+
+A temporary hold on available inventory for a customer order. Reserved stock is not shipped yet, but it must reduce available quantity until it is released, consumed by shipment, expired, or cancelled.
+
 ### Defect Report
 
 An operations document recording damaged, expired, missing, or otherwise unsellable stock. Defect reports move quantity out of available inventory and into defective tracking until the business decides to return, write off, or investigate.

@@ -295,6 +295,8 @@ export interface ReportKpis {
   onHandQty: number;
   availableQty: number;
   defectiveQty: number;
+  reservationOpenQty: number;
+  reservationExpiredQty: number;
   postedJournalEntries: number;
   draftJournalEntries: number;
   trialBalanceDebitVnd: number;
@@ -319,6 +321,7 @@ export interface AdminReportsOverview {
   receivableByCustomer: ReportBreakdownRow[];
   payableByPartner: ReportBreakdownRow[];
   reconciliationByType: ReportBreakdownRow[];
+  reservationsBySku: ReportBreakdownRow[];
   inventoryBySku: ReportBreakdownRow[];
   accountingByAccount: ReportBreakdownRow[];
   alerts: ReportAlert[];

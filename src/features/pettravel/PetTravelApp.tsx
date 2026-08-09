@@ -3707,6 +3707,11 @@ export function PetTravelApp() {
                     <span className="text-[10px] muted">Sẵn bán: {reportsOverview.kpis.availableQty} / Tồn thực: {reportsOverview.kpis.onHandQty}</span>
                   </div>
                   <div className="metric">
+                    <span className="muted text-sm font-semibold">Hàng đang giữ</span>
+                    <strong className="text-blue-700">{reportsOverview.kpis.reservationOpenQty}</strong>
+                    <span className="text-[10px] muted">Giữ quá hạn: {reportsOverview.kpis.reservationExpiredQty}</span>
+                  </div>
+                  <div className="metric">
                     <span className="muted text-sm font-semibold">Hàng lỗi</span>
                     <strong className={reportsOverview.kpis.defectiveQty > 0 ? "text-red-700" : "text-green-700"}>{reportsOverview.kpis.defectiveQty}</strong>
                     <span className="text-[10px] muted">Cần luồng trả NCC / ghi giảm / xử lý.</span>
@@ -3820,6 +3825,26 @@ export function PetTravelApp() {
                           </tr>
                         )) : (
                           <tr><td colSpan={4} className="py-6 text-center text-xs text-gray-500">Chưa có batch đối soát hoặc chưa chạy migration v5.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="panel p-4 overflow-x-auto">
+                    <h3 className="text-sm font-bold text-[#331B08] mb-3">Giữ hàng theo SKU</h3>
+                    <table className="variant-table w-full">
+                      <thead>
+                        <tr><th>SKU</th><th>Đang giữ</th><th>Quá hạn</th></tr>
+                      </thead>
+                      <tbody>
+                        {reportsOverview.reservationsBySku.length ? reportsOverview.reservationsBySku.map((row) => (
+                          <tr key={row.key}>
+                            <td className="text-xs font-mono font-bold text-orange-950">{row.label}</td>
+                            <td className="text-xs font-bold text-blue-700">{row.quantity ?? 0}</td>
+                            <td className="text-xs font-bold text-red-700">{row.secondaryAmountVnd ?? 0}</td>
+                          </tr>
+                        )) : (
+                          <tr><td colSpan={3} className="py-6 text-center text-xs text-gray-500">Chưa có giữ hàng theo đơn hoặc chưa chạy migration v6.</td></tr>
                         )}
                       </tbody>
                     </table>
