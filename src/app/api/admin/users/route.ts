@@ -1,15 +1,23 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requirePermission, requireSameOrigin } from "@/server/auth";
-import { getAppUsers, createAppUser } from "@/server/db";
+import { createAppUser, getAppUsers } from "@/server/db";
+import {
+  emailSchema,
+  fullNameSchema,
+  getValidationErrorMessage,
+  optionalCompanySchema,
+  passwordSchema,
+  phoneSchema
+} from "@/lib/validation";
 
 export const runtime = "nodejs";
 
 const createUserSchema = z.object({
-  fullName: z.string().min(2),
-  email: z.string().email(),
-  phone: z.string().min(9),
-  password: z.string().min(12).max(128),
+  fullName: fullNameSchema,
+  email: emailSchema,
+  phone: phoneSchema,
+  password: passwordSchema,
   role: z.enum([
     "super_admin",
     "admin_manager",
@@ -19,7 +27,7 @@ const createUserSchema = z.object({
     "customer_owner",
     "customer_staff"
   ]),
-  company: z.string().optional()
+  company: optionalCompanySchema
 });
 
 export async function GET() {
@@ -34,7 +42,7 @@ export async function GET() {
     const users = await getAppUsers();
     return NextResponse.json({ users });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Không thể lấy danh sách tài khoản.";
+    const msg = getValidationErrorMessage(error, "Không thể lấy danh sách tài khoản.");
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
@@ -49,20 +57,27 @@ export async function POST(request: Request) {
   }
 
   try {
-    const payload = createUserSchema.parse(await request.json());
+    const parsed = createUserSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: getValidationErrorMessage(parsed.error, "Dữ liệu tạo tài khoản không hợp lệ.") },
+        { status: 400 }
+      );
+    }
 
+    const payload = parsed.data;
     await createAppUser({
       email: payload.email,
       fullName: payload.fullName,
       phone: payload.phone,
       passwordRaw: payload.password,
       role: payload.role,
-      company: payload.company
+      company: payload.company || undefined
     });
 
     return NextResponse.json({ success: true, message: "Tạo tài khoản thành công!" });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Không thể tạo tài khoản.";
+    const msg = getValidationErrorMessage(error, "Không thể tạo tài khoản.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser, requirePermission, requireSameOrigin } from "@/server/auth";
 import { getCategories, saveCategories } from "@/server/db";
+import { categoryNameSchema, getValidationErrorMessage } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -24,19 +25,19 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { category } = await req.json();
-    if (!category || typeof category !== "string") {
-      return NextResponse.json({ error: "Tên danh mục không hợp lệ." }, { status: 400 });
-    }
+    const body = await req.json();
+    const category = categoryNameSchema.parse(body.category);
     const currentList = await getCategories();
-    if (currentList.includes(category)) {
+
+    if (currentList.some((item) => item.toLowerCase() === category.toLowerCase())) {
       return NextResponse.json({ error: "Danh mục đã tồn tại." }, { status: 400 });
     }
+
     const updated = [...currentList, category];
     await saveCategories(updated);
     return NextResponse.json({ success: true, categories: updated });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Dữ liệu không hợp lệ.";
+    const msg = getValidationErrorMessage(error, "Tên danh mục không hợp lệ.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
@@ -51,16 +52,23 @@ export async function PUT(req: Request) {
   }
 
   try {
-    const { oldCategory, newCategory } = await req.json();
-    if (!oldCategory || !newCategory) {
-      return NextResponse.json({ error: "Tên danh mục không hợp lệ." }, { status: 400 });
-    }
+    const body = await req.json();
+    const oldCategory = categoryNameSchema.parse(body.oldCategory);
+    const newCategory = categoryNameSchema.parse(body.newCategory);
     const currentList = await getCategories();
+
+    if (!currentList.includes(oldCategory)) {
+      return NextResponse.json({ error: "Danh mục cần sửa không tồn tại." }, { status: 404 });
+    }
+    if (oldCategory.toLowerCase() !== newCategory.toLowerCase() && currentList.some((cat) => cat.toLowerCase() === newCategory.toLowerCase())) {
+      return NextResponse.json({ error: "Tên danh mục mới đã tồn tại." }, { status: 400 });
+    }
+
     const updated = currentList.map((cat) => (cat === oldCategory ? newCategory : cat));
     await saveCategories(updated);
     return NextResponse.json({ success: true, categories: updated });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Dữ liệu không hợp lệ.";
+    const msg = getValidationErrorMessage(error, "Tên danh mục không hợp lệ.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
@@ -75,17 +83,14 @@ export async function DELETE(req: Request) {
   }
 
   try {
-    const { url } = req;
-    const { searchParams } = new URL(url);
-    const category = searchParams.get("category");
-    if (!category) return NextResponse.json({ error: "Thiếu tên danh mục." }, { status: 400 });
-
+    const { searchParams } = new URL(req.url);
+    const category = categoryNameSchema.parse(searchParams.get("category"));
     const currentList = await getCategories();
     const updated = currentList.filter((cat) => cat !== category);
     await saveCategories(updated);
     return NextResponse.json({ success: true, categories: updated });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Dữ liệu không hợp lệ.";
+    const msg = getValidationErrorMessage(error, "Thiếu hoặc sai tên danh mục.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }

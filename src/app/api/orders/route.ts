@@ -1,46 +1,114 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSessionUser, requireSameOrigin } from "@/server/auth";
-import { getOrders, getProducts, saveOrder } from "@/server/db";
+import { normalizeOrderQuoteFinancials } from "@/server/accounting/order-financials";
+import { getAdminPolicy, getOrders, getProducts, saveOrder } from "@/server/db";
 import type { CustomerOrder, OrderComment, OrderItem, PaymentProof } from "@/lib/domain";
+import {
+  getValidationErrorMessage,
+  idSchema,
+  phoneSchema,
+  recipientSchema,
+  shortTextSchema,
+  vndAmountSchema
+} from "@/lib/validation";
 
 export const runtime = "nodejs";
 
 const customerOrderItemSchema = z.object({
-  variantSku: z.string().min(1).max(120),
-  quantity: z.number().int().positive().max(10_000)
+  variantSku: z.string().trim().min(1, "Thiếu SKU sản phẩm.").max(120, "SKU sản phẩm quá dài."),
+  quantity: z
+    .number()
+    .int("Số lượng phải là số nguyên.")
+    .positive("Số lượng phải lớn hơn 0.")
+    .max(10_000, "Số lượng vượt quá giới hạn.")
 }).passthrough();
 
 const createCustomerOrderSchema = z.object({
-  items: z.array(customerOrderItemSchema).min(1).max(200),
+  items: z.array(customerOrderItemSchema).min(1, "Đơn hàng phải có ít nhất 1 sản phẩm.").max(200, "Đơn hàng tối đa 200 dòng sản phẩm."),
   paymentIntent: z.enum(["deposit_cod", "pay_full"]).default("deposit_cod"),
-  recipientName: z.string().trim().min(2).max(120),
-  recipientPhone: z.string().trim().min(8).max(30),
-  recipientAddress: z.string().trim().min(6).max(500)
+  ...recipientSchema.shape
 });
 
 const customerCommentSchema = z.object({
-  id: z.string().min(1).max(120).optional(),
-  message: z.string().trim().min(1).max(2000)
+  id: idSchema.optional(),
+  message: shortTextSchema("Nội dung ghi chú", 1, 2000)
 });
 
 const customerProofSchema = z.object({
-  id: z.string().min(1).max(120),
-  paymentRequestId: z.string().min(1).max(120),
-  fileName: z.string().min(3).max(180),
+  id: idSchema,
+  paymentRequestId: idSchema,
+  fileName: z.string().trim().min(3, "Tên file quá ngắn.").max(180, "Tên file quá dài."),
   uploadedAt: z.string().optional()
 });
 
 const customerOrderUpdateSchema = z.object({
-  id: z.string().min(1).max(120),
+  id: idSchema,
   paymentIntent: z.enum(["deposit_cod", "pay_full"]).optional(),
   invoiceRequested: z.boolean().optional(),
-  recipientName: z.string().trim().min(2).max(120).optional(),
-  recipientPhone: z.string().trim().min(8).max(30).optional(),
-  recipientAddress: z.string().trim().min(6).max(500).optional(),
-  comments: z.array(customerCommentSchema).max(20).optional(),
-  paymentProofs: z.array(customerProofSchema).max(20).optional()
+  recipientName: recipientSchema.shape.recipientName.optional(),
+  recipientPhone: phoneSchema.optional(),
+  recipientAddress: recipientSchema.shape.recipientAddress.optional(),
+  comments: z.array(customerCommentSchema).max(20, "Mỗi lần cập nhật tối đa 20 ghi chú.").optional(),
+  paymentProofs: z.array(customerProofSchema).max(20, "Mỗi lần cập nhật tối đa 20 minh chứng.").optional()
 });
+
+const adminOrderItemSchema = z.object({
+  id: idSchema,
+  productCode: z.string().trim().min(1, "Thiếu mã sản phẩm.").max(80, "Mã sản phẩm quá dài."),
+  productName: shortTextSchema("Tên sản phẩm", 1, 180),
+  variantSku: z.string().trim().min(1, "Thiếu SKU phân loại.").max(120, "SKU phân loại quá dài."),
+  variantLabel: shortTextSchema("Tên phân loại", 1, 120),
+  quantity: z.number().int("Số lượng phải là số nguyên.").positive("Số lượng phải lớn hơn 0.").max(10_000),
+  unitPriceSnapshot: vndAmountSchema("Đơn giá"),
+  supplierId: idSchema
+});
+
+const adminQuoteAdjustmentSchema = z.object({
+  id: idSchema,
+  type: z.enum(["discount", "free_shipping", "offer", "shipping_fee"]),
+  label: shortTextSchema("Tên điều chỉnh", 1, 160),
+  amount: z.number().int("Số tiền điều chỉnh phải là số nguyên VND.").min(-10_000_000_000).max(10_000_000_000),
+  requiresApproval: z.boolean()
+});
+
+const adminQuoteSchema = z.object({
+  id: idSchema,
+  version: z.number().int().positive(),
+  status: z.enum(["draft", "published", "accepted", "superseded"]),
+  subtotal: vndAmountSchema("Tạm tính"),
+  adjustments: z.array(adminQuoteAdjustmentSchema).max(50, "Tối đa 50 điều chỉnh trên một báo giá."),
+  finalTotal: vndAmountSchema("Tổng cuối"),
+  depositAmount: vndAmountSchema("Số tiền cọc"),
+  codRemaining: vndAmountSchema("COD còn lại"),
+  shippingFeeOption: z.enum(["included", "separate_cod"]).optional(),
+  expiresAt: z.string().min(1, "Thiếu hạn báo giá.")
+});
+
+const adminOrderSchema = z.object({
+  id: idSchema,
+  number: z.string().trim().min(1, "Thiếu số đơn hàng.").max(80, "Số đơn hàng quá dài."),
+  customerName: shortTextSchema("Tên khách hàng", 1, 120),
+  customerCompany: shortTextSchema("Tên công ty", 1, 160),
+  customerId: idSchema,
+  assignedStaffId: idSchema.optional(),
+  assignedStaffName: shortTextSchema("Tên nhân viên", 1, 120).optional(),
+  commercialStatus: z.enum(["draft", "submitted", "admin_review", "quoted", "customer_accepted", "locked", "cancelled"]),
+  paymentStatus: z.enum(["unrequested", "deposit_requested", "deposit_uploaded", "deposit_confirmed", "full_requested", "full_uploaded", "paid", "cod_remaining", "refunded"]),
+  fulfillmentStatus: z.enum(["not_started", "supplier_checking", "supplier_confirmed", "packing", "ready_to_ship", "shipped", "delivered"]),
+  paymentIntent: z.enum(["deposit_cod", "pay_full"]),
+  invoiceRequested: z.boolean(),
+  recipientName: recipientSchema.shape.recipientName.optional().or(z.literal("")),
+  recipientPhone: phoneSchema.optional().or(z.literal("")),
+  recipientAddress: recipientSchema.shape.recipientAddress.optional().or(z.literal("")),
+  items: z.array(adminOrderItemSchema).min(1, "Đơn hàng phải có ít nhất 1 sản phẩm.").max(200, "Đơn hàng tối đa 200 dòng sản phẩm."),
+  quoteVersions: z.array(adminQuoteSchema).max(50, "Tối đa 50 phiên bản báo giá."),
+  paymentRequests: z.array(z.unknown()).max(50),
+  paymentProofs: z.array(z.unknown()).max(50),
+  fulfillmentGroups: z.array(z.unknown()).max(50),
+  comments: z.array(z.unknown()).max(200),
+  updatedAt: z.string().min(1)
+}).passthrough();
 
 async function buildCustomerItems(
   rawItems: Array<z.infer<typeof customerOrderItemSchema>>
@@ -54,7 +122,7 @@ async function buildCustomerItems(
     const variant = product?.variants.find((candidate) => candidate.sku === item.variantSku);
 
     if (!product || !variant) {
-      throw new Error(`SKU khong hop le hoac khong kha dung: ${item.variantSku}`);
+      throw new Error(`SKU không hợp lệ hoặc không khả dụng: ${item.variantSku}`);
     }
 
     return {
@@ -70,7 +138,6 @@ async function buildCustomerItems(
   });
 }
 
-// Helper to sanitize orders for customers (masking internal notes/fields)
 function sanitizeOrderForCustomer(order: CustomerOrder): CustomerOrder {
   return {
     ...order,
@@ -78,44 +145,29 @@ function sanitizeOrderForCustomer(order: CustomerOrder): CustomerOrder {
   };
 }
 
-/**
- * GET /api/orders
- * - Admin: returns ALL orders
- * - Customer: returns only their own orders
- */
 export async function GET() {
   const user = await getSessionUser();
 
   if (!user) {
-    return NextResponse.json(
-      { error: "Vui lòng đăng nhập để xem đơn hàng." },
-      { status: 401 }
-    );
+    return NextResponse.json({ error: "Vui lòng đăng nhập để xem đơn hàng." }, { status: 401 });
   }
 
   const orders = await getOrders(user);
-  const safeOrders = user.isAdmin
-    ? orders
-    : orders.map(sanitizeOrderForCustomer);
-
+  const safeOrders = user.isAdmin ? orders : orders.map(sanitizeOrderForCustomer);
   const hasActiveOrder = orders.some(
     (o) =>
       o.customerId === user.id &&
       o.commercialStatus !== "cancelled" &&
       o.fulfillmentStatus !== "delivered"
   );
-  const canCreateOrder = user.isAdmin ? false : !hasActiveOrder;
 
   return NextResponse.json({
     orders: safeOrders,
-    canCreateOrder,
+    canCreateOrder: user.isAdmin ? false : !hasActiveOrder,
     total: safeOrders.length
   });
 }
 
-/**
- * POST /api/orders — Create a new order proposal (Customer only)
- */
 export async function POST(request: Request) {
   try {
     requireSameOrigin(request);
@@ -149,7 +201,6 @@ export async function POST(request: Request) {
   try {
     const body = createCustomerOrderSchema.parse(await request.json());
     const items = await buildCustomerItems(body.items);
-
     const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, "");
     const seq = String(orders.length + 1001);
     const orderNumber = `PTW-${dateStr}-${seq}`;
@@ -186,17 +237,13 @@ export async function POST(request: Request) {
     };
 
     await saveOrder(newOrder, user.id);
-
     return NextResponse.json({ order: sanitizeOrderForCustomer(newOrder) });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Lỗi tạo đơn hàng.";
+    const msg = getValidationErrorMessage(error, "Lỗi tạo đơn hàng.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
 
-/**
- * PUT /api/orders — Update an existing order (Customer or Admin)
- */
 export async function PUT(request: Request) {
   try {
     requireSameOrigin(request);
@@ -212,34 +259,28 @@ export async function PUT(request: Request) {
   try {
     const rawBody = await request.json();
     const updatedOrder: CustomerOrder = user.isAdmin
-      ? rawBody
+      ? (adminOrderSchema.parse(rawBody) as CustomerOrder)
       : ({ id: customerOrderUpdateSchema.parse(rawBody).id } as CustomerOrder);
-    
-    // Find existing order
+
     const orders = await getOrders(user);
     const existing = orders.find((o) => o.id === updatedOrder.id);
     if (!existing) {
       return NextResponse.json({ error: "Đơn hàng không tồn tại." }, { status: 404 });
     }
 
-    // Security check: Customer can only update their own order
     if (!user.isAdmin && existing.customerId !== user.id) {
       return NextResponse.json({ error: "Bạn không có quyền chỉnh sửa đơn hàng này." }, { status: 403 });
     }
 
-    // If customer updates, sanitize input to prevent tampering with admin fields
     let orderToSave = updatedOrder;
     if (user.isAdmin) {
-      // 1. Staff lock check
-      if (existing.assignedStaffId && existing.assignedStaffId !== user.id) {
-        if (user.role !== "super_admin") {
-          return NextResponse.json(
-            { error: `Đơn hàng này đang được xử lý bởi nhân viên khác (${existing.assignedStaffName || "Nhân viên vận hành"}). Bạn không có quyền chỉnh sửa.` },
-            { status: 403 }
-          );
-        }
+      if (existing.assignedStaffId && existing.assignedStaffId !== user.id && user.role !== "super_admin") {
+        return NextResponse.json(
+          { error: `Đơn hàng này đang được xử lý bởi nhân viên khác (${existing.assignedStaffName || "Nhân viên vận hành"}). Bạn không có quyền chỉnh sửa.` },
+          { status: 403 }
+        );
       }
-      // 2. Auto-assign staff if not already assigned
+
       if (!existing.assignedStaffId) {
         orderToSave = {
           ...updatedOrder,
@@ -247,6 +288,7 @@ export async function PUT(request: Request) {
           assignedStaffName: user.name
         };
       }
+      orderToSave = normalizeOrderQuoteFinancials(orderToSave, await getAdminPolicy());
     } else {
       const customerPayload = customerOrderUpdateSchema.parse(rawBody);
       const existingPaymentRequestIds = new Set(existing.paymentRequests.map((request) => request.id));
@@ -298,11 +340,10 @@ export async function PUT(request: Request) {
     }
 
     await saveOrder(orderToSave, user.id);
-
     const result = user.isAdmin ? orderToSave : sanitizeOrderForCustomer(orderToSave);
     return NextResponse.json({ order: result });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Lỗi cập nhật đơn hàng.";
+    const msg = getValidationErrorMessage(error, "Lỗi cập nhật đơn hàng.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }

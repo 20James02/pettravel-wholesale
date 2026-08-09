@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionUser, requirePermission, requireSameOrigin } from "@/server/auth";
-import { getProducts, saveProduct, deleteProduct } from "@/server/db";
+import { deleteProduct, getProducts, saveProduct } from "@/server/db";
+import { getValidationErrorMessage, idSchema, productSchema } from "@/lib/validation";
 import type { Product } from "@/lib/domain";
 
 export const runtime = "nodejs";
@@ -29,12 +30,21 @@ export async function POST(req: Request) {
   }
 
   try {
-    const product: Product = await req.json();
-    if (!product.id) product.id = `prod_${Date.now()}`;
+    const parsed = productSchema.parse(await req.json());
+    const product: Product = {
+      ...parsed,
+      id: parsed.id || `prod_${Date.now()}`,
+      imageUrl: parsed.imageUrl || "/product-food.svg",
+      tags: parsed.tags ?? [],
+      variants: parsed.variants.map((variant, index) => ({
+        ...variant,
+        id: variant.id || `var_${Date.now()}_${index}`
+      }))
+    };
     await saveProduct(product);
     return NextResponse.json({ success: true, product });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Dữ liệu không hợp lệ.";
+    const msg = getValidationErrorMessage(error, "Dữ liệu sản phẩm không hợp lệ.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
@@ -49,11 +59,11 @@ export async function PUT(req: Request) {
   }
 
   try {
-    const product: Product = await req.json();
+    const product = productSchema.required({ id: true }).parse(await req.json()) as Product;
     await saveProduct(product);
     return NextResponse.json({ success: true, product });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Dữ liệu không hợp lệ.";
+    const msg = getValidationErrorMessage(error, "Dữ liệu sản phẩm không hợp lệ.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
@@ -68,15 +78,12 @@ export async function DELETE(req: Request) {
   }
 
   try {
-    const { url } = req;
-    const { searchParams } = new URL(url);
-    const id = searchParams.get("id");
-    if (!id) return NextResponse.json({ error: "Thiếu ID sản phẩm." }, { status: 400 });
-
+    const { searchParams } = new URL(req.url);
+    const id = idSchema.parse(searchParams.get("id"));
     await deleteProduct(id);
     return NextResponse.json({ success: true });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Dữ liệu không hợp lệ.";
+    const msg = getValidationErrorMessage(error, "Thiếu hoặc sai ID sản phẩm.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }

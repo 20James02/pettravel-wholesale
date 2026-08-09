@@ -25,5 +25,6 @@ BEGIN
 END
 $$;
 
--- 2. Add assigned_staff_id to customer_orders for locking active sessions
-ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS assigned_staff_id uuid REFERENCES app_users(id) ON DELETE SET NULL;
+-- 2. Add assigned_staff_id to customer_orders for locking active sessions.
+-- app_users.id is text in the current baseline schema.
+ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS assigned_staff_id text REFERENCES app_users(id) ON DELETE SET NULL;

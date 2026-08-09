@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth, requireSameOrigin } from "@/server/auth";
 import { updateUserProfile } from "@/server/db";
+import { fullNameSchema, getValidationErrorMessage, optionalUrlSchema, passwordSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
 const updateProfileSchema = z.object({
-  fullName: z.string().min(2).optional(),
-  avatarUrl: z.string().url().or(z.string().length(0)).optional(),
-  newPassword: z.string().min(12).max(128).optional()
+  fullName: fullNameSchema.optional(),
+  avatarUrl: optionalUrlSchema.optional(),
+  newPassword: passwordSchema.optional()
 });
 
 export async function PUT(request: Request) {
@@ -22,8 +23,15 @@ export async function PUT(request: Request) {
   }
 
   try {
-    const payload = updateProfileSchema.parse(await request.json());
+    const parsed = updateProfileSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: getValidationErrorMessage(parsed.error, "Dữ liệu cập nhật không hợp lệ.") },
+        { status: 400 }
+      );
+    }
 
+    const payload = parsed.data;
     await updateUserProfile(user.id, {
       fullName: payload.fullName,
       avatarUrl: payload.avatarUrl || undefined,
@@ -32,7 +40,7 @@ export async function PUT(request: Request) {
 
     return NextResponse.json({ success: true, message: "Cập nhật thông tin tài khoản thành công!" });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Không thể cập nhật thông tin.";
+    const msg = getValidationErrorMessage(error, "Không thể cập nhật thông tin.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }

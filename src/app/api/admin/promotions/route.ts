@@ -1,18 +1,9 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { requireAdmin, requirePermission, requireSameOrigin } from "@/server/auth";
 import { createSupabaseServiceClient } from "@/server/supabase";
+import { getValidationErrorMessage, promotionsPolicySchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
-
-const promotionsSchema = z.object({
-  freeShippingThreshold: z.number().nonnegative(),
-  defaultDepositRate: z.number().min(0).max(1),
-  maxOperatorDiscountRate: z.number().min(0).max(1),
-  requireManagerApprovalAbove: z.number().nonnegative(),
-  giftThreshold: z.number().nonnegative().optional(),
-  giftName: z.string().optional()
-});
 
 export async function GET() {
   try {
@@ -30,7 +21,6 @@ export async function GET() {
     .maybeSingle();
 
   if (error || !data) {
-    // Default fallback policy settings
     return NextResponse.json({
       policy: {
         freeShippingThreshold: 5000000,
@@ -56,7 +46,7 @@ export async function PUT(request: Request) {
   }
 
   try {
-    const payload = promotionsSchema.parse(await request.json());
+    const payload = promotionsPolicySchema.parse(await request.json());
     const supabase = createSupabaseServiceClient();
 
     const { error } = await supabase.from("app_settings").upsert({
@@ -68,7 +58,7 @@ export async function PUT(request: Request) {
 
     return NextResponse.json({ success: true, policy: payload });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Dữ liệu không hợp lệ.";
+    const msg = getValidationErrorMessage(error, "Dữ liệu cấu hình không hợp lệ.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }

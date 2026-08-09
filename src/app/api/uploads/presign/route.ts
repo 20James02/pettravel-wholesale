@@ -3,14 +3,20 @@ import { z } from "zod";
 import { getOrders } from "@/server/db";
 import { createR2UploadUrl } from "@/server/r2";
 import { hasPermission, requireAuth, requireSameOrigin } from "@/server/auth";
+import { getValidationErrorMessage } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
 const presignSchema = z.object({
-  orderId: z.string().min(3).max(64),
-  fileName: z.string().min(3).max(180),
+  orderId: z.string().trim().min(3, "Mã đơn hàng không hợp lệ.").max(64, "Mã đơn hàng quá dài."),
+  fileName: z
+    .string()
+    .trim()
+    .min(3, "Tên file quá ngắn.")
+    .max(180, "Tên file không được vượt quá 180 ký tự.")
+    .refine((value) => !/[\\/]/.test(value), "Tên file không được chứa đường dẫn."),
   contentType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]),
-  fileSizeBytes: z.number().int().positive().max(10 * 1024 * 1024),
+  fileSizeBytes: z.number().int("Dung lượng file không hợp lệ.").positive("Dung lượng file phải lớn hơn 0.").max(10 * 1024 * 1024, "File không được vượt quá 10MB."),
   purpose: z.enum(["payment-proof", "invoice", "product-image"])
 });
 
@@ -33,7 +39,7 @@ export async function POST(request: Request) {
     const result = await createR2UploadUrl(payload);
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to create upload URL.";
+    const message = getValidationErrorMessage(error, "Không thể tạo đường dẫn upload.");
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }

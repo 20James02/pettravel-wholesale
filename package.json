@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/server/accounting/engine.test.ts src/server/accounting/order-financials.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.637.0",

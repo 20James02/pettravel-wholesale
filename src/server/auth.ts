@@ -23,21 +23,29 @@ const ROLE_PERMISSIONS: Record<RoleKey, PermissionKey[]> = {
     "supplier.read", "supplier.write",
     "order.read", "order.quote", "order.adjust",
     "order.confirm_payment", "order.ship",
-    "order.comment_internal", "rbac.write"
+    "order.comment_internal",
+    "accounting.read", "accounting.write", "accounting.post",
+    "accounting.close_period", "accounting.export",
+    "rbac.write"
   ],
   admin_manager: [
     "catalog.read", "catalog.write",
     "supplier.read", "supplier.write",
     "order.read", "order.quote", "order.adjust",
     "order.confirm_payment", "order.ship",
-    "order.comment_internal"
+    "order.comment_internal",
+    "accounting.read", "accounting.write", "accounting.post",
+    "accounting.close_period", "accounting.export"
   ],
   order_operator: [
     "catalog.read", "supplier.read",
     "order.read", "order.quote", "order.adjust",
     "order.ship", "order.comment_internal"
   ],
-  accountant: ["order.read", "order.confirm_payment", "order.comment_internal"],
+  accountant: [
+    "order.read", "order.confirm_payment", "order.comment_internal",
+    "accounting.read", "accounting.write", "accounting.post", "accounting.export"
+  ],
   warehouse: ["catalog.read", "supplier.read", "order.read", "order.ship", "order.comment_internal"],
   customer_owner: ["catalog.read", "order.read"],
   customer_staff: ["catalog.read", "order.read"]

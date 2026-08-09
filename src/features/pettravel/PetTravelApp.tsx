@@ -45,6 +45,22 @@ import type {
   ProductVariant
 } from "@/lib/domain";
 import { formatVnd, percent } from "@/lib/money";
+import {
+  categoryNameSchema,
+  emailSchema,
+  fullNameSchema,
+  getValidationErrorMessage,
+  loginPasswordSchema,
+  optionalUrlSchema,
+  passwordSchema,
+  phoneSchema,
+  productSchema,
+  recipientSchema,
+  shortTextSchema,
+  supplierSchema,
+  promotionsPolicySchema,
+  vndAmountSchema
+} from "@/lib/validation";
 
 type AppMode = "guest" | "customer" | "admin";
 type TabKey = "catalog" | "cart" | "order" | "admin" | "admin_products" | "admin_reconciliation" | "admin_invoices" | "settings" | "admin_suppliers" | "admin_categories" | "admin_users" | "profile" | "admin_promotions";
@@ -374,33 +390,48 @@ export function PetTravelApp() {
 
   async function handleAddCategory(e: React.FormEvent) {
     e.preventDefault();
-    if (!newCategoryName.trim()) return;
     try {
+      const category = categoryNameSchema.parse(newCategoryName);
       const res = await fetch("/api/categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ category: newCategoryName.trim() })
+        body: JSON.stringify({ category })
       });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Không thể thêm danh mục.");
+        return;
+      }
       if (res.ok) {
         setNewCategoryName("");
         await fetchCategories();
       }
-    } catch { /* silent */ }
+    } catch (error) {
+      alert(getValidationErrorMessage(error, "Tên danh mục không hợp lệ."));
+    }
   }
 
   async function handleEditCategory(oldCat: string, newCat: string) {
-    if (!newCat.trim()) return;
     try {
+      const oldCategory = categoryNameSchema.parse(oldCat);
+      const newCategory = categoryNameSchema.parse(newCat);
       const res = await fetch("/api/categories", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ oldCategory: oldCat, newCategory: newCat.trim() })
+        body: JSON.stringify({ oldCategory, newCategory })
       });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Không thể sửa danh mục.");
+        return;
+      }
       if (res.ok) {
         setEditingCategoryOld(null);
         await fetchCategories();
       }
-    } catch { /* silent */ }
+    } catch (error) {
+      alert(getValidationErrorMessage(error, "Tên danh mục không hợp lệ."));
+    }
   }
 
   async function handleDeleteCategory(cat: string) {
@@ -430,10 +461,11 @@ export function PetTravelApp() {
       adminOnly: supAdminOnly
     };
     try {
+      const validatedSupplier = supplierSchema.parse(supplierData) as Supplier;
       const res = await fetch("/api/suppliers", {
         method: editingSupplier ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(supplierData)
+        body: JSON.stringify(validatedSupplier)
       });
       if (res.ok) {
         setShowSupplierForm(false);
@@ -449,8 +481,13 @@ export function PetTravelApp() {
           const suppData = await suppRes.json();
           setSuppliers(suppData.suppliers ?? []);
         }
+      } else {
+        const data = await res.json();
+        alert(data.error || "Không thể lưu nhà cung cấp.");
       }
-    } catch { /* silent */ }
+    } catch (error) {
+      alert(getValidationErrorMessage(error, "Dữ liệu nhà cung cấp không hợp lệ."));
+    }
   }
 
   async function handleDeleteSupplier(id: string, name: string) {
@@ -471,15 +508,20 @@ export function PetTravelApp() {
   }
 
   const handleAddImage = () => {
-    if (!newImageUrlInput.trim()) return;
-    if (!formImages.includes(newImageUrlInput.trim())) {
-      const updated = [...formImages, newImageUrlInput.trim()];
-      setFormImages(updated);
-      if (!formImage || formImages.length === 0) {
-        setFormImage(newImageUrlInput.trim());
+    try {
+      const imageUrl = optionalUrlSchema.parse(newImageUrlInput);
+      if (!imageUrl) return;
+      if (!formImages.includes(imageUrl)) {
+        const updated = [...formImages, imageUrl];
+        setFormImages(updated);
+        if (!formImage || formImages.length === 0) {
+          setFormImage(imageUrl);
+        }
       }
+      setNewImageUrlInput("");
+    } catch (error) {
+      alert(getValidationErrorMessage(error, "Đường dẫn ảnh không hợp lệ."));
     }
-    setNewImageUrlInput("");
   };
 
   /** Login via credentials (email + password) */
@@ -491,10 +533,12 @@ export function PetTravelApp() {
     }
     setIsLoading(true);
     try {
+      const email = emailSchema.parse(loginEmail);
+      const password = loginPasswordSchema.parse(loginPassword);
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginEmail.trim(), password: loginPassword })
+        body: JSON.stringify({ email, password })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -533,18 +577,23 @@ export function PetTravelApp() {
       alert("Vui lòng điền đầy đủ các thông tin bắt buộc!");
       return;
     }
+    if (createPassword.length < 12) {
+      alert("Mật khẩu ban đầu phải có ít nhất 12 ký tự. Ví dụ: Hanni@0601PT");
+      return;
+    }
     try {
+      const payload = {
+        fullName: fullNameSchema.parse(createFullName),
+        email: emailSchema.parse(createEmail),
+        phone: phoneSchema.parse(createPhone),
+        password: passwordSchema.parse(createPassword),
+        role: createRole,
+        company: createRole === "customer_owner" ? shortTextSchema("Tên tổ chức", 2, 160).parse(createCompany) : undefined
+      };
       const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fullName: createFullName.trim(),
-          email: createEmail.trim(),
-          phone: createPhone.trim(),
-          password: createPassword,
-          role: createRole,
-          company: createRole === "customer_owner" ? createCompany.trim() : undefined
-        })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (!res.ok) {
@@ -568,9 +617,13 @@ export function PetTravelApp() {
     e.preventDefault();
     try {
       const payload: ProfileUpdatePayload = {};
-      if (profileFullName.trim()) payload.fullName = profileFullName.trim();
-      if (profileAvatarUrl.trim()) payload.avatarUrl = profileAvatarUrl.trim();
-      if (profileNewPassword) payload.newPassword = profileNewPassword;
+      if (profileFullName.trim()) payload.fullName = fullNameSchema.parse(profileFullName);
+      if (profileAvatarUrl.trim()) payload.avatarUrl = optionalUrlSchema.parse(profileAvatarUrl);
+      if (profileNewPassword && profileNewPassword.length < 12) {
+        alert("Mật khẩu mới phải có ít nhất 12 ký tự.");
+        return;
+      }
+      if (profileNewPassword) payload.newPassword = passwordSchema.parse(profileNewPassword);
 
       const res = await fetch("/api/user/profile", {
         method: "PUT",
@@ -602,7 +655,7 @@ export function PetTravelApp() {
       const res = await fetch("/api/admin/promotions", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(promotionsPolicy)
+        body: JSON.stringify(promotionsPolicySchema.parse(promotionsPolicy))
       });
       const data = await res.json();
       if (!res.ok) {
@@ -674,7 +727,7 @@ export function PetTravelApp() {
   function handleAdminQtyChange(itemId: string, newQty: number) {
     setAdminOrderItems((prev) =>
       prev.map((item) =>
-        item.id === itemId ? { ...item, quantity: Math.max(0, newQty) } : item
+        item.id === itemId ? { ...item, quantity: Math.max(1, Math.min(10_000, Math.trunc(newQty || 1))) } : item
       )
     );
     setIsOrderModified(true);
@@ -809,6 +862,23 @@ export function PetTravelApp() {
 
   // 2. Admin publishes a new Quote Version (Gửi khách xác nhận)
   async function handlePublishQuote() {
+    try {
+      adminOrderItems.forEach((item) => {
+        vndAmountSchema("Đơn giá").parse(item.unitPriceSnapshot);
+        if (!Number.isInteger(item.quantity) || item.quantity <= 0 || item.quantity > 10_000) {
+          throw new Error(`Số lượng của ${item.productName} phải từ 1 đến 10.000.`);
+        }
+      });
+      vndAmountSchema("Chiết khấu").parse(adminDiscount);
+      vndAmountSchema("Phí ship").parse(adminShippingFee);
+      if (customDepositInput.trim()) {
+        vndAmountSchema("Số tiền cọc tùy chỉnh").parse(Number(customDepositInput));
+      }
+    } catch (error) {
+      alert(getValidationErrorMessage(error, "Dữ liệu báo giá không hợp lệ."));
+      return;
+    }
+
     const subtotal = adminOrderItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
 
     const adjustments = [];
@@ -1008,7 +1078,7 @@ export function PetTravelApp() {
     setCartItems((prev) =>
       prev
         .map((item) =>
-          item.variantSku === sku ? { ...item, quantity: Math.max(0, item.quantity + delta) } : item
+          item.variantSku === sku ? { ...item, quantity: Math.max(0, Math.min(10_000, item.quantity + delta)) } : item
         )
         .filter((item) => item.quantity > 0)
     );
@@ -1016,6 +1086,19 @@ export function PetTravelApp() {
 
   // 7. Customer submits cart proposal (Initial Confirm or Updated Buy More proposal)
   async function handleSubmitCartProposal() {
+    try {
+      if (cartItems.length === 0) throw new Error("Giỏ hàng chưa có sản phẩm.");
+      cartItems.forEach((item) => {
+        if (!Number.isInteger(item.quantity) || item.quantity <= 0 || item.quantity > 10_000) {
+          throw new Error(`Số lượng của ${item.productName} phải từ 1 đến 10.000.`);
+        }
+        vndAmountSchema("Đơn giá").parse(item.unitPriceSnapshot);
+      });
+    } catch (error) {
+      alert(getValidationErrorMessage(error, "Dữ liệu giỏ hàng không hợp lệ."));
+      return;
+    }
+
     const subtotal = cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
     const isDeposit = workingOrder.paymentIntent === "deposit_cod";
     const initialDeposit = isDeposit ? Math.round(subtotal * adminPolicy.defaultDepositRate) : subtotal;
@@ -1099,6 +1182,12 @@ export function PetTravelApp() {
       return;
     }
 
+    const recipientValidation = recipientSchema.safeParse({ recipientName, recipientPhone, recipientAddress });
+    if (!recipientValidation.success) {
+      alert(getValidationErrorMessage(recipientValidation.error, "Thông tin giao nhận không hợp lệ."));
+      return;
+    }
+
     const activeQuote = workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1];
     if (!activeQuote) return;
 
@@ -1127,9 +1216,9 @@ export function PetTravelApp() {
 
     const updatedOrder: CustomerOrder = {
       ...workingOrder,
-      recipientName,
-      recipientPhone,
-      recipientAddress,
+      recipientName: recipientValidation.data.recipientName,
+      recipientPhone: recipientValidation.data.recipientPhone,
+      recipientAddress: recipientValidation.data.recipientAddress,
       commercialStatus: "locked",
       paymentStatus: isDeposit ? "deposit_uploaded" : "full_uploaded", // directly upload simulated receipt
       paymentRequests: [...updatedRequests, newRequest],
@@ -1990,7 +2079,7 @@ export function PetTravelApp() {
                       placeholder="••••••••"
                       value={profileNewPassword}
                       onChange={(e) => setProfileNewPassword(e.target.value)}
-                      minLength={6}
+                      minLength={12}
                     />
                   </div>
 
@@ -3214,13 +3303,16 @@ export function PetTravelApp() {
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10px] font-bold text-orange-950/80 uppercase">Mật khẩu ban đầu</label>
                     <input
-                      type="text"
+                      type="password"
                       className="text-input text-sm py-2 px-3"
+                      placeholder="Tối thiểu 12 ký tự"
                       value={createPassword}
                       onChange={(e) => setCreatePassword(e.target.value)}
                       required
-                      minLength={6}
+                      minLength={12}
+                      autoComplete="new-password"
                     />
+                    <span className="text-[10px] muted">Mật khẩu cần tối thiểu 12 ký tự để đảm bảo an toàn.</span>
                   </div>
 
                   <div className="flex flex-col gap-1.5">
@@ -4090,11 +4182,18 @@ export function PetTravelApp() {
                       }))
                     };
 
+                    const preflightProduct = productSchema.safeParse(productData);
+                    if (!preflightProduct.success) {
+                      alert(getValidationErrorMessage(preflightProduct.error, "Dữ liệu sản phẩm không hợp lệ."));
+                      return;
+                    }
+
                     try {
+                      const validatedProduct = productSchema.parse(productData);
                       const res = await fetch("/api/products", {
                         method: editingProduct ? "PUT" : "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(productData)
+                        body: JSON.stringify(validatedProduct)
                       });
                       if (res.ok) {
                         await fetchProducts();

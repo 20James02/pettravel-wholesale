@@ -18,6 +18,11 @@ export type PermissionKey =
   | "order.confirm_payment"
   | "order.ship"
   | "order.comment_internal"
+  | "accounting.read"
+  | "accounting.write"
+  | "accounting.post"
+  | "accounting.close_period"
+  | "accounting.export"
   | "rbac.write";
 
 export type CommercialStatus =
@@ -202,4 +207,28 @@ export interface AdminPolicy {
   defaultDepositRate: number;
   maxOperatorDiscountRate: number;
   requireManagerApprovalAbove: number;
+}
+
+export type AccountingPeriodStatus = "open" | "closed";
+export type JournalEntryStatus = "draft" | "posted" | "void";
+
+export interface JournalEntrySummary {
+  id: string;
+  entryNo: string;
+  description: string;
+  status: JournalEntryStatus;
+  sourceType: string;
+  sourceId: string;
+  createdAt: string;
+  postedAt?: string;
+}
+
+export interface AccountingOverview {
+  periodsTotal: number;
+  openPeriods: number;
+  closedPeriods: number;
+  draftEntries: number;
+  postedEntries: number;
+  voidEntries: number;
+  recentEntries: JournalEntrySummary[];
 }
