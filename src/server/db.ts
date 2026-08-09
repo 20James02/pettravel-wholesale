@@ -34,6 +34,7 @@ interface ProductVariantRow {
   id: string;
   sku: string;
   label: string;
+  image_url?: string | null;
   active: boolean;
   supplier_offers?: SupplierOfferRow[] | null;
 }
@@ -424,6 +425,7 @@ export async function getProducts(role: "guest" | "customer" | "admin"): Promise
         id,
         sku,
         label,
+        image_url,
         active,
         supplier_offers (
           id,
@@ -453,7 +455,8 @@ export async function getProducts(role: "guest" | "customer" | "admin"): Promise
           wholesalePrice: Number(so.wholesale_price),
           minOrderQty: Number(so.min_order_qty),
           stock: Number(so.stock_qty),
-          supplierId: role === "customer" ? "sup_pettravel" : so.supplier_id // Strip supplier details for customers
+          supplierId: role === "customer" ? "sup_pettravel" : so.supplier_id, // Strip supplier details for customers
+          imageUrl: pv.image_url ?? undefined
         }));
       }) ?? [];
 
@@ -502,6 +505,7 @@ export async function saveProduct(product: Product): Promise<void> {
       product_id: product.id,
       sku: v.sku,
       label: v.label,
+      image_url: v.imageUrl || null,
       active: true
     });
     if (varErr) throw new Error(varErr.message);
@@ -1124,6 +1128,9 @@ export async function ensureDbInitialized(supabase = createSupabaseServiceClient
   isDbInitialized = true;
 
   const migrationSql = `
+    -- Thêm trường image_url vào bảng product_variants
+    ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS image_url text;
+
     -- 1. Thêm trường phone, password_hash, và avatar_url vào bảng app_users
     ALTER TABLE app_users ADD COLUMN IF NOT EXISTS phone text;
     ALTER TABLE app_users ADD COLUMN IF NOT EXISTS password_hash text;

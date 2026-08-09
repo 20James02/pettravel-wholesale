@@ -86,6 +86,7 @@ export interface ProductVariant {
   minOrderQty: number;
   stock: number;
   supplierId: string;
+  imageUrl?: string;
 }
 
 export interface Product {

@@ -158,6 +158,13 @@ export function PetTravelApp() {
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [isUploadingImage, setIsUploadingImage] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Popup form states
+  const [showOperationsForm, setShowOperationsForm] = useState<boolean>(false);
+  const [showCategoryForm, setShowCategoryForm] = useState<boolean>(false);
+  const [showUserForm, setShowUserForm] = useState<boolean>(false);
+  const [showPromotionsForm, setShowPromotionsForm] = useState<boolean>(false);
+  const [variantUploadingIndex, setVariantUploadingIndex] = useState<number | null>(null);
   const [workingOrder, setWorkingOrder] = useState<CustomerOrder>(EMPTY_ORDER);
 
   // Auth & data state
@@ -548,6 +555,7 @@ export function PetTravelApp() {
       setOperationExpenseAmount(0);
       setOperationPostNow(false);
       await fetchOperationsOverview();
+      setShowOperationsForm(false);
     } catch {
       setOperationsError("Không thể kết nối máy chủ khi tạo chứng từ.");
     } finally {
@@ -572,6 +580,7 @@ export function PetTravelApp() {
       if (res.ok) {
         setNewCategoryName("");
         await fetchCategories();
+        setShowCategoryForm(false);
       }
     } catch (error) {
       alert(getValidationErrorMessage(error, "Tên danh mục không hợp lệ."));
@@ -757,6 +766,65 @@ export function PetTravelApp() {
     }
   };
 
+  const handleVariantImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, variantIndex: number) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+    if (!allowedTypes.has(file.type)) {
+      alert("Định dạng ảnh không hỗ trợ! Vui lòng chọn ảnh JPG, PNG hoặc WEBP.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Dung lượng ảnh quá lớn! File không được vượt quá 5MB.");
+      return;
+    }
+
+    setVariantUploadingIndex(variantIndex);
+    try {
+      const presignRes = await fetch("/api/uploads/presign", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          orderId: "catalog",
+          fileName: file.name,
+          contentType: file.type,
+          fileSizeBytes: file.size,
+          purpose: "product-image"
+        })
+      });
+
+      if (!presignRes.ok) {
+        const errData = await presignRes.json();
+        throw new Error(errData.error || "Không thể lấy link tải lên.");
+      }
+
+      const { uploadUrl, publicUrl } = await presignRes.json();
+
+      const uploadRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": file.type,
+        },
+        body: file
+      });
+
+      if (!uploadRes.ok) {
+        throw new Error("Lỗi khi tải file lên R2.");
+      }
+
+      setFormVariants((prev) => prev.map((variant, idx) => 
+        idx === variantIndex ? { ...variant, imageUrl: publicUrl } : variant
+      ));
+    } catch (error: any) {
+      alert(`Lỗi tải ảnh phân loại: ${error.message || "Có lỗi xảy ra."}`);
+    } finally {
+      setVariantUploadingIndex(null);
+    }
+  };
+
   /** Login via credentials (email + password) */
   async function handleCredentialsLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -843,6 +911,7 @@ export function PetTravelApp() {
       setCreatePassword("");
       setCreateCompany("");
       await fetchUsers();
+      setShowUserForm(false);
     } catch {
       alert("Lỗi kết nối.");
     }
@@ -900,6 +969,7 @@ export function PetTravelApp() {
       }
       alert("Lưu cấu hình ưu đãi thành công!");
       await fetchPromotions();
+      setShowPromotionsForm(false);
     } catch {
       alert("Lỗi kết nối.");
     }
@@ -1973,7 +2043,7 @@ export function PetTravelApp() {
                     }}
                   >
                     <div className="relative aspect-square w-full bg-[#FFFBEB] border-b border-orange-100 shrink-0">
-                      <Image src={product.imageUrl} alt={product.name} fill className="object-cover" />
+                      <img src={product.imageUrl} alt={product.name} className="w-full h-full object-cover" />
                       <span className="absolute top-2 left-2 bg-[#FFFDF9] border border-orange-100 text-[9px] px-2 py-0.5 rounded-full font-bold text-orange-950 shadow-sm z-10">
                         {product.category}
                       </span>
@@ -2042,7 +2112,7 @@ export function PetTravelApp() {
                         {/* Header sản phẩm */}
                         <div className="flex items-center gap-3 pb-2 border-b border-dashed border-orange-100">
                           <div className="relative w-10 h-10 rounded-xl bg-orange-50 overflow-hidden flex items-center justify-center border border-orange-100 shrink-0">
-                            <Image src={group.productImage} alt={group.productName} fill className="object-cover" />
+                            <img src={group.productImage} alt={group.productName} className="w-full h-full object-cover" />
                           </div>
                           <div>
                             <strong className="text-xs text-[#331B08] block">{group.productName}</strong>
@@ -2798,7 +2868,7 @@ export function PetTravelApp() {
                                 <tr key={item.id} className={item.quantity === 0 ? "opacity-50 bg-gray-50/50" : ""}>
                                   <td className="w-16">
                                     <div className="relative w-10 h-10 rounded-xl overflow-hidden border bg-orange-50 flex items-center justify-center p-1 shrink-0">
-                                      <Image src={image} alt={item.productName} fill className="object-cover" />
+                                      <img src={image} alt={item.productName} className="w-full h-full object-cover" />
                                     </div>
                                     <span className="text-[8px] font-mono font-bold text-orange-900 block mt-1 text-center">{item.variantSku}</span>
                                   </td>
@@ -3136,7 +3206,7 @@ export function PetTravelApp() {
                     <tr key={p.id}>
                       <td className="w-16">
                         <div className="relative w-12 h-12 rounded-xl overflow-hidden border bg-orange-50 flex items-center justify-center p-1">
-                          <Image src={p.imageUrl} alt={p.name} fill className="object-contain" />
+                          <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain" />
                         </div>
                         <span className="text-[10px] font-mono font-bold text-orange-950 block mt-1 text-center">{p.code}</span>
                       </td>
@@ -3213,93 +3283,117 @@ export function PetTravelApp() {
         {/* --- D2-C. CATEGORY MANAGEMENT TAB (ADMIN ONLY) --- */}
         {activeTab === "admin_categories" && isAdmin && (
           <div className="flex flex-col gap-6">
-            <div>
-              <h2 className="text-xl font-bold text-[#331B08]">🏷️ Quản lý Danh mục Sản phẩm sỉ</h2>
-              <p className="muted text-xs">Quản lý danh sách các danh mục hàng sỉ (Thức ăn, Túi vận chuyển, Đồ chơi...).</p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-[#331B08]">🏷️ Quản lý Danh mục Sản phẩm sỉ</h2>
+                <p className="muted text-xs">Quản lý danh sách các danh mục hàng sỉ (Thức ăn, Túi vận chuyển, Đồ chơi...).</p>
+              </div>
+              <button
+                type="button"
+                className="tab-button text-xs py-2 px-4 border-orange-200 bg-orange-50/50 hover:bg-orange-100 cursor-pointer font-bold rounded-xl"
+                onClick={() => {
+                  setNewCategoryName("");
+                  setShowCategoryForm(true);
+                }}
+              >
+                + Thêm danh mục mới
+              </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-              {/* Form thêm mới */}
-              <div className="panel p-4 flex flex-col gap-4">
-                <h3 className="text-sm font-bold text-orange-950 border-b pb-2">Thêm danh mục mới</h3>
-                <form onSubmit={handleAddCategory} className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-bold text-orange-900">Tên danh mục:</label>
-                    <input
-                      type="text"
-                      className="text-input text-xs py-2 px-3"
-                      placeholder="Nhập tên danh mục..."
-                      value={newCategoryName}
-                      onChange={(e) => setNewCategoryName(e.target.value)}
-                    />
-                  </div>
-                  <button type="submit" className="primary-button text-xs py-2 w-full">
-                    + Thêm danh mục
-                  </button>
-                </form>
-              </div>
-
-              {/* Danh sách danh mục */}
-              <div className="panel p-4 md:col-span-2 flex flex-col gap-4">
-                <h3 className="text-sm font-bold text-orange-950 border-b pb-2">Danh sách danh mục hiện có</h3>
-                <div className="flex flex-col gap-2">
-                  {allCategories.map((cat) => (
-                    <div key={cat} className="flex items-center justify-between p-3 border border-orange-100 bg-[#FFFDF9] rounded-xl">
-                      {editingCategoryOld === cat ? (
-                        <div className="flex items-center gap-2 w-full mr-4">
-                          <input
-                            type="text"
-                            className="text-input text-xs py-1 px-2 flex-grow"
-                            value={editingCategoryNew}
-                            onChange={(e) => setEditingCategoryNew(e.target.value)}
-                          />
+            {/* Danh sách danh mục rộng 100% */}
+            <div className="panel p-4 flex flex-col gap-4 w-full">
+              <h3 className="text-sm font-bold text-orange-950 border-b pb-2">Danh sách danh mục hiện có</h3>
+              <div className="flex flex-col gap-2">
+                {allCategories.map((cat) => (
+                  <div key={cat} className="flex items-center justify-between p-3 border border-orange-100 bg-[#FFFDF9] rounded-xl">
+                    {editingCategoryOld === cat ? (
+                      <div className="flex items-center gap-2 w-full mr-4">
+                        <input
+                          type="text"
+                          className="text-input text-xs py-1 px-2 flex-grow"
+                          value={editingCategoryNew}
+                          onChange={(e) => setEditingCategoryNew(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="tab-button bg-green-500 text-white border-green-600 px-3 py-1 text-xs cursor-pointer"
+                          onClick={() => handleEditCategory(cat, editingCategoryNew)}
+                        >
+                          Lưu
+                        </button>
+                        <button
+                          type="button"
+                          className="tab-button bg-gray-200 text-gray-800 px-3 py-1 text-xs cursor-pointer"
+                          onClick={() => setEditingCategoryOld(null)}
+                        >
+                          Hủy
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="font-bold text-sm text-orange-950">{cat}</span>
+                        <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            className="tab-button bg-green-500 text-white border-green-600 px-3 py-1 text-xs cursor-pointer"
-                            onClick={() => handleEditCategory(cat, editingCategoryNew)}
+                            className="tab-button px-2.5 py-1 text-xs cursor-pointer border-orange-200 text-orange-800"
+                            onClick={() => {
+                              setEditingCategoryOld(cat);
+                              setEditingCategoryNew(cat);
+                            }}
                           >
-                            Lưu
+                            Sửa
                           </button>
                           <button
                             type="button"
-                            className="tab-button bg-gray-200 text-gray-800 px-3 py-1 text-xs cursor-pointer"
-                            onClick={() => setEditingCategoryOld(null)}
+                            className="tab-button px-2.5 py-1 text-xs cursor-pointer bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
+                            onClick={() => handleDeleteCategory(cat)}
                           >
-                            Hủy
+                            Xóa
                           </button>
                         </div>
-                      ) : (
-                        <>
-                          <span className="font-bold text-sm text-orange-950">{cat}</span>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              className="tab-button px-2.5 py-1 text-xs cursor-pointer border-orange-200 text-orange-800"
-                              onClick={() => {
-                                setEditingCategoryOld(cat);
-                                setEditingCategoryNew(cat);
-                              }}
-                            >
-                              Sửa
-                            </button>
-                            <button
-                              type="button"
-                              className="tab-button px-2.5 py-1 text-xs cursor-pointer bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
-                              onClick={() => handleDeleteCategory(cat)}
-                            >
-                              Xóa
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ))}
-                  {allCategories.length === 0 && (
-                    <p className="muted text-xs text-center py-4">Chưa có danh mục nào.</p>
-                  )}
-                </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+                {allCategories.length === 0 && (
+                  <p className="muted text-xs text-center py-4">Chưa có danh mục nào.</p>
+                )}
               </div>
             </div>
+
+            {/* Popup Form Modal for adding category */}
+            {showCategoryForm && (
+              <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowCategoryForm(false)}>
+                <div className="panel max-w-sm w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex justify-between items-center border-b pb-2 border-orange-100">
+                    <h3 className="text-base font-bold text-orange-950 m-0">Thêm danh mục sỉ mới</h3>
+                    <button
+                      type="button"
+                      className="w-6 h-6 rounded-full bg-orange-50 text-orange-700 flex items-center justify-center text-xs font-bold hover:bg-orange-100 transition"
+                      onClick={() => setShowCategoryForm(false)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <form onSubmit={handleAddCategory} className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-orange-900">Tên danh mục:</label>
+                      <input
+                        type="text"
+                        className="text-input text-xs py-2 px-3"
+                        placeholder="Ví dụ: Thức ăn, Phụ kiện, Cát vệ sinh..."
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <button type="submit" className="primary-button text-xs py-2.5 w-full font-bold">
+                      + Thêm danh mục
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -3328,65 +3422,86 @@ export function PetTravelApp() {
             </div>
 
             {/* Form modal/panel */}
+            {/* Form modal/panel */}
             {showSupplierForm && (
-              <div className="panel p-4 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200">
-                <h3 className="text-sm font-bold text-orange-950 border-b pb-2">
-                  {editingSupplier ? `Cập nhật nhà cung cấp: ${editingSupplier.name}` : "Thêm nhà cung cấp sỉ mới"}
-                </h3>
-                <form onSubmit={handleSaveSupplier} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-bold text-orange-900">Mã nhà cung cấp (Code):</label>
-                    <input
-                      type="text"
-                      className="text-input text-xs py-2 px-3"
-                      placeholder="Ví dụ: PT, PC, ML..."
-                      value={supCode}
-                      onChange={(e) => setSupCode(e.target.value)}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1 md:col-span-2">
-                    <label className="text-xs font-bold text-orange-900">Tên nhà cung cấp:</label>
-                    <input
-                      type="text"
-                      className="text-input text-xs py-2 px-3"
-                      placeholder="Nhập tên nhà cung cấp..."
-                      value={supName}
-                      onChange={(e) => setSupName(e.target.value)}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-bold text-orange-900">Chuẩn bị hàng (Lead time ngày):</label>
-                    <input
-                      type="number"
-                      className="text-input text-xs py-2 px-3"
-                      value={supLeadTime}
-                      onChange={(e) => setSupLeadTime(Number(e.target.value))}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2 pb-3">
-                    <input
-                      type="checkbox"
-                      id="supAdminOnly"
-                      checked={supAdminOnly}
-                      onChange={(e) => setSupAdminOnly(e.target.checked)}
-                    />
-                    <label htmlFor="supAdminOnly" className="text-xs font-bold text-orange-900 cursor-pointer">
-                      Chỉ hiển thị với Admin
-                    </label>
-                  </div>
-                  <div className="md:col-span-4 flex justify-end gap-2 mt-2 border-t pt-3">
+              <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => {
+                setShowSupplierForm(false);
+                setEditingSupplier(null);
+              }}>
+                <div className="panel max-w-2xl w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex justify-between items-center border-b pb-2 border-orange-100">
+                    <h3 className="text-base font-bold text-orange-950 m-0">
+                      {editingSupplier ? `Cập nhật nhà cung cấp: ${editingSupplier.name}` : "Thêm nhà cung cấp sỉ mới"}
+                    </h3>
                     <button
                       type="button"
-                      className="tab-button text-xs py-1.5 px-3 cursor-pointer"
-                      onClick={() => setShowSupplierForm(false)}
+                      className="w-6 h-6 rounded-full bg-orange-50 text-orange-700 flex items-center justify-center text-xs font-bold hover:bg-orange-100 transition"
+                      onClick={() => {
+                        setShowSupplierForm(false);
+                        setEditingSupplier(null);
+                      }}
                     >
-                      Hủy bỏ
-                    </button>
-                    <button type="submit" className="primary-button text-xs py-1.5 px-4">
-                      Lưu thay đổi
+                      ✕
                     </button>
                   </div>
-                </form>
+                  <form onSubmit={handleSaveSupplier} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-orange-900">Mã nhà cung cấp (Code):</label>
+                      <input
+                        type="text"
+                        className="text-input text-xs py-2 px-3"
+                        placeholder="Ví dụ: PT, PC, ML..."
+                        value={supCode}
+                        onChange={(e) => setSupCode(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5 sm:col-span-1 lg:col-span-2">
+                      <label className="text-xs font-bold text-orange-900">Tên nhà cung cấp:</label>
+                      <input
+                        type="text"
+                        className="text-input text-xs py-2 px-3"
+                        placeholder="Nhập tên nhà cung cấp..."
+                        value={supName}
+                        onChange={(e) => setSupName(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-bold text-orange-900">Chuẩn bị hàng (Lead time ngày):</label>
+                      <input
+                        type="number"
+                        className="text-input text-xs py-2 px-3"
+                        value={supLeadTime}
+                        onChange={(e) => setSupLeadTime(Number(e.target.value))}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 pb-3.5 sm:col-span-2 lg:col-span-4">
+                      <input
+                        type="checkbox"
+                        id="supAdminOnly"
+                        checked={supAdminOnly}
+                        onChange={(e) => setSupAdminOnly(e.target.checked)}
+                      />
+                      <label htmlFor="supAdminOnly" className="text-xs font-bold text-orange-900 cursor-pointer">
+                        Chỉ hiển thị với Admin
+                      </label>
+                    </div>
+                    <div className="sm:col-span-2 lg:col-span-4 flex justify-end gap-2.5 mt-3 border-t pt-3 border-orange-100">
+                      <button
+                        type="button"
+                        className="tab-button text-xs py-1.5 px-3 cursor-pointer"
+                        onClick={() => {
+                          setShowSupplierForm(false);
+                          setEditingSupplier(null);
+                        }}
+                      >
+                        Hủy bỏ
+                      </button>
+                      <button type="submit" className="primary-button text-xs py-1.5 px-4 font-bold">
+                        Lưu thay đổi
+                      </button>
+                    </div>
+                  </form>
+                </div>
               </div>
             )}
 
@@ -3601,15 +3716,34 @@ export function PetTravelApp() {
                   Quản lý nghiệp vụ nhập hàng, tồn kho, hàng lỗi, hóa đơn bán hàng và chi phí phát sinh trước khi ghi sổ kế toán.
                 </p>
               </div>
-              <button
-                type="button"
-                className="tab-button text-xs py-2 px-4 border-orange-200 bg-white hover:bg-orange-50 cursor-pointer font-bold rounded-xl"
-                onClick={fetchOperationsOverview}
-                disabled={isOperationsLoading}
-              >
-                <RefreshCw size={14} className={isOperationsLoading ? "animate-spin" : ""} />
-                {isOperationsLoading ? "Đang tải..." : "Làm mới kho"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="tab-button text-xs py-2 px-4 border-orange-200 bg-orange-50/50 hover:bg-orange-100 cursor-pointer font-bold rounded-xl flex items-center gap-1.5"
+                  onClick={() => {
+                    setOperationPartner("");
+                    setOperationSku("");
+                    setOperationDescription("");
+                    setOperationQuantity(1);
+                    setOperationUnitCost(0);
+                    setOperationExpenseCategory("");
+                    setOperationExpenseAmount(0);
+                    setOperationPostNow(false);
+                    setShowOperationsForm(true);
+                  }}
+                >
+                  + Lập chứng từ mới
+                </button>
+                <button
+                  type="button"
+                  className="tab-button text-xs py-2 px-4 border-orange-200 bg-white hover:bg-orange-50 cursor-pointer font-bold rounded-xl flex items-center gap-1.5"
+                  onClick={fetchOperationsOverview}
+                  disabled={isOperationsLoading}
+                >
+                  <RefreshCw size={14} className={isOperationsLoading ? "animate-spin" : ""} />
+                  {isOperationsLoading ? "Đang tải..." : "Làm mới kho"}
+                </button>
+              </div>
             </div>
 
             {operationsError && (
@@ -3655,175 +3789,192 @@ export function PetTravelApp() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-[0.85fr_1.15fr] gap-6">
-              <form onSubmit={handleCreateOperationsDocument} className="panel p-4 flex flex-col gap-4">
-                <div className="section-title">
-                  <h3 className="text-lg font-bold">Tạo chứng từ nhanh</h3>
-                  <StatusPill tone={operationPostNow ? "warning" : "info"}>
-                    {operationPostNow ? "Post ngay" : "Lưu nháp"}
-                  </StatusPill>
-                </div>
+            {/* List of documents occupies full width */}
+            <div className="panel p-4 flex flex-col gap-4 overflow-x-auto w-full">
+              <div className="flex items-center justify-between border-b border-dashed border-orange-100 pb-2">
+                <h3 className="text-sm font-bold text-[#331B08]">Chứng từ vận hành gần nhất</h3>
+                <StatusPill tone={operationsOverview?.recentDocuments.length ? "info" : "warning"}>
+                  {operationsOverview?.recentDocuments.length ? `${operationsOverview.recentDocuments.length} chứng từ` : "Chưa có dữ liệu"}
+                </StatusPill>
+              </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Loại nghiệp vụ</label>
-                    <select
-                      className="text-input text-sm py-2 px-3 bg-white border"
-                      value={operationType}
-                      onChange={(e) => setOperationType(e.target.value as OperationsDocumentType)}
-                    >
-                      <option value="purchase_receipt">Nhập hàng từ nhà cung cấp</option>
-                      <option value="sales_invoice">Tạo hóa đơn bán hàng</option>
-                      <option value="expense">Chi phí phát sinh</option>
-                      <option value="defect_report">Ghi nhận hàng lỗi</option>
-                      <option value="stock_adjustment">Kiểm kê / điều chỉnh tăng</option>
-                    </select>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Đối tác / Nhà cung cấp</label>
-                    <input
-                      type="text"
-                      className="text-input text-sm py-2 px-3"
-                      value={operationPartner}
-                      onChange={(e) => setOperationPartner(e.target.value)}
-                      placeholder="Ví dụ: Pet Travel, GHN, NCC A..."
-                    />
-                  </div>
-                </div>
-
-                {operationType === "expense" ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Nhóm chi phí</label>
-                      <input
-                        type="text"
-                        className="text-input text-sm py-2 px-3"
-                        value={operationExpenseCategory}
-                        onChange={(e) => setOperationExpenseCategory(e.target.value)}
-                        placeholder="Vận chuyển, đóng gói, marketing..."
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Số tiền chi phí</label>
-                      <input
-                        type="number"
-                        className="text-input text-sm py-2 px-3"
-                        value={operationExpenseAmount}
-                        onChange={(e) => setOperationExpenseAmount(parseInt(e.target.value, 10) || 0)}
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                    <div className="flex flex-col gap-1.5 md:col-span-2">
-                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">SKU / Mã phân loại</label>
-                      <input
-                        type="text"
-                        className="text-input text-sm py-2 px-3 font-mono"
-                        value={operationSku}
-                        onChange={(e) => setOperationSku(e.target.value)}
-                        placeholder="VD: PT-BAG-001-M-BL"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Số lượng</label>
-                      <input
-                        type="number"
-                        className="text-input text-sm py-2 px-3"
-                        value={operationQuantity}
-                        onChange={(e) => setOperationQuantity(parseInt(e.target.value, 10) || 1)}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Đơn giá vốn</label>
-                      <input
-                        type="number"
-                        className="text-input text-sm py-2 px-3"
-                        value={operationUnitCost}
-                        onChange={(e) => setOperationUnitCost(parseInt(e.target.value, 10) || 0)}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-orange-950/80 uppercase">Diễn giải / ghi chú</label>
-                  <textarea
-                    className="text-input text-sm py-2 px-3 min-h-[84px]"
-                    value={operationDescription}
-                    onChange={(e) => setOperationDescription(e.target.value)}
-                    placeholder="Nhập lý do, số lô, tình trạng hàng, ghi chú chi phí..."
-                  />
-                </div>
-
-                <label className="flex items-start gap-2 text-xs text-orange-950 font-bold cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={operationPostNow}
-                    onChange={(e) => setOperationPostNow(e.target.checked)}
-                  />
-                  <span>
-                    Post ngay chứng từ này. Khi post, hệ thống sẽ sinh stock movement và cập nhật tồn kho; chứng từ đã post không được sửa trực tiếp.
-                  </span>
-                </label>
-
-                <button
-                  type="submit"
-                  className="primary-button text-xs py-3 justify-center font-bold cursor-pointer"
-                  disabled={isOperationsLoading}
-                >
-                  {isOperationsLoading ? "Đang xử lý..." : "Lưu chứng từ vận hành"}
-                </button>
-              </form>
-
-              <div className="panel p-4 flex flex-col gap-4 overflow-x-auto">
-                <div className="flex items-center justify-between border-b border-dashed border-orange-100 pb-2">
-                  <h3 className="text-sm font-bold text-[#331B08]">Chứng từ vận hành gần nhất</h3>
-                  <StatusPill tone={operationsOverview?.recentDocuments.length ? "info" : "warning"}>
-                    {operationsOverview?.recentDocuments.length ? `${operationsOverview.recentDocuments.length} chứng từ` : "Chưa có dữ liệu"}
-                  </StatusPill>
-                </div>
-
-                <table className="variant-table w-full">
-                  <thead>
-                    <tr>
-                      <th>Số chứng từ</th>
-                      <th>Nghiệp vụ</th>
-                      <th>Đối tác</th>
-                      <th className="text-right">Giá trị</th>
-                      <th>Trạng thái</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {operationsOverview?.recentDocuments.length ? (
-                      operationsOverview.recentDocuments.map((doc) => (
-                        <tr key={doc.id}>
-                          <td className="text-xs font-mono font-bold text-orange-950">{doc.documentNo}</td>
-                          <td className="text-xs text-[#331B08] font-bold">{operationsTypeLabel(doc.type)}</td>
-                          <td className="text-xs text-gray-600">{doc.partnerName || "Pet Travel nội bộ"}</td>
-                          <td className="text-right text-xs font-bold text-[#331B08]">{formatVnd(doc.totalAmountVnd)}</td>
-                          <td>
-                            <span className={`status-pill text-[10px] ${
-                              doc.status === "posted" ? "success" : doc.status === "draft" ? "warning" : "info"
-                            }`}>
-                              {doc.status === "posted" ? "Đã post" : doc.status === "draft" ? "Nháp" : doc.status === "void" ? "Đã hủy" : "Chờ duyệt"}
-                            </span>
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={5} className="py-8 text-center text-xs text-gray-500 font-medium">
-                          Chưa có chứng từ. Hãy tạo phiếu nhập hoặc chi phí đầu tiên sau khi chạy migration Supabase v4.
+              <table className="variant-table w-full">
+                <thead>
+                  <tr>
+                    <th>Số chứng từ</th>
+                    <th>Nghiệp vụ</th>
+                    <th>Đối tác</th>
+                    <th className="text-right">Giá trị</th>
+                    <th>Trạng thái</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {operationsOverview?.recentDocuments.length ? (
+                    operationsOverview.recentDocuments.map((doc) => (
+                      <tr key={doc.id}>
+                        <td className="text-xs font-mono font-bold text-orange-950">{doc.documentNo}</td>
+                        <td className="text-xs text-[#331B08] font-bold">{operationsTypeLabel(doc.type)}</td>
+                        <td className="text-xs text-gray-600">{doc.partnerName || "Pet Travel nội bộ"}</td>
+                        <td className="text-right text-xs font-bold text-[#331B08]">{formatVnd(doc.totalAmountVnd)}</td>
+                        <td>
+                          <span className={`status-pill text-[10px] ${
+                            doc.status === "posted" ? "success" : doc.status === "draft" ? "warning" : "info"
+                          }`}>
+                            {doc.status === "posted" ? "Đã post" : doc.status === "draft" ? "Nháp" : doc.status === "void" ? "Đã hủy" : "Chờ duyệt"}
+                          </span>
                         </td>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-xs text-gray-500 font-medium">
+                        Chưa có chứng từ. Hãy tạo phiếu nhập hoặc chi phí đầu tiên sau khi chạy migration Supabase v4.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
+
+            {/* Popup Form Modal for creating document */}
+            {showOperationsForm && (
+              <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowOperationsForm(false)}>
+                <form
+                  onSubmit={handleCreateOperationsDocument}
+                  className="panel max-w-lg w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in max-h-[90vh] overflow-y-auto"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex justify-between items-center border-b pb-2 border-orange-100">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-orange-950 m-0">Lập chứng từ vận hành mới</h3>
+                      <StatusPill tone={operationPostNow ? "warning" : "info"}>
+                        {operationPostNow ? "Post ngay" : "Lưu nháp"}
+                      </StatusPill>
+                    </div>
+                    <button
+                      type="button"
+                      className="w-6 h-6 rounded-full bg-orange-50 text-orange-700 flex items-center justify-center text-xs font-bold hover:bg-orange-100 transition"
+                      onClick={() => setShowOperationsForm(false)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Loại nghiệp vụ</label>
+                      <select
+                        className="text-input text-xs py-2 px-3 bg-white border"
+                        value={operationType}
+                        onChange={(e) => setOperationType(e.target.value as OperationsDocumentType)}
+                      >
+                        <option value="purchase_receipt">Nhập hàng từ nhà cung cấp</option>
+                        <option value="sales_invoice">Tạo hóa đơn bán hàng</option>
+                        <option value="expense">Chi phí phát sinh</option>
+                        <option value="defect_report">Ghi nhận hàng lỗi</option>
+                        <option value="stock_adjustment">Kiểm kê / điều chỉnh tăng</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Đối tác / Nhà cung cấp</label>
+                      <input
+                        type="text"
+                        className="text-input text-xs py-2 px-3"
+                        value={operationPartner}
+                        onChange={(e) => setOperationPartner(e.target.value)}
+                        placeholder="Ví dụ: Pet Travel, NCC A..."
+                      />
+                    </div>
+                  </div>
+
+                  {operationType === "expense" ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-orange-950/80 uppercase">Nhóm chi phí</label>
+                        <input
+                          type="text"
+                          className="text-input text-xs py-2 px-3"
+                          value={operationExpenseCategory}
+                          onChange={(e) => setOperationExpenseCategory(e.target.value)}
+                          placeholder="Vận chuyển, đóng gói, marketing..."
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-orange-950/80 uppercase">Số tiền chi phí</label>
+                        <input
+                          type="number"
+                          className="text-input text-xs py-2 px-3"
+                          value={operationExpenseAmount}
+                          onChange={(e) => setOperationExpenseAmount(parseInt(e.target.value, 10) || 0)}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                      <div className="flex flex-col gap-1.5 sm:col-span-1">
+                        <label className="text-[10px] font-bold text-orange-950/80 uppercase">SKU / Mã phân loại</label>
+                        <input
+                          type="text"
+                          className="text-input text-xs py-2 px-3 font-mono"
+                          value={operationSku}
+                          onChange={(e) => setOperationSku(e.target.value)}
+                          placeholder="VD: PT-BAG-001..."
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-orange-950/80 uppercase">Số lượng</label>
+                        <input
+                          type="number"
+                          className="text-input text-xs py-2 px-3"
+                          value={operationQuantity}
+                          onChange={(e) => setOperationQuantity(parseInt(e.target.value, 10) || 1)}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold text-orange-950/80 uppercase">Đơn giá vốn</label>
+                        <input
+                          type="number"
+                          className="text-input text-xs py-2 px-3"
+                          value={operationUnitCost}
+                          onChange={(e) => setOperationUnitCost(parseInt(e.target.value, 10) || 0)}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Diễn giải / ghi chú</label>
+                    <textarea
+                      className="text-input text-xs py-2 px-3 min-h-[60px]"
+                      value={operationDescription}
+                      onChange={(e) => setOperationDescription(e.target.value)}
+                      placeholder="Nhập lý do, ghi chú..."
+                    />
+                  </div>
+
+                  <label className="flex items-start gap-2 text-xs text-orange-950 font-bold cursor-pointer bg-orange-50/50 p-2.5 rounded-xl border border-orange-100">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={operationPostNow}
+                      onChange={(e) => setOperationPostNow(e.target.checked)}
+                    />
+                    <span>
+                      Post ngay chứng từ này. Ghi sổ và cập nhật tồn kho tức thì (chứng từ đã post không được sửa).
+                    </span>
+                  </label>
+
+                  <button
+                    type="submit"
+                    className="primary-button text-xs py-2.5 justify-center font-bold cursor-pointer mt-2"
+                    disabled={isOperationsLoading}
+                  >
+                    {isOperationsLoading ? "Đang xử lý..." : "Lưu chứng từ vận hành"}
+                  </button>
+                </form>
+              </div>
+            )}
           </div>
         )}
 
@@ -4416,297 +4567,345 @@ export function PetTravelApp() {
         {/* --- F. ADMIN USER MANAGEMENT TAB --- */}
         {activeTab === "admin_users" && isAdmin && (
           <div className="flex flex-col gap-6 animate-fade-in w-full">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* User Creation Form */}
-              <div className="panel flex flex-col gap-4 bg-white border border-orange-100 rounded-3xl p-6">
-                <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2">
-                  <UserRound className="text-orange-500" size={20} />
-                  Tạo tài khoản mới
-                </h3>
-                <p className="muted text-xs">Cấp quyền truy cập mới cho nhân viên vận hành (Admin/Operator) hoặc đối tác đại lý sỉ (Customer).</p>
-
-                <form onSubmit={handleCreateUser} className="flex flex-col gap-4 mt-2">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Họ và Tên</label>
-                    <input
-                      type="text"
-                      className="text-input text-sm py-2 px-3"
-                      value={createFullName}
-                      onChange={(e) => setCreateFullName(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Email đăng nhập</label>
-                    <input
-                      type="email"
-                      className="text-input text-sm py-2 px-3"
-                      value={createEmail}
-                      onChange={(e) => setCreateEmail(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Số điện thoại</label>
-                    <input
-                      type="tel"
-                      className="text-input text-sm py-2 px-3"
-                      value={createPhone}
-                      onChange={(e) => setCreatePhone(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Mật khẩu ban đầu</label>
-                    <input
-                      type="password"
-                      className="text-input text-sm py-2 px-3"
-                      placeholder="Tối thiểu 12 ký tự"
-                      value={createPassword}
-                      onChange={(e) => setCreatePassword(e.target.value)}
-                      required
-                      minLength={12}
-                      autoComplete="new-password"
-                    />
-                    <span className="text-[10px] muted">Mật khẩu cần tối thiểu 12 ký tự để đảm bảo an toàn.</span>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Vai trò & Quyền</label>
-                    <select
-                      className="text-input text-sm py-2 px-3 bg-white border"
-                      value={createRole}
-                      onChange={(e) => setCreateRole(e.target.value)}
-                    >
-                      <option value="customer_owner">Đại lý sỉ (Customer Owner)</option>
-                      <option value="super_admin">Quản trị cấp cao (Super Admin)</option>
-                      <option value="finance_admin">Tài chính (Finance Admin)</option>
-                      <option value="operator">Nhân viên vận hành (Operator)</option>
-                    </select>
-                  </div>
-
-                  {createRole === "customer_owner" && (
-                    <div className="flex flex-col gap-1.5 animate-slide-down">
-                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Tên Công ty/Cửa hàng</label>
-                      <input
-                        type="text"
-                        className="text-input text-sm py-2 px-3"
-                        placeholder="Ví dụ: Happy Paws Shop"
-                        value={createCompany}
-                        onChange={(e) => setCreateCompany(e.target.value)}
-                        required={createRole === "customer_owner"}
-                      />
-                    </div>
-                  )}
-
-                  <button
-                    type="submit"
-                    className="primary-button text-xs py-3 w-full justify-center font-bold cursor-pointer"
-                  >
-                    Tạo tài khoản
-                  </button>
-                </form>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-[#331B08]">👥 Quản lý thành viên hệ thống</h2>
+                <p className="muted text-xs">Quản lý và phân quyền tài khoản của đại lý sỉ, operator, admin và kế toán tài chính.</p>
               </div>
+              <button
+                type="button"
+                className="tab-button text-xs py-2 px-4 border-orange-200 bg-orange-50/50 hover:bg-orange-100 cursor-pointer font-bold rounded-xl"
+                onClick={() => {
+                  setCreateFullName("");
+                  setCreateEmail("");
+                  setCreatePhone("");
+                  setCreatePassword("");
+                  setCreateCompany("");
+                  setCreateRole("customer_owner");
+                  setShowUserForm(true);
+                }}
+              >
+                + Tạo tài khoản mới
+              </button>
+            </div>
 
-              {/* User List Panel */}
-              <div className="panel lg:col-span-2 flex flex-col gap-4 bg-white border border-orange-100 rounded-3xl p-6">
-                <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2">
-                  <Users className="text-orange-500" size={20} />
-                  Thành viên hệ thống ({userList.length})
-                </h3>
-                <p className="muted text-xs">Danh sách toàn bộ tài khoản đại lý sỉ, nhân viên kế toán, tài chính và điều phối viên đang hoạt động.</p>
+            {/* Danh sách thành viên rộng 100% */}
+            <div className="panel flex flex-col gap-4 bg-white border border-orange-100 rounded-3xl p-6 w-full">
+              <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2">
+                <Users className="text-orange-500" size={20} />
+                Thành viên hệ thống ({userList.length})
+              </h3>
+              <p className="muted text-xs">Danh sách toàn bộ tài khoản đại lý sỉ, nhân viên kế toán, tài chính và điều phối viên đang hoạt động.</p>
 
-                <div className="overflow-x-auto mt-2">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b-2 border-orange-100 text-[10px] font-extrabold uppercase text-[#78350F] tracking-wider">
-                        <th className="py-2.5">Thành viên</th>
-                        <th>Số điện thoại</th>
-                        <th>Tổ chức sỉ / Vai trò</th>
-                        <th>Phân loại</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-orange-50/50">
-                      {userList.map((u) => (
-                        <tr key={u.id} className="text-xs hover:bg-orange-50/20">
-                          <td className="py-3">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full overflow-hidden bg-orange-50 flex items-center justify-center font-bold text-orange-750 text-xs shrink-0 border border-orange-200">
-                                {u.avatarUrl ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img src={u.avatarUrl} alt="" className="w-full h-full object-cover" />
-                                ) : (
-                                  u.fullName?.charAt(0) || "U"
-                                )}
-                              </div>
-                              <div className="flex flex-col">
-                                <strong className="text-[#331B08]">{u.fullName}</strong>
-                                <span className="text-[10px] text-gray-400">{u.email}</span>
-                              </div>
+              <div className="overflow-x-auto mt-2">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b-2 border-orange-100 text-[10px] font-extrabold uppercase text-[#78350F] tracking-wider">
+                      <th className="py-2.5">Thành viên</th>
+                      <th>Số điện thoại</th>
+                      <th>Tổ chức sỉ / Vai trò</th>
+                      <th>Phân loại</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-orange-50/50">
+                    {userList.map((u) => (
+                      <tr key={u.id} className="text-xs hover:bg-orange-50/20">
+                        <td className="py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full overflow-hidden bg-orange-50 flex items-center justify-center font-bold text-orange-750 text-xs shrink-0 border border-orange-200">
+                              {u.avatarUrl ? (
+                                <img src={u.avatarUrl} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                u.fullName?.charAt(0) || "U"
+                              )}
                             </div>
-                          </td>
-                          <td className="font-semibold text-gray-655">{u.phone || "—"}</td>
-                          <td>
                             <div className="flex flex-col">
-                              <strong className="text-[#78350F]">{u.company || "Pet Travel Nội bộ"}</strong>
-                              <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">{u.role}</span>
+                              <strong className="text-[#331B08]">{u.fullName}</strong>
+                              <span className="text-[10px] text-gray-400">{u.email}</span>
                             </div>
-                          </td>
-                          <td>
-                            <span className={`status-pill text-[9px] ${
-                              u.role.includes("admin") ? "success" : "info"
-                            }`}>
-                              {u.role.includes("admin") ? "Nội bộ Admin" : "Đại lý ngoài"}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                          </div>
+                        </td>
+                        <td className="font-semibold text-gray-600">{u.phone || "—"}</td>
+                        <td>
+                          <div className="flex flex-col">
+                            <strong className="text-[#78350F]">{u.company || "Pet Travel Nội bộ"}</strong>
+                            <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">{u.role}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <span className={`status-pill text-[9px] ${
+                            u.role.includes("admin") ? "success" : "info"
+                          }`}>
+                            {u.role.includes("admin") ? "Nội bộ Admin" : "Đại lý ngoài"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
+
+            {/* Popup Form Modal for creating user */}
+            {showUserForm && (
+              <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowUserForm(false)}>
+                <div className="panel max-w-md w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex justify-between items-center border-b pb-2 border-orange-100">
+                    <h3 className="text-base font-bold text-orange-950 m-0">Tạo tài khoản thành viên mới</h3>
+                    <button
+                      type="button"
+                      className="w-6 h-6 rounded-full bg-orange-50 text-orange-700 flex items-center justify-center text-xs font-bold hover:bg-orange-100 transition"
+                      onClick={() => setShowUserForm(false)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <form onSubmit={handleCreateUser} className="flex flex-col gap-4 mt-2">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Họ và Tên</label>
+                      <input
+                        type="text"
+                        className="text-input text-xs py-2 px-3"
+                        value={createFullName}
+                        onChange={(e) => setCreateFullName(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Email đăng nhập</label>
+                      <input
+                        type="email"
+                        className="text-input text-xs py-2 px-3"
+                        value={createEmail}
+                        onChange={(e) => setCreateEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Số điện thoại</label>
+                      <input
+                        type="tel"
+                        className="text-input text-xs py-2 px-3"
+                        value={createPhone}
+                        onChange={(e) => setCreatePhone(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Mật khẩu ban đầu</label>
+                      <input
+                        type="password"
+                        className="text-input text-xs py-2 px-3"
+                        placeholder="Tối thiểu 12 ký tự"
+                        value={createPassword}
+                        onChange={(e) => setCreatePassword(e.target.value)}
+                        required
+                        minLength={12}
+                        autoComplete="new-password"
+                      />
+                      <span className="text-[9px] text-gray-400">Mật khẩu cần tối thiểu 12 ký tự để đảm bảo an toàn.</span>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Vai trò & Quyền</label>
+                      <select
+                        className="text-input text-xs py-2 px-3 bg-white border"
+                        value={createRole}
+                        onChange={(e) => setCreateRole(e.target.value)}
+                      >
+                        <option value="customer_owner">Đại lý sỉ (Customer Owner)</option>
+                        <option value="super_admin">Quản trị cấp cao (Super Admin)</option>
+                        <option value="finance_admin">Tài chính (Finance Admin)</option>
+                        <option value="operator">Nhân viên vận hành (Operator)</option>
+                      </select>
+                    </div>
+
+                    {createRole === "customer_owner" && (
+                      <div className="flex flex-col gap-1.5 animate-slide-down">
+                        <label className="text-[10px] font-bold text-orange-950/80 uppercase">Tên Công ty/Cửa hàng</label>
+                        <input
+                          type="text"
+                          className="text-input text-xs py-2 px-3"
+                          placeholder="Ví dụ: Happy Paws Shop"
+                          value={createCompany}
+                          onChange={(e) => setCreateCompany(e.target.value)}
+                          required={createRole === "customer_owner"}
+                        />
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      className="primary-button text-xs py-2.5 w-full justify-center font-bold cursor-pointer mt-2"
+                    >
+                      Tạo tài khoản
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* --- G. ADMIN PROMOTIONS & SYSTEM DEFAULTS TAB --- */}
         {activeTab === "admin_promotions" && isAdmin && (
           <div className="flex flex-col gap-6 animate-fade-in w-full">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Settings Form */}
-              <div className="panel flex flex-col gap-4 bg-white border border-orange-100 rounded-3xl p-6">
-                <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2">
-                  <Percent className="text-orange-500" size={20} />
-                  Khuyến mãi & Chỉ số mặc định
-                </h3>
-                <p className="muted text-xs">Cấu hình các chỉ số ưu đãi mặc định cho đại lý khi tạo đơn sỉ tự động và ngưỡng freeship hệ thống.</p>
-
-                <form onSubmit={handleSavePromotions} className="flex flex-col gap-4 mt-2">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Ngưỡng miễn phí vận chuyển sỉ (Freeship Threshold - VND)</label>
-                    <input
-                      type="number"
-                      className="text-input text-sm py-2 px-3"
-                      value={promotionsPolicy.freeShippingThreshold}
-                      onChange={(e) => setPromotionsPolicy({
-                        ...promotionsPolicy,
-                        freeShippingThreshold: Math.max(0, parseInt(e.target.value, 10) || 0)
-                      })}
-                      required
-                    />
-                    <p className="text-[10px] text-gray-400 mt-0.5">Các đơn sỉ có tổng trị giá hàng từ ngưỡng này trở lên sẽ tự động freeship.</p>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-[#78350F] uppercase">Tỷ lệ đặt cọc mặc định (Ví dụ: 0.3 = 30%)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="1"
-                      className="text-input text-sm py-2 px-3 font-semibold"
-                      value={promotionsPolicy.defaultDepositRate}
-                      onChange={(e) => setPromotionsPolicy({
-                        ...promotionsPolicy,
-                        defaultDepositRate: Math.max(0, Math.min(1, parseFloat(e.target.value) || 0))
-                      })}
-                      required
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-[#78350F] uppercase">Chiết khấu tối đa của nhân viên (Ví dụ: 0.08 = 8%)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="1"
-                      className="text-input text-sm py-2 px-3 font-semibold"
-                      value={promotionsPolicy.maxOperatorDiscountRate}
-                      onChange={(e) => setPromotionsPolicy({
-                        ...promotionsPolicy,
-                        maxOperatorDiscountRate: Math.max(0, Math.min(1, parseFloat(e.target.value) || 0))
-                      })}
-                      required
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-[#78350F] uppercase">Hạn mức chiết khấu cần Quản lý duyệt (VND)</label>
-                    <input
-                      type="number"
-                      className="text-input text-sm py-2 px-3"
-                      value={promotionsPolicy.requireManagerApprovalAbove}
-                      onChange={(e) => setPromotionsPolicy({
-                        ...promotionsPolicy,
-                        requireManagerApprovalAbove: Math.max(0, parseInt(e.target.value, 10) || 0)
-                      })}
-                      required
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Ngưỡng tặng quà sỉ mặc định (VND)</label>
-                    <input
-                      type="number"
-                      className="text-input text-sm py-2 px-3"
-                      value={promotionsPolicy.giftThreshold || 0}
-                      onChange={(e) => setPromotionsPolicy({
-                        ...promotionsPolicy,
-                        giftThreshold: Math.max(0, parseInt(e.target.value, 10) || 0)
-                      })}
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Tên Quà Tặng kèm theo</label>
-                    <input
-                      type="text"
-                      className="text-input text-sm py-2 px-3"
-                      placeholder="Không quà tặng"
-                      value={promotionsPolicy.giftName || ""}
-                      onChange={(e) => setPromotionsPolicy({
-                        ...promotionsPolicy,
-                        giftName: e.target.value
-                      })}
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="primary-button text-xs py-3 w-full justify-center font-bold cursor-pointer"
-                  >
-                    Lưu thiết lập ưu đãi
-                  </button>
-                </form>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-[#331B08]">⚙️ Khuyến mãi & Chỉ số mặc định</h2>
+                <p className="muted text-xs">Cấu hình các chỉ số ưu đãi mặc định cho đại lý khi tạo đơn sỉ tự động và các quy tắc hệ thống.</p>
               </div>
+              <button
+                type="button"
+                className="tab-button text-xs py-2 px-4 border-orange-200 bg-orange-50/50 hover:bg-orange-100 cursor-pointer font-bold rounded-xl"
+                onClick={() => {
+                  fetchPromotions();
+                  setShowPromotionsForm(true);
+                }}
+              >
+                ⚙️ Cấu hình Ưu đãi
+              </button>
+            </div>
 
-              {/* Status and Active Rules overview */}
-              <div className="flex flex-col gap-4">
-                <div className="panel bg-[#FFFDF9] border border-orange-100 rounded-3xl p-6">
-                  <h4 className="text-xs font-bold text-orange-950 uppercase flex items-center gap-1.5">
-                    💡 Hướng dẫn Quy tắc Khuyến mại
-                  </h4>
-                  <ul className="text-xs text-[#331B08]/85 pl-4 flex flex-col gap-3 mt-3 list-disc">
-                    <li>
-                      Miễn phí vận chuyển cho các đơn sỉ từ <strong>{formatVnd(promotionsPolicy.freeShippingThreshold)}</strong> trở lên.
-                    </li>
-                    <li>
-                      Đại lý thanh toán trước <strong>{promotionsPolicy.defaultDepositRate * 100}%</strong> giá trị đơn sỉ làm tiền cọc đóng gói, <strong>{(1 - promotionsPolicy.defaultDepositRate) * 100}%</strong> COD còn lại khi nhận hàng.
-                    </li>
-                    <li>
-                      Nếu đơn sỉ có trị giá từ <strong>{formatVnd(promotionsPolicy.giftThreshold || 0)}</strong>, hệ thống tự động tặng kèm quà: <strong>{promotionsPolicy.giftName || "Chưa thiết lập"}</strong>.
-                    </li>
-                    <li>
-                      Nhân viên vận hành được tự động chiết khấu tối đa <strong>{promotionsPolicy.maxOperatorDiscountRate * 100}%</strong> hoặc giảm trực tiếp đến <strong>{formatVnd(promotionsPolicy.requireManagerApprovalAbove)}</strong> cho đại lý mà không cần Quản lý duyệt.
-                    </li>
-                  </ul>
+            {/* Hướng dẫn quy tắc chiếm 100% chiều rộng */}
+            <div className="panel bg-[#FFFDF9] border border-orange-100 rounded-3xl p-6 w-full">
+              <h4 className="text-sm font-bold text-orange-950 uppercase flex items-center gap-2 border-b pb-3 border-orange-100">
+                💡 Quy tắc Khuyến mại & Vận hành đang áp dụng
+              </h4>
+              <ul className="text-xs text-[#331B08]/85 pl-4 flex flex-col gap-4 mt-4 list-disc leading-relaxed">
+                <li>
+                  Miễn phí vận chuyển cho các đơn sỉ từ <strong>{formatVnd(promotionsPolicy.freeShippingThreshold)}</strong> trở lên.
+                </li>
+                <li>
+                  Đại lý thanh toán trước <strong>{promotionsPolicy.defaultDepositRate * 100}%</strong> giá trị đơn sỉ làm tiền cọc đóng gói, <strong>{(1 - promotionsPolicy.defaultDepositRate) * 100}%</strong> COD còn lại khi nhận hàng.
+                </li>
+                <li>
+                  Nếu đơn sỉ có trị giá từ <strong>{formatVnd(promotionsPolicy.giftThreshold || 0)}</strong>, hệ thống tự động tặng kèm quà: <strong>{promotionsPolicy.giftName || "Chưa thiết lập"}</strong>.
+                </li>
+                <li>
+                  Nhân viên vận hành được tự động chiết khấu tối đa <strong>{promotionsPolicy.maxOperatorDiscountRate * 100}%</strong> hoặc giảm trực tiếp đến <strong>{formatVnd(promotionsPolicy.requireManagerApprovalAbove)}</strong> cho đại lý mà không cần Quản lý duyệt.
+                </li>
+              </ul>
+            </div>
+
+            {/* Popup Form Modal for Promotions config */}
+            {showPromotionsForm && (
+              <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowPromotionsForm(false)}>
+                <div className="panel max-w-lg w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex justify-between items-center border-b pb-2 border-orange-100">
+                    <h3 className="text-base font-bold text-orange-950 m-0">Cấu hình Khuyến mãi & Chỉ số mặc định</h3>
+                    <button
+                      type="button"
+                      className="w-6 h-6 rounded-full bg-orange-50 text-orange-700 flex items-center justify-center text-xs font-bold hover:bg-orange-100 transition"
+                      onClick={() => setShowPromotionsForm(false)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <form onSubmit={handleSavePromotions} className="flex flex-col gap-4 mt-2">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Ngưỡng miễn phí vận chuyển sỉ (Freeship Threshold - VND)</label>
+                      <input
+                        type="number"
+                        className="text-input text-xs py-2 px-3"
+                        value={promotionsPolicy.freeShippingThreshold}
+                        onChange={(e) => setPromotionsPolicy({
+                          ...promotionsPolicy,
+                          freeShippingThreshold: Math.max(0, parseInt(e.target.value, 10) || 0)
+                        })}
+                        required
+                      />
+                      <p className="text-[9px] text-gray-400">Các đơn sỉ có tổng trị giá hàng từ ngưỡng này trở lên sẽ tự động freeship.</p>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-[#78350F] uppercase">Tỷ lệ đặt cọc mặc định (Ví dụ: 0.3 = 30%)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="1"
+                        className="text-input text-xs py-2 px-3 font-semibold"
+                        value={promotionsPolicy.defaultDepositRate}
+                        onChange={(e) => setPromotionsPolicy({
+                          ...promotionsPolicy,
+                          defaultDepositRate: Math.max(0, Math.min(1, parseFloat(e.target.value) || 0))
+                        })}
+                        required
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-[#78350F] uppercase">Chiết khấu tối đa của nhân viên (Ví dụ: 0.08 = 8%)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max="1"
+                        className="text-input text-xs py-2 px-3 font-semibold"
+                        value={promotionsPolicy.maxOperatorDiscountRate}
+                        onChange={(e) => setPromotionsPolicy({
+                          ...promotionsPolicy,
+                          maxOperatorDiscountRate: Math.max(0, Math.min(1, parseFloat(e.target.value) || 0))
+                        })}
+                        required
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-[#78350F] uppercase">Hạn mức chiết khấu cần Quản lý duyệt (VND)</label>
+                      <input
+                        type="number"
+                        className="text-input text-xs py-2 px-3"
+                        value={promotionsPolicy.requireManagerApprovalAbove}
+                        onChange={(e) => setPromotionsPolicy({
+                          ...promotionsPolicy,
+                          requireManagerApprovalAbove: Math.max(0, parseInt(e.target.value, 10) || 0)
+                        })}
+                        required
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Ngưỡng tặng quà sỉ mặc định (VND)</label>
+                      <input
+                        type="number"
+                        className="text-input text-xs py-2 px-3"
+                        value={promotionsPolicy.giftThreshold || 0}
+                        onChange={(e) => setPromotionsPolicy({
+                          ...promotionsPolicy,
+                          giftThreshold: Math.max(0, parseInt(e.target.value, 10) || 0)
+                        })}
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Tên Quà Tặng kèm theo</label>
+                      <input
+                        type="text"
+                        className="text-input text-xs py-2 px-3"
+                        placeholder="Không quà tặng"
+                        value={promotionsPolicy.giftName || ""}
+                        onChange={(e) => setPromotionsPolicy({
+                          ...promotionsPolicy,
+                          giftName: e.target.value
+                        })}
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="primary-button text-xs py-2.5 w-full justify-center font-bold cursor-pointer mt-2"
+                    >
+                      Lưu thiết lập ưu đãi
+                    </button>
+                  </form>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -4731,7 +4930,7 @@ export function PetTravelApp() {
             {/* Left side: Image gallery */}
             <div className="flex flex-col gap-3 md:w-1/2">
               <div className="relative aspect-square w-full rounded-2xl overflow-hidden border-2 border-[#FED7AA] bg-white flex items-center justify-center">
-                <Image 
+                <img 
                   src={
                     activeGalleryIndex === 0
                       ? selectedProduct.imageUrl
@@ -4742,8 +4941,7 @@ export function PetTravelApp() {
                       : "/product-bag.svg"
                   } 
                   alt={selectedProduct.name} 
-                  fill 
-                  className="object-contain p-4" 
+                  className="w-full h-full object-contain p-4" 
                 />
               </div>
               <div className="flex gap-2 justify-center">
@@ -4755,7 +4953,7 @@ export function PetTravelApp() {
                     onClick={() => setActiveGalleryIndex(idx)}
                   >
                     <div className="relative w-full h-full">
-                      <Image src={img} alt="thumbnail" fill className="object-contain" />
+                      <img src={img} alt="thumbnail" className="w-full h-full object-contain" />
                     </div>
                   </button>
                 ))}
@@ -5239,14 +5437,62 @@ export function PetTravelApp() {
                   </button>
                 </div>
 
-                <div className="flex flex-col gap-2 max-h-[160px] overflow-y-auto border border-orange-100 rounded-2xl p-2 bg-orange-50/10">
+                <div className="flex flex-col gap-3.5 max-h-[350px] overflow-y-auto border border-orange-100 rounded-2xl p-3 bg-orange-50/10">
                   {formVariants.map((v, index) => (
-                    <div key={v.id} className="grid grid-cols-6 gap-2 items-center bg-[#FFFDF9] border border-orange-100 p-2 rounded-xl">
+                    <div key={v.id} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-end bg-[#FFFDF9] border border-orange-100 p-3.5 rounded-xl relative group">
+                      
+                      {/* Absolute close button on top-right */}
+                      <button
+                        type="button"
+                        className="absolute top-2 right-2 w-5 h-5 rounded-full bg-red-50 text-red-500 text-[10px] flex items-center justify-center font-bold opacity-70 hover:opacity-100 border border-red-100 cursor-pointer hover:bg-red-100 transition z-10"
+                        onClick={() => {
+                          setFormVariants(prev => prev.filter((_, i) => i !== index));
+                        }}
+                        title="Xóa phân loại"
+                      >
+                        ✕
+                      </button>
+
+                      {/* 1. Variant Thumbnail Image Upload */}
+                      <div className="col-span-1 flex flex-col gap-1 items-start justify-center">
+                        <label className="text-[10px] font-bold text-orange-900/70 uppercase">Ảnh</label>
+                        <div className="relative w-11 h-11 border border-orange-200 rounded-lg overflow-hidden bg-[#FFFBEB] flex items-center justify-center cursor-pointer group/img">
+                          {v.imageUrl ? (
+                            <img src={v.imageUrl} alt="Variant" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-[8px] text-orange-800/60 font-bold text-center px-1">Chọn ảnh</span>
+                          )}
+
+                          <input
+                            type="file"
+                            id={`var-file-${v.id}`}
+                            className="hidden"
+                            accept="image/jpeg,image/png,image/webp"
+                            onChange={(e) => handleVariantImageUpload(e, index)}
+                            disabled={variantUploadingIndex === index}
+                          />
+
+                          <label
+                            htmlFor={`var-file-${v.id}`}
+                            className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition cursor-pointer"
+                          >
+                            <span className="text-[8px] text-white font-extrabold">Tải lên</span>
+                          </label>
+
+                          {variantUploadingIndex === index && (
+                            <div className="absolute inset-0 bg-white/80 flex items-center justify-center animate-pulse z-10">
+                              <span className="text-[8px] text-orange-950 font-bold">⏳</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 2. Label */}
                       <div className="col-span-1">
-                        <label className="text-[10px] font-bold text-gray-500">Tên phân loại:</label>
+                        <label className="text-[10px] font-bold text-orange-950/80 uppercase">Tên phân loại</label>
                         <input 
                           type="text" 
-                          className="text-input text-[10px] py-1 px-2 w-full" 
+                          className="text-input text-[10px] py-1.5 px-2 w-full" 
                           value={v.label} 
                           onChange={(e) => {
                             const nextLabel = e.target.value;
@@ -5258,20 +5504,24 @@ export function PetTravelApp() {
                           }} 
                         />
                       </div>
+
+                      {/* 3. SKU */}
                       <div className="col-span-1">
-                        <label className="text-[10px] font-bold text-gray-500">SKU (Tự sinh):</label>
+                        <label className="text-[10px] font-bold text-orange-950/80 uppercase">SKU (Tự sinh)</label>
                         <input 
                           type="text" 
-                          className="text-input text-[9px] py-1 px-2 w-full bg-gray-50 border-gray-200 cursor-not-allowed font-mono" 
+                          className="text-input text-[9px] py-1.5 px-2 w-full bg-gray-50 border-gray-200 cursor-not-allowed font-mono" 
                           value={v.sku} 
                           readOnly
                         />
                       </div>
+
+                      {/* 4. Wholesale Price */}
                       <div className="col-span-1">
-                        <label className="text-[10px] font-bold text-gray-500">Giá sỉ (VND):</label>
+                        <label className="text-[10px] font-bold text-orange-950/80 uppercase">Giá sỉ (VND)</label>
                         <input 
                           type="number" 
-                          className="text-input text-[10px] py-1 px-2 w-full" 
+                          className="text-input text-[10px] py-1.5 px-2 w-full" 
                           value={v.wholesalePrice} 
                           onChange={(e) => {
                             const updated = [...formVariants];
@@ -5280,11 +5530,13 @@ export function PetTravelApp() {
                           }} 
                         />
                       </div>
+
+                      {/* 5. MOQ */}
                       <div className="col-span-1">
-                        <label className="text-[10px] font-bold text-gray-500">MOQ:</label>
+                        <label className="text-[10px] font-bold text-orange-950/80 uppercase">MOQ</label>
                         <input 
                           type="number" 
-                          className="text-input text-[10px] py-1 px-2 w-full" 
+                          className="text-input text-[10px] py-1.5 px-2 w-full" 
                           value={v.minOrderQty} 
                           onChange={(e) => {
                             const updated = [...formVariants];
@@ -5293,11 +5545,13 @@ export function PetTravelApp() {
                           }} 
                         />
                       </div>
+
+                      {/* 6. Stock */}
                       <div className="col-span-1">
-                        <label className="text-[10px] font-bold text-gray-500">Tồn kho:</label>
+                        <label className="text-[10px] font-bold text-orange-950/80 uppercase">Tồn kho</label>
                         <input 
                           type="number" 
-                          className="text-input text-[10px] py-1 px-2 w-full" 
+                          className="text-input text-[10px] py-1.5 px-2 w-full" 
                           value={v.stock} 
                           onChange={(e) => {
                             const updated = [...formVariants];
@@ -5306,17 +5560,7 @@ export function PetTravelApp() {
                           }} 
                         />
                       </div>
-                      <div className="col-span-1 text-center">
-                        <button
-                          type="button"
-                          className="text-[10px] font-bold text-red-500 hover:text-red-700 bg-red-50 px-2 py-1 rounded border border-red-100 mt-4 cursor-pointer"
-                          onClick={() => {
-                            setFormVariants(prev => prev.filter((_, i) => i !== index));
-                          }}
-                        >
-                          Xóa
-                        </button>
-                      </div>
+
                     </div>
                   ))}
                 </div>
