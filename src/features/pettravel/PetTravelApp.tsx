@@ -33,9 +33,11 @@ import {
   RefreshCw,
   Sparkles,
   Check,
-  Clock
+  Clock,
+  Menu,
+  X
 } from "lucide-react";
-import { type ReactNode, useMemo, useState, useEffect, useCallback } from "react";
+import { type ReactNode, useMemo, useState, useEffect, useCallback, useRef } from "react";
 import Lenis from "lenis";
 import type {
   AccountingOverview,
@@ -153,6 +155,9 @@ function operationsTypeLabel(type: OperationsDocumentType): string {
 export function PetTravelApp() {
   const [mode, setMode] = useState<AppMode>("guest");
   const [activeTab, setActiveTab] = useState<TabKey>("catalog");
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  const [isUploadingImage, setIsUploadingImage] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [workingOrder, setWorkingOrder] = useState<CustomerOrder>(EMPTY_ORDER);
 
   // Auth & data state
@@ -683,6 +688,72 @@ export function PetTravelApp() {
       setNewImageUrlInput("");
     } catch (error) {
       alert(getValidationErrorMessage(error, "Đường dẫn ảnh không hợp lệ."));
+    }
+  };
+
+  const handleLocalImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+    if (!allowedTypes.has(file.type)) {
+      alert("Định dạng ảnh không hỗ trợ! Vui lòng chọn ảnh JPG, PNG hoặc WEBP.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert("Dung lượng ảnh quá lớn! File không được vượt quá 10MB.");
+      return;
+    }
+
+    setIsUploadingImage(true);
+    try {
+      const presignRes = await fetch("/api/uploads/presign", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          orderId: "catalog",
+          fileName: file.name,
+          contentType: file.type,
+          fileSizeBytes: file.size,
+          purpose: "product-image"
+        })
+      });
+
+      if (!presignRes.ok) {
+        const errData = await presignRes.json();
+        throw new Error(errData.error || "Không thể lấy link tải lên từ máy chủ.");
+      }
+
+      const { uploadUrl, publicUrl } = await presignRes.json();
+
+      const uploadRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": file.type,
+        },
+        body: file
+      });
+
+      if (!uploadRes.ok) {
+        throw new Error("Lỗi khi tải file lên bộ lưu trữ đám mây Cloudflare R2.");
+      }
+
+      if (!formImages.includes(publicUrl)) {
+        const updated = [...formImages, publicUrl];
+        setFormImages(updated);
+        if (!formImage || formImages.length === 0) {
+          setFormImage(publicUrl);
+        }
+      }
+    } catch (error: any) {
+      alert(`Lỗi tải ảnh: ${error.message || "Có lỗi xảy ra."}`);
+    } finally {
+      setIsUploadingImage(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   };
 
@@ -1482,9 +1553,35 @@ export function PetTravelApp() {
   // --- 2. MAIN APPLICATION SHELL ---
   return (
     <main className="app-shell">
+      {/* Mobile Sidebar Overlay */}
+      {isSidebarOpen && (
+        <div 
+          className="sidebar-overlay lg:hidden" 
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
       {/* SIDEBAR NAVIGATION */}
-      <aside className="sidebar">
-        <div className="flex items-center gap-3">
+      <aside className={`sidebar ${isSidebarOpen ? "open" : ""}`}>
+        {/* Mobile Header with close button */}
+        <div className="flex justify-between items-center w-full lg:hidden mb-2">
+          <div className="flex items-center gap-3">
+            <div className="brand-mark">🐾</div>
+            <div>
+              <h1 className="text-lg font-bold leading-none">Pet Travel</h1>
+              <p className="muted text-xs font-semibold mt-1">Cổng Bán Sỉ Đối Tác</p>
+            </div>
+          </div>
+          <button 
+            type="button" 
+            className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-orange-100 text-orange-950 transition cursor-pointer"
+            onClick={() => setIsSidebarOpen(false)}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Desktop Header */}
+        <div className="hidden lg:flex items-center gap-3">
           <div className="brand-mark">🐾</div>
           <div>
             <h1 className="text-lg font-bold leading-none">Pet Travel</h1>
@@ -1533,7 +1630,10 @@ export function PetTravelApp() {
               className="tab-button w-full justify-start"
               type="button"
               data-active={activeTab === "catalog"}
-              onClick={() => setActiveTab("catalog")}
+              onClick={() => {
+                setActiveTab("catalog");
+                setIsSidebarOpen(false);
+              }}
             >
               <Search size={18} />
               Cửa hàng bán sỉ
@@ -1544,7 +1644,10 @@ export function PetTravelApp() {
                 className="tab-button w-full justify-start"
                 type="button"
                 data-active={activeTab === "catalog"}
-                onClick={() => setActiveTab("catalog")}
+                onClick={() => {
+                  setActiveTab("catalog");
+                  setIsSidebarOpen(false);
+                }}
               >
                 <Boxes size={18} />
                 Cửa hàng bán sỉ
@@ -1553,7 +1656,10 @@ export function PetTravelApp() {
                 className="tab-button w-full justify-start"
                 type="button"
                 data-active={activeTab === "cart"}
-                onClick={() => setActiveTab("cart")}
+                onClick={() => {
+                  setActiveTab("cart");
+                  setIsSidebarOpen(false);
+                }}
               >
                 <ShoppingCart size={18} />
                 Giỏ hàng của tôi
@@ -1567,7 +1673,10 @@ export function PetTravelApp() {
                 className="tab-button w-full justify-start"
                 type="button"
                 data-active={activeTab === "order"}
-                onClick={() => setActiveTab("order")}
+                onClick={() => {
+                  setActiveTab("order");
+                  setIsSidebarOpen(false);
+                }}
               >
                 <MessageSquare size={18} />
                 Trực phòng đơn hàng
@@ -1579,6 +1688,7 @@ export function PetTravelApp() {
                 onClick={() => {
                   setActiveTab("profile");
                   setProfileFullName(currentUser?.name || "");
+                  setIsSidebarOpen(false);
                 }}
               >
                 <UserRound size={18} />
@@ -1591,7 +1701,10 @@ export function PetTravelApp() {
                 className="tab-button w-full justify-start"
                 type="button"
                 data-active={activeTab === "admin"}
-                onClick={() => setActiveTab("admin")}
+                onClick={() => {
+                  setActiveTab("admin");
+                  setIsSidebarOpen(false);
+                }}
               >
                 <SplitSquareVertical size={18} />
                 Quản lý đơn hàng
@@ -1600,7 +1713,10 @@ export function PetTravelApp() {
                 className="tab-button w-full justify-start"
                 type="button"
                 data-active={activeTab === "admin_products"}
-                onClick={() => setActiveTab("admin_products")}
+                onClick={() => {
+                  setActiveTab("admin_products");
+                  setIsSidebarOpen(false);
+                }}
               >
                 <Boxes size={18} />
                 Quản lý sản phẩm
@@ -1609,7 +1725,10 @@ export function PetTravelApp() {
                 className="tab-button w-full justify-start"
                 type="button"
                 data-active={activeTab === "admin_suppliers"}
-                onClick={() => setActiveTab("admin_suppliers")}
+                onClick={() => {
+                  setActiveTab("admin_suppliers");
+                  setIsSidebarOpen(false);
+                }}
               >
                 <Building2 size={18} />
                 Quản lý nhà cung cấp
@@ -1618,7 +1737,10 @@ export function PetTravelApp() {
                 className="tab-button w-full justify-start"
                 type="button"
                 data-active={activeTab === "admin_categories"}
-                onClick={() => setActiveTab("admin_categories")}
+                onClick={() => {
+                  setActiveTab("admin_categories");
+                  setIsSidebarOpen(false);
+                }}
               >
                 <Boxes size={18} />
                 Quản lý danh mục
@@ -1630,6 +1752,7 @@ export function PetTravelApp() {
                 onClick={() => {
                   setActiveTab("admin_users");
                   fetchUsers();
+                  setIsSidebarOpen(false);
                 }}
               >
                 <Users size={18} />
@@ -1642,6 +1765,7 @@ export function PetTravelApp() {
                 onClick={() => {
                   setActiveTab("admin_promotions");
                   fetchPromotions();
+                  setIsSidebarOpen(false);
                 }}
               >
                 <Percent size={18} />
@@ -1654,6 +1778,7 @@ export function PetTravelApp() {
                 onClick={() => {
                   setActiveTab("admin_reconciliation");
                   fetchReportsOverview();
+                  setIsSidebarOpen(false);
                 }}
               >
                 <WalletCards size={18} />
@@ -1666,6 +1791,7 @@ export function PetTravelApp() {
                 onClick={() => {
                   setActiveTab("admin_operations");
                   fetchOperationsOverview();
+                  setIsSidebarOpen(false);
                 }}
               >
                 <PackageCheck size={18} />
@@ -1678,6 +1804,7 @@ export function PetTravelApp() {
                 onClick={() => {
                   setActiveTab("admin_accounting");
                   fetchAccountingOverview();
+                  setIsSidebarOpen(false);
                 }}
               >
                 <Calculator size={18} />
@@ -1690,16 +1817,20 @@ export function PetTravelApp() {
                 onClick={() => {
                   setActiveTab("admin_reports");
                   fetchReportsOverview();
+                  setIsSidebarOpen(false);
                 }}
               >
                 <BarChart3 size={18} />
-                BÃ¡o cÃ¡o
+                Báo cáo
               </button>
               <button
                 className="tab-button w-full justify-start"
                 type="button"
                 data-active={activeTab === "admin_invoices"}
-                onClick={() => setActiveTab("admin_invoices")}
+                onClick={() => {
+                  setActiveTab("admin_invoices");
+                  setIsSidebarOpen(false);
+                }}
               >
                 <ReceiptText size={18} />
                 Hóa đơn đỏ (VAT)
@@ -1708,7 +1839,10 @@ export function PetTravelApp() {
                 className="tab-button w-full justify-start"
                 type="button"
                 data-active={activeTab === "catalog"}
-                onClick={() => setActiveTab("catalog")}
+                onClick={() => {
+                  setActiveTab("catalog");
+                  setIsSidebarOpen(false);
+                }}
               >
                 <Search size={18} />
                 Xem trước Cửa hàng
@@ -1717,7 +1851,10 @@ export function PetTravelApp() {
                 className="tab-button w-full justify-start"
                 type="button"
                 data-active={activeTab === "settings"}
-                onClick={() => setActiveTab("settings")}
+                onClick={() => {
+                  setActiveTab("settings");
+                  setIsSidebarOpen(false);
+                }}
               >
                 <Settings size={18} />
                 Cấu hình & Đối tác
@@ -1741,13 +1878,23 @@ export function PetTravelApp() {
       {/* MAIN SCREEN AREA */}
       <section className="main-area">
         <header className="topbar animate-fade-in">
-          <div>
-            <p className="muted m-0 text-[10px] font-mono font-bold uppercase tracking-wider">
-              Cửa hàng sỉ Pet Travel / {!isLoggedIn ? "Khách ghé thăm" : isAdmin ? "Cổng quản trị" : "Cổng Đại lý"}
-            </p>
-            <h2 className="text-xl font-bold text-[#331B08] mt-1">
-              {!isLoggedIn ? "Xin chào đối tác sỉ đáng yêu! 👋" : `Xin chào, ${currentUser?.name || "Đại lý"}! 👋`}
-            </h2>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="lg:hidden p-2 rounded-xl border-2 border-orange-100 hover:border-orange-200 bg-[#FFFDF9] text-orange-950 flex items-center justify-center transition cursor-pointer active:scale-95 mr-1"
+              onClick={() => setIsSidebarOpen(true)}
+              title="Mở menu quản trị"
+            >
+              <Menu size={20} />
+            </button>
+            <div>
+              <p className="muted m-0 text-[10px] font-mono font-bold uppercase tracking-wider">
+                Cửa hàng sỉ Pet Travel / {!isLoggedIn ? "Khách ghé thăm" : isAdmin ? "Cổng quản trị" : "Cổng Đại lý"}
+              </p>
+              <h2 className="text-xl font-bold text-[#331B08] mt-1">
+                {!isLoggedIn ? "Xin chào đối tác sỉ đáng yêu! 👋" : `Xin chào, ${currentUser?.name || "Đại lý"}! 👋`}
+              </h2>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
@@ -4963,7 +5110,18 @@ export function PetTravelApp() {
               {/* TikTok-style Image Gallery Manager */}
               <div className="flex flex-col gap-1.5 p-3 border border-orange-100 rounded-2xl bg-orange-50/5">
                 <label className="text-xs font-bold text-orange-950/80">Ảnh sản phẩm (Chọn 1 ảnh làm ảnh chính):</label>
-                <div className="flex gap-2">
+                
+                {/* Hidden File Input for Local Image Upload */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleLocalImageUpload}
+                  disabled={isUploadingImage}
+                />
+
+                <div className="flex flex-wrap sm:flex-nowrap gap-2">
                   <input
                     type="text"
                     className="text-input text-xs py-2 px-3 flex-grow"
@@ -4977,8 +5135,17 @@ export function PetTravelApp() {
                       }
                     }}
                   />
-                  <button type="button" className="tab-button text-xs py-2 px-4 cursor-pointer" onClick={handleAddImage}>
-                    + Thêm ảnh
+                  <button type="button" className="tab-button text-xs py-2 px-4 cursor-pointer shrink-0" onClick={handleAddImage}>
+                    + Thêm ảnh URL
+                  </button>
+                  <button
+                    type="button"
+                    className="tab-button text-xs py-2 px-4 cursor-pointer shrink-0 flex items-center gap-1.5 bg-orange-50 border-orange-200 text-orange-950 hover:bg-orange-100"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploadingImage}
+                  >
+                    <Upload size={14} />
+                    + Tải ảnh từ máy
                   </button>
                 </div>
 
@@ -4993,19 +5160,28 @@ export function PetTravelApp() {
                         onClick={() => setFormImage(imgUrl)}
                         title="Click để chọn làm ảnh chính"
                       >
-                        <Image src={imgUrl} alt={`Thumb ${idx}`} fill className="object-cover" />
+                        <Image src={imgUrl} alt={`Thumb ${idx}`} fill className="object-cover animate-fade-in" />
                         
+                        {/* Hover Overlay to Select as Main */}
+                        {!isMain && (
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition duration-150 z-10">
+                            <span className="text-[9px] text-white font-extrabold text-center px-1">
+                              Đặt ảnh chính
+                            </span>
+                          </div>
+                        )}
+
                         {/* Main Image Indicator */}
                         {isMain && (
-                          <div className="absolute top-1 left-1 bg-orange-500 text-white text-[8px] font-extrabold px-1 py-0.5 rounded shadow-sm z-10">
-                            Ảnh chính
+                          <div className="absolute top-1 left-1 bg-orange-500 text-white text-[8px] font-extrabold px-1 py-0.5 rounded shadow-sm z-20">
+                             Ảnh chính
                           </div>
                         )}
 
                         {/* Remove Image Button */}
                         <button
                           type="button"
-                          className="absolute top-1 right-1 w-4.5 h-4.5 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold opacity-0 group-hover:opacity-100 transition shadow-sm z-20 hover:bg-red-600"
+                          className="absolute top-1 right-1 w-4.5 h-4.5 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold opacity-0 group-hover:opacity-100 transition shadow-sm z-30 hover:bg-red-600"
                           onClick={(e) => {
                             e.stopPropagation();
                             const updated = formImages.filter(img => img !== imgUrl);
@@ -5020,7 +5196,16 @@ export function PetTravelApp() {
                       </div>
                     );
                   })}
-                  {formImages.length === 0 && (
+
+                  {/* Skeleton for local uploading image */}
+                  {isUploadingImage && (
+                    <div className="w-20 h-20 border-2 border-dashed border-orange-300 rounded-xl flex flex-col items-center justify-center text-[9px] text-orange-950 font-bold bg-orange-50/20 animate-pulse">
+                      <span className="text-xs">⏳</span>
+                      <span>Đang tải...</span>
+                    </div>
+                  )}
+
+                  {formImages.length === 0 && !isUploadingImage && (
                     <div className="w-20 h-20 border-2 border-dashed border-orange-200 rounded-xl flex items-center justify-center text-[10px] text-orange-900/60 font-bold bg-orange-50/10">
                       Chưa có ảnh
                     </div>

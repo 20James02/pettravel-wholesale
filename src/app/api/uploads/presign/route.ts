@@ -37,7 +37,9 @@ export async function POST(request: Request) {
     }
 
     const result = await createR2UploadUrl(payload);
-    return NextResponse.json(result);
+    const publicBaseUrl = process.env.R2_PUBLIC_BASE_URL || "https://pub-example.r2.dev";
+    const publicUrl = `${publicBaseUrl}/${result.key}`;
+    return NextResponse.json({ ...result, publicUrl });
   } catch (error) {
     const message = getValidationErrorMessage(error, "Không thể tạo đường dẫn upload.");
     return NextResponse.json({ error: message }, { status: 400 });

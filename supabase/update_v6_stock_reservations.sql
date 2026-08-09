@@ -16,10 +16,12 @@ create table if not exists stock_reservations (
   release_reason text,
   created_by text references app_users(id),
   created_at timestamptz not null default now(),
-  release_note text
+  release_note text,
+  consumed_document_id text references operations_documents(id)
 );
 
 alter table stock_reservations add column if not exists release_note text;
+alter table stock_reservations add column if not exists consumed_document_id text references operations_documents(id);
 
 alter table stock_reservations
   drop constraint if exists stock_reservations_organization_id_order_id_order_item_id_sku_snapshot_key;
@@ -75,6 +77,7 @@ declare
   v_order record;
   v_item record;
   v_balance record;
+  v_inventory_org_id text;
   v_existing_qty integer;
   v_reserved_qty integer := 0;
   v_line_count integer := 0;
@@ -92,17 +95,34 @@ begin
     raise exception 'Only accepted or locked orders can reserve stock.';
   end if;
 
+  select organization_id
+  into v_inventory_org_id
+  from app_users
+  where id = p_actor_id
+    and status = 'active';
+
+  if v_inventory_org_id is null then
+    raise exception 'Actor is not attached to an internal inventory organization.';
+  end if;
+
   select coalesce(sum(quantity), 0)
   into v_existing_qty
   from stock_reservations
   where order_id = p_order_id
+    and organization_id = v_inventory_org_id
     and status = 'active';
 
   if v_existing_qty > 0 then
     return jsonb_build_object(
       'status', 'already_reserved',
       'reservedQty', v_existing_qty,
-      'lineCount', (select count(*) from stock_reservations where order_id = p_order_id and status = 'active')
+      'lineCount', (
+        select count(*)
+        from stock_reservations
+        where order_id = p_order_id
+          and organization_id = v_inventory_org_id
+          and status = 'active'
+      )
     );
   end if;
 
@@ -116,7 +136,7 @@ begin
     into v_balance
     from inventory_balances ib
     left join warehouses w on w.id = ib.warehouse_id
-    where ib.organization_id = v_order.organization_id
+    where ib.organization_id = v_inventory_org_id
       and ib.sku = v_item.variant_sku_snapshot
       and (ib.on_hand_qty - ib.reserved_qty - ib.defective_qty) >= v_item.quantity
     order by coalesce(w.is_default, false) desc, ib.updated_at desc
@@ -145,7 +165,7 @@ begin
       created_by
     )
     values (
-      v_order.organization_id,
+      v_inventory_org_id,
       v_balance.warehouse_id,
       p_order_id,
       v_item.id,
@@ -183,6 +203,7 @@ as $$
 declare
   v_reservation record;
   v_balance record;
+  v_actor_org_id text;
   v_next_status text;
   v_document_id text;
   v_document_no text;
@@ -201,10 +222,21 @@ begin
     when 'cancel_order' then 'cancelled'
   end;
 
+  select organization_id
+  into v_actor_org_id
+  from app_users
+  where id = p_actor_id
+    and status = 'active';
+
+  if v_actor_org_id is null then
+    raise exception 'Actor is not attached to an internal inventory organization.';
+  end if;
+
   for v_reservation in
     select *
     from stock_reservations
     where order_id = p_order_id
+      and organization_id = v_actor_org_id
       and status = 'active'
     order by created_at
     for update
@@ -330,7 +362,8 @@ begin
     set status = v_next_status,
         released_at = now(),
         release_reason = coalesce(p_reason, p_action),
-        release_note = concat('Actor ', p_actor_id, ' executed ', p_action)
+        release_note = concat('Actor ', p_actor_id, ' executed ', p_action),
+        consumed_document_id = case when p_action = 'consume_order' then v_document_id else consumed_document_id end
     where id = v_reservation.id;
 
     v_total_qty := v_total_qty + v_reservation.quantity;
