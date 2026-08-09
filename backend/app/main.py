@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers.router import api_router
 from app.core.config import settings
@@ -10,13 +10,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-@app.middleware("http")
-async def fix_vercel_rewrites_path(request: Request, call_next):
-    forwarded_path = request.headers.get("x-matched-path") or request.headers.get("x-forwarded-uri")
-    if forwarded_path and forwarded_path != request.scope.get("path"):
-        request.scope["path"] = forwarded_path.split("?")[0]
-    return await call_next(request)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,9 +19,13 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(api_router, prefix="/v1")
+app.include_router(api_router, prefix="/api/index.py/api/v1")
+app.include_router(api_router, prefix="/api/index.py/v1")
 
 @app.get("/")
 @app.get("/api")
+@app.get("/api/index.py")
 def read_root():
     return {
         "status": "healthy",
