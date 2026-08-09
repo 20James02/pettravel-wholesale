@@ -1,6 +1,12 @@
 import "server-only";
 
-import type { AccountingOverview, JournalEntryStatus, JournalEntrySummary, UserAccount } from "@/lib/domain";
+import type {
+  AccountingOverview,
+  JournalEntryDetail,
+  JournalEntryStatus,
+  JournalEntrySummary,
+  UserAccount
+} from "@/lib/domain";
 import { createSupabaseServiceClient } from "@/server/supabase";
 
 interface JournalEntryRow {
@@ -14,6 +20,20 @@ interface JournalEntryRow {
   posted_at?: string | null;
 }
 
+interface JournalLineRow {
+  id: string;
+  entry_id: string;
+  line_no: number;
+  account_code: string;
+  account_name: string;
+  debit_amount: number | string;
+  credit_amount: number | string;
+  memo?: string | null;
+  partner_org_id?: string | null;
+  order_id?: string | null;
+  supplier_id?: string | null;
+}
+
 function toJournalEntrySummary(row: JournalEntryRow): JournalEntrySummary {
   return {
     id: row.id,
@@ -24,6 +44,33 @@ function toJournalEntrySummary(row: JournalEntryRow): JournalEntrySummary {
     sourceId: row.source_id,
     createdAt: row.created_at,
     postedAt: row.posted_at ?? undefined
+  };
+}
+
+function toJournalEntryDetail(row: JournalEntryRow, lines: JournalLineRow[]): JournalEntryDetail {
+  const mappedLines = lines
+    .sort((a, b) => a.line_no - b.line_no)
+    .map((line) => ({
+      id: line.id,
+      lineNo: line.line_no,
+      accountCode: line.account_code,
+      accountName: line.account_name,
+      debitAmountVnd: Number(line.debit_amount ?? 0),
+      creditAmountVnd: Number(line.credit_amount ?? 0),
+      memo: line.memo ?? undefined,
+      orderId: line.order_id ?? undefined,
+      supplierId: line.supplier_id ?? undefined,
+      partnerOrgId: line.partner_org_id ?? undefined
+    }));
+  const debitTotalVnd = mappedLines.reduce((sum, line) => sum + line.debitAmountVnd, 0);
+  const creditTotalVnd = mappedLines.reduce((sum, line) => sum + line.creditAmountVnd, 0);
+
+  return {
+    ...toJournalEntrySummary(row),
+    debitTotalVnd,
+    creditTotalVnd,
+    isBalanced: debitTotalVnd > 0 && debitTotalVnd === creditTotalVnd,
+    lines: mappedLines
   };
 }
 
@@ -113,4 +160,51 @@ export async function getAccountingOverview(user: UserAccount): Promise<Accounti
     voidEntries,
     recentEntries: ((recentEntriesResult.data ?? []) as JournalEntryRow[]).map(toJournalEntrySummary)
   };
+}
+
+export async function getJournalEntryDetails(user: UserAccount, limit = 20): Promise<JournalEntryDetail[]> {
+  const supabase = createSupabaseServiceClient();
+  const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 50);
+
+  let entriesQuery = supabase
+    .from("journal_entries")
+    .select("id, entry_no, description, status, source_type, source_id, created_at, posted_at")
+    .order("created_at", { ascending: false })
+    .limit(safeLimit);
+
+  if (user.organizationId) {
+    entriesQuery = entriesQuery.eq("organization_id", user.organizationId);
+  }
+
+  const { data: entriesData, error: entriesError } = await entriesQuery;
+  if (entriesError) {
+    throw new Error(`Cannot read journal entries: ${entriesError.message}`);
+  }
+
+  const entries = (entriesData ?? []) as JournalEntryRow[];
+  if (entries.length === 0) return [];
+
+  let linesQuery = supabase
+    .from("journal_lines")
+    .select("id, entry_id, line_no, account_code, account_name, debit_amount, credit_amount, memo, partner_org_id, order_id, supplier_id")
+    .in("entry_id", entries.map((entry) => entry.id))
+    .order("line_no", { ascending: true });
+
+  if (user.organizationId) {
+    linesQuery = linesQuery.eq("organization_id", user.organizationId);
+  }
+
+  const { data: linesData, error: linesError } = await linesQuery;
+  if (linesError) {
+    throw new Error(`Cannot read journal lines: ${linesError.message}`);
+  }
+
+  const linesByEntry = new Map<string, JournalLineRow[]>();
+  for (const line of (linesData ?? []) as JournalLineRow[]) {
+    const current = linesByEntry.get(line.entry_id) ?? [];
+    current.push(line);
+    linesByEntry.set(line.entry_id, current);
+  }
+
+  return entries.map((entry) => toJournalEntryDetail(entry, linesByEntry.get(entry.id) ?? []));
 }

@@ -227,6 +227,26 @@ export interface JournalEntrySummary {
   postedAt?: string;
 }
 
+export interface JournalLineSummary {
+  id: string;
+  lineNo: number;
+  accountCode: string;
+  accountName: string;
+  debitAmountVnd: number;
+  creditAmountVnd: number;
+  memo?: string;
+  orderId?: string;
+  supplierId?: string;
+  partnerOrgId?: string;
+}
+
+export interface JournalEntryDetail extends JournalEntrySummary {
+  debitTotalVnd: number;
+  creditTotalVnd: number;
+  isBalanced: boolean;
+  lines: JournalLineSummary[];
+}
+
 export interface AccountingOverview {
   periodsTotal: number;
   openPeriods: number;

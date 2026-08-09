@@ -43,6 +43,7 @@ import type {
   AdminPolicy,
   AdminReportsOverview,
   CustomerOrder,
+  JournalEntryDetail,
   OperationsDocumentType,
   OperationsOverview,
   PaymentIntent,
@@ -177,7 +178,9 @@ export function PetTravelApp() {
   const [adminPolicy, setAdminPolicy] = useState<AdminPolicy>(DEFAULT_POLICY);
   const [rolePermissions, setRolePermissions] = useState<Record<RoleKey, PermissionKey[]>>({} as Record<RoleKey, PermissionKey[]>);
   const [accountingOverview, setAccountingOverview] = useState<AccountingOverview | null>(null);
+  const [accountingJournalEntries, setAccountingJournalEntries] = useState<JournalEntryDetail[]>([]);
   const [isAccountingLoading, setIsAccountingLoading] = useState<boolean>(false);
+  const [isAccountingJournalLoading, setIsAccountingJournalLoading] = useState<boolean>(false);
   const [accountingError, setAccountingError] = useState<string>("");
   const [reportsOverview, setReportsOverview] = useState<AdminReportsOverview | null>(null);
   const [isReportsLoading, setIsReportsLoading] = useState<boolean>(false);
@@ -501,6 +504,27 @@ export function PetTravelApp() {
       setAccountingError("Không thể kết nối tới dịch vụ kế toán.");
     } finally {
       setIsAccountingLoading(false);
+    }
+  }, []);
+
+  const fetchAccountingJournalEntries = useCallback(async () => {
+    setIsAccountingJournalLoading(true);
+    try {
+      const res = await fetch("/api/admin/accounting/journal-entries?limit=20");
+      const data = await res.json();
+
+      if (!res.ok) {
+        setAccountingJournalEntries([]);
+        setAccountingError(data.error || "Không thể tải sổ nhật ký kế toán chi tiết.");
+        return;
+      }
+
+      setAccountingJournalEntries(data.entries ?? []);
+    } catch {
+      setAccountingJournalEntries([]);
+      setAccountingError("Không thể kết nối tới sổ nhật ký kế toán chi tiết.");
+    } finally {
+      setIsAccountingJournalLoading(false);
     }
   }, []);
 
@@ -951,6 +975,7 @@ export function PetTravelApp() {
         await fetchPromotions();
         await fetchOperationsOverview();
         await fetchAccountingOverview();
+        await fetchAccountingJournalEntries();
         await fetchReportsOverview();
       } else {
         setProfileFullName(data.user.name);
@@ -1513,7 +1538,7 @@ export function PetTravelApp() {
         return;
       }
 
-      await Promise.all([fetchAccountingOverview(), fetchReportsOverview()]);
+      await Promise.all([fetchAccountingOverview(), fetchAccountingJournalEntries(), fetchReportsOverview()]);
       alert(
         `Đã ghi sổ: ${data.result?.createdEntries ?? 0} bút toán mới, ` +
         `${data.result?.skippedEntries ?? 0} bút toán đã tồn tại.`
@@ -2019,6 +2044,7 @@ export function PetTravelApp() {
                 onClick={() => {
                   setActiveTab("admin_accounting");
                   fetchAccountingOverview();
+                  fetchAccountingJournalEntries();
                   setIsSidebarOpen(false);
                 }}
               >
@@ -4484,11 +4510,14 @@ export function PetTravelApp() {
               <button
                 type="button"
                 className="tab-button text-xs py-2 px-4 border-orange-200 bg-white hover:bg-orange-50 cursor-pointer font-bold rounded-xl"
-                onClick={fetchAccountingOverview}
-                disabled={isAccountingLoading}
+                onClick={() => {
+                  fetchAccountingOverview();
+                  fetchAccountingJournalEntries();
+                }}
+                disabled={isAccountingLoading || isAccountingJournalLoading}
               >
-                <RefreshCw size={14} className={isAccountingLoading ? "animate-spin" : ""} />
-                {isAccountingLoading ? "Đang tải..." : "Làm mới số liệu"}
+                <RefreshCw size={14} className={isAccountingLoading || isAccountingJournalLoading ? "animate-spin" : ""} />
+                {isAccountingLoading || isAccountingJournalLoading ? "Đang tải..." : "Làm mới số liệu"}
               </button>
             </div>
 
@@ -4587,6 +4616,99 @@ export function PetTravelApp() {
                     )}
                   </tbody>
                 </table>
+
+                <div className="flex flex-col gap-3 border-t border-dashed border-orange-100 pt-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-[#331B08] m-0">Sổ nhật ký chi tiết Nợ/Có</h3>
+                      <p className="text-[10px] muted m-0 mt-0.5">
+                        Hiển thị từng dòng hạch toán để kế toán kiểm tra tài khoản, đối tượng, đơn hàng và trạng thái cân bút toán.
+                      </p>
+                    </div>
+                    <StatusPill tone={accountingJournalEntries.length ? "info" : "warning"}>
+                      {accountingJournalEntries.length ? `${accountingJournalEntries.length} bút toán` : "Chưa có dòng"}
+                    </StatusPill>
+                  </div>
+
+                  {accountingJournalEntries.length ? (
+                    <div className="flex flex-col gap-3">
+                      {accountingJournalEntries.map((entry) => (
+                        <div key={entry.id} className="rounded-2xl border border-orange-100 bg-[#FFFDF9] overflow-hidden">
+                          <div className="p-3 bg-orange-50/50 border-b border-orange-100 flex flex-col lg:flex-row lg:items-center justify-between gap-2">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <strong className="text-xs font-mono text-orange-950">{entry.entryNo}</strong>
+                                <span className={`status-pill text-[9px] ${entry.status === "posted" ? "success" : entry.status === "draft" ? "warning" : "info"}`}>
+                                  {entry.status === "posted" ? "Đã ghi sổ" : entry.status === "draft" ? "Nháp" : "Đã hủy"}
+                                </span>
+                                <span className={`status-pill text-[9px] ${entry.isBalanced ? "success" : "warning"}`}>
+                                  {entry.isBalanced ? "Cân Nợ/Có" : "Lệch Nợ/Có"}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-[#331B08] font-semibold m-0 mt-1">{entry.description}</p>
+                              <p className="text-[10px] muted m-0 mt-0.5">
+                                Nguồn: <span className="font-mono">{entry.sourceType}</span> · <span className="font-mono">{entry.sourceId}</span>
+                              </p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-right min-w-[220px]">
+                              <div className="rounded-xl bg-white border border-orange-100 p-2">
+                                <span className="text-[9px] muted uppercase font-bold block">Tổng Nợ</span>
+                                <strong className="text-xs text-green-700">{formatVnd(entry.debitTotalVnd)}</strong>
+                              </div>
+                              <div className="rounded-xl bg-white border border-orange-100 p-2">
+                                <span className="text-[9px] muted uppercase font-bold block">Tổng Có</span>
+                                <strong className="text-xs text-blue-700">{formatVnd(entry.creditTotalVnd)}</strong>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="overflow-x-auto">
+                            <table className="variant-table w-full">
+                              <thead>
+                                <tr>
+                                  <th>Dòng</th>
+                                  <th>Tài khoản</th>
+                                  <th>Đối tượng / đơn</th>
+                                  <th className="text-right">Nợ</th>
+                                  <th className="text-right">Có</th>
+                                  <th>Ghi chú</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {entry.lines.map((line) => (
+                                  <tr key={line.id}>
+                                    <td className="text-xs font-mono">{line.lineNo}</td>
+                                    <td>
+                                      <span className="text-xs font-bold text-[#331B08] block">{line.accountCode} - {line.accountName}</span>
+                                      <span className="text-[10px] muted">Account ledger</span>
+                                    </td>
+                                    <td className="text-[10px] text-gray-600 font-mono">
+                                      {line.orderId ? <span className="block">Order: {line.orderId}</span> : null}
+                                      {line.partnerOrgId ? <span className="block">Partner: {line.partnerOrgId}</span> : null}
+                                      {line.supplierId ? <span className="block">Supplier: {line.supplierId}</span> : null}
+                                      {!line.orderId && !line.partnerOrgId && !line.supplierId ? "—" : null}
+                                    </td>
+                                    <td className="text-right text-xs font-bold text-green-700">
+                                      {line.debitAmountVnd > 0 ? formatVnd(line.debitAmountVnd) : "—"}
+                                    </td>
+                                    <td className="text-right text-xs font-bold text-blue-700">
+                                      {line.creditAmountVnd > 0 ? formatVnd(line.creditAmountVnd) : "—"}
+                                    </td>
+                                    <td className="text-[10px] text-gray-600">{line.memo || "—"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded-2xl border border-dashed border-orange-200 bg-orange-50/30 text-xs text-orange-950">
+                      Chưa có dòng nhật ký chi tiết. Sau khi chạy migration v7 và bấm “Ghi sổ toàn bộ đơn”, các dòng Nợ/Có sẽ xuất hiện tại đây.
+                    </div>
+                  )}
+                </div>
               </div>
 
               <aside className="panel p-4 flex flex-col gap-4">
