@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers.router import api_router
 from app.core.config import settings
@@ -20,17 +20,17 @@ app.add_middleware(
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 app.include_router(api_router, prefix="/v1")
-app.include_router(api_router, prefix="/api/index.py/api/v1")
-app.include_router(api_router, prefix="/api/index.py/v1")
 
 @app.get("/")
 @app.get("/api")
 @app.get("/api/index.py")
-def read_root():
+def read_root(request: Request):
     return {
         "status": "healthy",
         "service": "pettravel-wholesale-backend",
-        "message": "Welcome to Pet Travel B2B Wholesale API portal!"
+        "message": "Welcome to Pet Travel B2B Wholesale API portal!",
+        "path": request.scope.get("path"),
+        "headers": dict(request.headers)
     }
 
 if __name__ == "__main__":
