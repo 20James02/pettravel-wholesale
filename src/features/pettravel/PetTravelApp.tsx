@@ -3,6 +3,7 @@
 import Image from "next/image";
 import {
   AlertTriangle,
+  BarChart3,
   Bell,
   BookOpenCheck,
   Boxes,
@@ -39,6 +40,7 @@ import Lenis from "lenis";
 import type {
   AccountingOverview,
   AdminPolicy,
+  AdminReportsOverview,
   CustomerOrder,
   OperationsDocumentType,
   OperationsOverview,
@@ -70,7 +72,7 @@ import {
 } from "@/lib/validation";
 
 type AppMode = "guest" | "customer" | "admin";
-type TabKey = "catalog" | "cart" | "order" | "admin" | "admin_products" | "admin_reconciliation" | "admin_operations" | "admin_accounting" | "admin_invoices" | "settings" | "admin_suppliers" | "admin_categories" | "admin_users" | "profile" | "admin_promotions";
+type TabKey = "catalog" | "cart" | "order" | "admin" | "admin_products" | "admin_reconciliation" | "admin_operations" | "admin_accounting" | "admin_reports" | "admin_invoices" | "settings" | "admin_suppliers" | "admin_categories" | "admin_users" | "profile" | "admin_promotions";
 
 interface ApiUser {
   id: string;
@@ -162,6 +164,9 @@ export function PetTravelApp() {
   const [accountingOverview, setAccountingOverview] = useState<AccountingOverview | null>(null);
   const [isAccountingLoading, setIsAccountingLoading] = useState<boolean>(false);
   const [accountingError, setAccountingError] = useState<string>("");
+  const [reportsOverview, setReportsOverview] = useState<AdminReportsOverview | null>(null);
+  const [isReportsLoading, setIsReportsLoading] = useState<boolean>(false);
+  const [reportsError, setReportsError] = useState<string>("");
   const [operationsOverview, setOperationsOverview] = useState<OperationsOverview | null>(null);
   const [isOperationsLoading, setIsOperationsLoading] = useState<boolean>(false);
   const [operationsError, setOperationsError] = useState<string>("");
@@ -445,6 +450,28 @@ export function PetTravelApp() {
     }
   }, []);
 
+  const fetchReportsOverview = useCallback(async () => {
+    setIsReportsLoading(true);
+    setReportsError("");
+    try {
+      const res = await fetch("/api/admin/reports/overview");
+      const data = await res.json();
+
+      if (!res.ok) {
+        setReportsOverview(null);
+        setReportsError(data.error || "Không thể tải dữ liệu báo cáo.");
+        return;
+      }
+
+      setReportsOverview(data.overview ?? null);
+    } catch {
+      setReportsOverview(null);
+      setReportsError("Không thể kết nối tới dịch vụ báo cáo.");
+    } finally {
+      setIsReportsLoading(false);
+    }
+  }, []);
+
   const fetchOperationsOverview = useCallback(async () => {
     setIsOperationsLoading(true);
     setOperationsError("");
@@ -697,6 +724,7 @@ export function PetTravelApp() {
         await fetchPromotions();
         await fetchOperationsOverview();
         await fetchAccountingOverview();
+        await fetchReportsOverview();
       } else {
         setProfileFullName(data.user.name);
       }
@@ -1612,6 +1640,18 @@ export function PetTravelApp() {
               >
                 <Calculator size={18} />
                 Kế toán
+              </button>
+              <button
+                className="tab-button w-full justify-start"
+                type="button"
+                data-active={activeTab === "admin_reports"}
+                onClick={() => {
+                  setActiveTab("admin_reports");
+                  fetchReportsOverview();
+                }}
+              >
+                <BarChart3 size={18} />
+                BÃ¡o cÃ¡o
               </button>
               <button
                 className="tab-button w-full justify-start"
@@ -3522,6 +3562,207 @@ export function PetTravelApp() {
                 </table>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* --- D3A2. REPORTS OVERVIEW TAB (ADMIN ONLY) --- */}
+        {activeTab === "admin_reports" && isAdmin && (
+          <div className="flex flex-col gap-6 animate-fade-in w-full">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <BarChart3 size={22} className="text-orange-600" />
+                  <h2 className="text-xl font-bold text-[#331B08]">Báo cáo quản trị B2B</h2>
+                </div>
+                <p className="muted text-xs">
+                  Tổng hợp doanh thu, thanh toán, tồn kho, hàng lỗi, bút toán và cảnh báo đối soát. Các số liệu kế toán chỉ được xem là chính thức khi lấy từ bút toán đã post và đối soát xong.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="tab-button text-xs py-2 px-4 border-orange-200 bg-white hover:bg-orange-50 cursor-pointer font-bold rounded-xl"
+                onClick={fetchReportsOverview}
+                disabled={isReportsLoading}
+              >
+                <RefreshCw size={14} className={isReportsLoading ? "animate-spin" : ""} />
+                {isReportsLoading ? "Đang tải..." : "Làm mới báo cáo"}
+              </button>
+            </div>
+
+            {reportsError && (
+              <div className="p-4 border border-red-200 bg-red-50 rounded-2xl flex items-start gap-3">
+                <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-sm text-red-950 block">Không tải được báo cáo</strong>
+                  <p className="text-xs text-red-800 m-0 mt-1">{reportsError}</p>
+                </div>
+              </div>
+            )}
+
+            {reportsOverview && (
+              <>
+                <div className="panel p-4 border-orange-100 bg-orange-50/30">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                    <div>
+                      <strong className="text-sm text-[#331B08]">Cơ sở số liệu: {reportsOverview.basis === "posted_only" ? "Bút toán đã post" : "Ước tính vận hành + sổ đã post"}</strong>
+                      <p className="text-[11px] muted m-0 mt-1">
+                        Sinh lúc {new Date(reportsOverview.generatedAt).toLocaleString("vi-VN")}. Báo cáo này cố ý tách rõ số liệu chính thức và số liệu ước tính để tránh khóa sổ sai.
+                      </p>
+                    </div>
+                    <StatusPill tone={reportsOverview.kpis.trialBalanceDifferenceVnd === 0 ? "success" : "warning"}>
+                      Trial balance lệch: {formatVnd(reportsOverview.kpis.trialBalanceDifferenceVnd)}
+                    </StatusPill>
+                  </div>
+                </div>
+
+                <div className="metrics-grid">
+                  <div className="metric">
+                    <span className="muted text-sm font-semibold">Đơn B2B</span>
+                    <strong>{reportsOverview.kpis.totalOrders}</strong>
+                    <span className="text-[10px] muted">Đang xử lý: {reportsOverview.kpis.activeOrders} · Đã chốt: {reportsOverview.kpis.acceptedOrders}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="muted text-sm font-semibold">Doanh thu ước tính</span>
+                    <strong className="text-green-700">{formatVnd(reportsOverview.kpis.estimatedSalesVnd)}</strong>
+                    <span className="text-[10px] muted">Gross: {formatVnd(reportsOverview.kpis.estimatedGrossSalesVnd)}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="muted text-sm font-semibold">Ưu đãi/chiết khấu</span>
+                    <strong className="text-amber-700">{formatVnd(reportsOverview.kpis.discountAndOfferVnd)}</strong>
+                    <span className="text-[10px] muted">Tính từ giá gross trừ báo giá cuối.</span>
+                  </div>
+                  <div className="metric">
+                    <span className="muted text-sm font-semibold">Thanh toán đã xác nhận</span>
+                    <strong className="text-blue-700">{formatVnd(reportsOverview.kpis.paymentConfirmedVnd)}</strong>
+                    <span className="text-[10px] muted">Chờ proof: {formatVnd(reportsOverview.kpis.paymentPendingProofVnd)}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="muted text-sm font-semibold">Giá trị tồn kho</span>
+                    <strong>{formatVnd(reportsOverview.kpis.inventoryValueVnd)}</strong>
+                    <span className="text-[10px] muted">Sẵn bán: {reportsOverview.kpis.availableQty} / Tồn thực: {reportsOverview.kpis.onHandQty}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="muted text-sm font-semibold">Hàng lỗi</span>
+                    <strong className={reportsOverview.kpis.defectiveQty > 0 ? "text-red-700" : "text-green-700"}>{reportsOverview.kpis.defectiveQty}</strong>
+                    <span className="text-[10px] muted">Cần luồng trả NCC / ghi giảm / xử lý.</span>
+                  </div>
+                  <div className="metric">
+                    <span className="muted text-sm font-semibold">Bút toán</span>
+                    <strong>{reportsOverview.kpis.postedJournalEntries}</strong>
+                    <span className="text-[10px] muted">Nháp: {reportsOverview.kpis.draftJournalEntries}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="muted text-sm font-semibold">Yêu cầu hóa đơn</span>
+                    <strong className={reportsOverview.kpis.invoiceRequestedOrders > 0 ? "text-amber-700" : ""}>{reportsOverview.kpis.invoiceRequestedOrders}</strong>
+                    <span className="text-[10px] muted">Cần module hóa đơn thuế để báo cáo VAT.</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                  <div className="panel p-4 overflow-x-auto">
+                    <h3 className="text-sm font-bold text-[#331B08] mb-3">Doanh thu theo trạng thái đơn</h3>
+                    <table className="variant-table w-full">
+                      <thead>
+                        <tr><th>Trạng thái</th><th>Số đơn</th><th className="text-right">Giá trị</th></tr>
+                      </thead>
+                      <tbody>
+                        {reportsOverview.salesByStatus.length ? reportsOverview.salesByStatus.map((row) => (
+                          <tr key={row.key}>
+                            <td className="text-xs font-bold text-[#331B08]">{row.label}</td>
+                            <td className="text-xs">{row.quantity ?? 0}</td>
+                            <td className="text-xs text-right font-bold">{formatVnd(row.amountVnd)}</td>
+                          </tr>
+                        )) : (
+                          <tr><td colSpan={3} className="py-6 text-center text-xs text-gray-500">Chưa có dữ liệu đơn hàng.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="panel p-4 overflow-x-auto">
+                    <h3 className="text-sm font-bold text-[#331B08] mb-3">Doanh thu gross theo nhà cung cấp nội bộ</h3>
+                    <table className="variant-table w-full">
+                      <thead>
+                        <tr><th>Nhà cung cấp</th><th>Số lượng</th><th className="text-right">Giá trị</th></tr>
+                      </thead>
+                      <tbody>
+                        {reportsOverview.salesBySupplier.length ? reportsOverview.salesBySupplier.map((row) => (
+                          <tr key={row.key}>
+                            <td className="text-xs font-mono font-bold text-orange-950">{row.label}</td>
+                            <td className="text-xs">{row.quantity ?? 0}</td>
+                            <td className="text-xs text-right font-bold">{formatVnd(row.amountVnd)}</td>
+                          </tr>
+                        )) : (
+                          <tr><td colSpan={3} className="py-6 text-center text-xs text-gray-500">Chưa có dữ liệu bán theo nhà cung cấp.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="panel p-4 overflow-x-auto">
+                    <h3 className="text-sm font-bold text-[#331B08] mb-3">Top tồn kho theo SKU</h3>
+                    <table className="variant-table w-full">
+                      <thead>
+                        <tr><th>SKU</th><th>Sẵn bán</th><th>Hàng lỗi</th><th className="text-right">Giá trị tồn</th></tr>
+                      </thead>
+                      <tbody>
+                        {reportsOverview.inventoryBySku.length ? reportsOverview.inventoryBySku.map((row) => (
+                          <tr key={row.key}>
+                            <td className="text-xs font-mono font-bold text-orange-950">{row.label}</td>
+                            <td className="text-xs">{row.quantity ?? 0}</td>
+                            <td className="text-xs text-red-700 font-semibold">{row.secondaryAmountVnd ?? 0}</td>
+                            <td className="text-xs text-right font-bold">{formatVnd(row.amountVnd)}</td>
+                          </tr>
+                        )) : (
+                          <tr><td colSpan={4} className="py-6 text-center text-xs text-gray-500">Chưa có dữ liệu tồn kho vận hành.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="panel p-4 overflow-x-auto">
+                    <h3 className="text-sm font-bold text-[#331B08] mb-3">Trial balance mini theo tài khoản</h3>
+                    <table className="variant-table w-full">
+                      <thead>
+                        <tr><th>Tài khoản</th><th className="text-right">Nợ</th><th className="text-right">Có</th></tr>
+                      </thead>
+                      <tbody>
+                        {reportsOverview.accountingByAccount.length ? reportsOverview.accountingByAccount.map((row) => (
+                          <tr key={row.key}>
+                            <td className="text-xs font-bold text-[#331B08]">{row.label}</td>
+                            <td className="text-xs text-right font-bold">{formatVnd(row.amountVnd)}</td>
+                            <td className="text-xs text-right font-bold">{formatVnd(row.secondaryAmountVnd ?? 0)}</td>
+                          </tr>
+                        )) : (
+                          <tr><td colSpan={3} className="py-6 text-center text-xs text-gray-500">Chưa có bút toán kế toán.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="panel p-4">
+                  <h3 className="text-sm font-bold text-[#331B08] mb-3">Cảnh báo độ chính xác & đối soát</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {reportsOverview.alerts.map((alert, index) => (
+                      <div
+                        key={`${alert.area}-${index}`}
+                        className={`p-3 border rounded-2xl text-xs ${
+                          alert.severity === "critical"
+                            ? "border-red-200 bg-red-50 text-red-900"
+                            : alert.severity === "warning"
+                              ? "border-amber-200 bg-amber-50 text-amber-900"
+                              : "border-blue-200 bg-blue-50 text-blue-900"
+                        }`}
+                      >
+                        <strong className="block uppercase text-[10px] tracking-wide">{alert.area} · {alert.severity}</strong>
+                        <span>{alert.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
 

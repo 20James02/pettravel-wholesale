@@ -265,3 +265,50 @@ export interface OperationsOverview {
   defectiveSkuCount: number;
   recentDocuments: OperationsDocumentSummary[];
 }
+
+export interface ReportAlert {
+  severity: "info" | "warning" | "critical";
+  area: "sales" | "inventory" | "accounting" | "reconciliation" | "invoice" | "data";
+  message: string;
+}
+
+export interface ReportKpis {
+  totalOrders: number;
+  activeOrders: number;
+  acceptedOrders: number;
+  invoiceRequestedOrders: number;
+  estimatedSalesVnd: number;
+  estimatedGrossSalesVnd: number;
+  discountAndOfferVnd: number;
+  paymentRequestedVnd: number;
+  paymentConfirmedVnd: number;
+  paymentPendingProofVnd: number;
+  inventoryValueVnd: number;
+  onHandQty: number;
+  availableQty: number;
+  defectiveQty: number;
+  postedJournalEntries: number;
+  draftJournalEntries: number;
+  trialBalanceDebitVnd: number;
+  trialBalanceCreditVnd: number;
+  trialBalanceDifferenceVnd: number;
+}
+
+export interface ReportBreakdownRow {
+  key: string;
+  label: string;
+  quantity?: number;
+  amountVnd: number;
+  secondaryAmountVnd?: number;
+}
+
+export interface AdminReportsOverview {
+  generatedAt: string;
+  basis: "posted_only" | "mixed_operational_estimate";
+  kpis: ReportKpis;
+  salesByStatus: ReportBreakdownRow[];
+  salesBySupplier: ReportBreakdownRow[];
+  inventoryBySku: ReportBreakdownRow[];
+  accountingByAccount: ReportBreakdownRow[];
+  alerts: ReportAlert[];
+}

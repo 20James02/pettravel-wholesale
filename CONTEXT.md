@@ -46,6 +46,26 @@ An immutable inventory movement that changes warehouse quantity, reserved quanti
 
 An operations document recording damaged, expired, missing, or otherwise unsellable stock. Defect reports move quantity out of available inventory and into defective tracking until the business decides to return, write off, or investigate.
 
+### Inventory Valuation
+
+The monetary value of stock on hand at a reporting date. It must be derived from stock movements and the chosen costing method, not from an editable product display field.
+
+### Reconciliation Batch
+
+A controlled review set that compares system records with an external source such as a bank statement, COD remittance file, supplier invoice, shipping bill, or Google Sheet import. Differences must remain traceable until resolved.
+
+### Tax Invoice
+
+An issued invoice used for VAT/tax reporting. A sales order or operations invoice may request a tax invoice, but tax reporting requires its own immutable invoice number, issue status, tax base, VAT amount, and void/replacement history.
+
+### Accounts Receivable
+
+Amounts the business is entitled to collect from customers after goods, invoices, deposits, COD, shipping fees, discounts, and refunds are recognized.
+
+### Accounts Payable
+
+Amounts the business owes suppliers, shippers, service providers, or staff after purchase receipts, supplier invoices, expenses, discounts, returns, and payments are recognized.
+
 ### VND Amount
 
 A Vietnamese Dong money amount stored as an integer with no decimal fraction.
