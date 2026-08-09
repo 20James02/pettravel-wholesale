@@ -472,7 +472,7 @@ export async function getProducts(role: "guest" | "customer" | "admin"): Promise
       dimensions: p.dimensions ?? "",
       weight: Number(p.weight) || 0,
       tags: p.tags ?? [],
-      variants: role === "guest" ? [] : variants // Guests see no variants or pricing
+      variants: role === "guest" ? variants.map(v => ({ ...v, wholesalePrice: 0 })) : variants
     };
   });
 }

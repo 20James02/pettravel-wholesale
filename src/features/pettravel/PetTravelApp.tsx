@@ -5072,47 +5072,50 @@ export function PetTravelApp() {
 
                   <div className="border-t border-dashed border-orange-100 my-1"></div>
 
+                  {/* Variants selector (Cho phép khách chưa đăng nhập xem các phân loại & xem hình ảnh) */}
+                  {selectedProduct.variants.length > 0 && (
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs font-bold text-orange-950/80">Chọn phân loại sản phẩm:</label>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {selectedProduct.variants.map((v) => (
+                          <button
+                            key={v.id}
+                            type="button"
+                            className={`tab-button min-h-[36px] text-xs ${selectedVariantSku === v.sku ? 'bg-orange-500 text-white border-orange-600' : ''}`}
+                            onClick={() => {
+                              setSelectedVariantSku(v.sku);
+                              setModalQty(v.minOrderQty);
+                              if (v.imageUrl) {
+                                setSelectedMainImage(v.imageUrl);
+                              }
+                            }}
+                          >
+                            {v.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Pricing and cart controls */}
                   {!isLoggedIn ? (
-                    <div className="p-4 border-2 border-dashed border-amber-200 bg-amber-50/20 rounded-2xl text-center">
+                    <div className="p-4 border-2 border-dashed border-amber-200 bg-amber-50/20 rounded-2xl text-center mt-2">
                       <LockKeyhole size={24} className="mx-auto text-amber-500 mb-2" />
-                      <strong className="text-xs text-[#78350F] block">Đại lý vui lòng đăng nhập để xem giá sỉ</strong>
+                      <strong className="text-xs text-[#78350F] block">Đại lý vui lòng đăng nhập để xem giá sỉ & đặt hàng</strong>
                       <button 
                         type="button" 
-                        className="tab-button text-xs py-1.5 px-4 mt-3 bg-orange-500 text-white border-orange-600 hover:bg-orange-600"
+                        className="tab-button text-xs py-2 px-5 mt-3 bg-orange-500 text-white border-orange-600 hover:bg-orange-600 cursor-pointer font-bold"
                         onClick={() => {
                           setSelectedProduct(null);
                           setSelectedMainImage("");
-                          setMode("guest");
+                          setShowLoginModal(true);
                         }}
                       >
-                        Đăng nhập Cổng đại lý
+                        🔑 Đăng nhập Cổng đại lý
                       </button>
                     </div>
                   ) : (
-                    <div className="flex flex-col gap-3">
-                      {/* Variants selector */}
-                      <div className="flex flex-col gap-1">
-                        <label className="text-xs font-bold text-orange-950/80">Chọn phân loại sản phẩm:</label>
-                        <div className="flex flex-wrap gap-2 mt-1">
-                          {selectedProduct.variants.map((v) => (
-                            <button
-                              key={v.id}
-                              type="button"
-                              className={`tab-button min-h-[36px] text-xs ${selectedVariantSku === v.sku ? 'bg-orange-500 text-white border-orange-600' : ''}`}
-                              onClick={() => {
-                                setSelectedVariantSku(v.sku);
-                                setModalQty(v.minOrderQty);
-                                if (v.imageUrl) {
-                                  setSelectedMainImage(v.imageUrl);
-                                }
-                              }}
-                            >
-                              {v.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                    <div className="flex flex-col gap-3 mt-1">
 
                     {/* Active variant details */}
                     {(() => {
