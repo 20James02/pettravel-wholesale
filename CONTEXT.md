@@ -66,6 +66,14 @@ Amounts the business is entitled to collect from customers after goods, invoices
 
 Amounts the business owes suppliers, shippers, service providers, or staff after purchase receipts, supplier invoices, expenses, discounts, returns, and payments are recognized.
 
+### Payment Allocation
+
+A traceable link between money received or paid and the business documents it settles, such as payment requests, customer invoices, supplier invoices, COD remittances, or expense documents.
+
+### Bank Transaction
+
+An imported or manually recorded bank-statement line. It is evidence for reconciliation, not by itself proof that an order, invoice, or ledger entry has been correctly settled.
+
 ### VND Amount
 
 A Vietnamese Dong money amount stored as an integer with no decimal fraction.

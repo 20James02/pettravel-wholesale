@@ -1612,7 +1612,10 @@ export function PetTravelApp() {
                 className="tab-button w-full justify-start"
                 type="button"
                 data-active={activeTab === "admin_reconciliation"}
-                onClick={() => setActiveTab("admin_reconciliation")}
+                onClick={() => {
+                  setActiveTab("admin_reconciliation");
+                  fetchReportsOverview();
+                }}
               >
                 <WalletCards size={18} />
                 Đối soát & Sao kê
@@ -3240,6 +3243,48 @@ export function PetTravelApp() {
               <p className="muted text-xs">Đối chiếu biên lai đại lý chuyển khoản với sao kê tài khoản ngân hàng Pet Travel.</p>
             </div>
 
+            <div className="panel p-4 border-orange-100 bg-orange-50/20">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-[#331B08]">Tổng quan đối soát toàn hệ thống</h3>
+                  <p className="text-[11px] muted m-0 mt-1">
+                    Dữ liệu này lấy từ bank_transactions, reconciliation_batches và sổ công nợ nếu bạn đã chạy migration v5.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="tab-button text-xs py-2 px-4 border-orange-200 bg-white hover:bg-orange-50 cursor-pointer font-bold rounded-xl"
+                  onClick={fetchReportsOverview}
+                  disabled={isReportsLoading}
+                >
+                  <RefreshCw size={14} className={isReportsLoading ? "animate-spin" : ""} />
+                  {isReportsLoading ? "Đang tải..." : "Làm mới"}
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-4">
+                <div className="metric">
+                  <span className="muted text-sm font-semibold">Đã khớp</span>
+                  <strong className="text-green-700">{formatVnd(reportsOverview?.kpis.reconciliationMatchedVnd ?? 0)}</strong>
+                </div>
+                <div className="metric">
+                  <span className="muted text-sm font-semibold">Chưa khớp</span>
+                  <strong className={(reportsOverview?.kpis.reconciliationUnmatchedVnd ?? 0) > 0 ? "text-red-700" : "text-green-700"}>
+                    {formatVnd(reportsOverview?.kpis.reconciliationUnmatchedVnd ?? 0)}
+                  </strong>
+                </div>
+                <div className="metric">
+                  <span className="muted text-sm font-semibold">Batch mở</span>
+                  <strong>{reportsOverview?.kpis.openReconciliationBatches ?? 0}</strong>
+                </div>
+                <div className="metric">
+                  <span className="muted text-sm font-semibold">GD ngân hàng chưa khớp</span>
+                  <strong className={(reportsOverview?.kpis.unmatchedBankTransactions ?? 0) > 0 ? "text-amber-700" : "text-green-700"}>
+                    {reportsOverview?.kpis.unmatchedBankTransactions ?? 0}
+                  </strong>
+                </div>
+              </div>
+            </div>
+
             {/* Reconciliation KPI cards */}
             <div className="metrics-grid">
               <div className="metric">
@@ -3637,6 +3682,26 @@ export function PetTravelApp() {
                     <span className="text-[10px] muted">Chờ proof: {formatVnd(reportsOverview.kpis.paymentPendingProofVnd)}</span>
                   </div>
                   <div className="metric">
+                    <span className="muted text-sm font-semibold">Phải thu đại lý</span>
+                    <strong className={reportsOverview.kpis.receivableOverdueVnd > 0 ? "text-red-700" : "text-blue-700"}>{formatVnd(reportsOverview.kpis.receivableOpenVnd)}</strong>
+                    <span className="text-[10px] muted">Quá hạn: {formatVnd(reportsOverview.kpis.receivableOverdueVnd)}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="muted text-sm font-semibold">Phải trả đối tác</span>
+                    <strong className={reportsOverview.kpis.payableOverdueVnd > 0 ? "text-amber-700" : "text-[#331B08]"}>{formatVnd(reportsOverview.kpis.payableOpenVnd)}</strong>
+                    <span className="text-[10px] muted">Quá hạn: {formatVnd(reportsOverview.kpis.payableOverdueVnd)}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="muted text-sm font-semibold">Đối soát đã khớp</span>
+                    <strong className="text-green-700">{formatVnd(reportsOverview.kpis.reconciliationMatchedVnd)}</strong>
+                    <span className="text-[10px] muted">Batch mở: {reportsOverview.kpis.openReconciliationBatches}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="muted text-sm font-semibold">Chưa khớp sao kê</span>
+                    <strong className={reportsOverview.kpis.reconciliationUnmatchedVnd > 0 ? "text-red-700" : "text-green-700"}>{formatVnd(reportsOverview.kpis.reconciliationUnmatchedVnd)}</strong>
+                    <span className="text-[10px] muted">GD ngân hàng chưa khớp: {reportsOverview.kpis.unmatchedBankTransactions}</span>
+                  </div>
+                  <div className="metric">
                     <span className="muted text-sm font-semibold">Giá trị tồn kho</span>
                     <strong>{formatVnd(reportsOverview.kpis.inventoryValueVnd)}</strong>
                     <span className="text-[10px] muted">Sẵn bán: {reportsOverview.kpis.availableQty} / Tồn thực: {reportsOverview.kpis.onHandQty}</span>
@@ -3694,6 +3759,67 @@ export function PetTravelApp() {
                           </tr>
                         )) : (
                           <tr><td colSpan={3} className="py-6 text-center text-xs text-gray-500">Chưa có dữ liệu bán theo nhà cung cấp.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="panel p-4 overflow-x-auto">
+                    <h3 className="text-sm font-bold text-[#331B08] mb-3">Công nợ phải thu theo đại lý</h3>
+                    <table className="variant-table w-full">
+                      <thead>
+                        <tr><th>Đại lý</th><th>Số chứng từ</th><th className="text-right">Còn phải thu</th></tr>
+                      </thead>
+                      <tbody>
+                        {reportsOverview.receivableByCustomer.length ? reportsOverview.receivableByCustomer.map((row) => (
+                          <tr key={row.key}>
+                            <td className="text-xs font-bold text-[#331B08]">{row.label}</td>
+                            <td className="text-xs">{row.quantity ?? 0}</td>
+                            <td className="text-xs text-right font-bold text-blue-700">{formatVnd(row.amountVnd)}</td>
+                          </tr>
+                        )) : (
+                          <tr><td colSpan={3} className="py-6 text-center text-xs text-gray-500">Chưa có sổ công nợ phải thu hoặc chưa chạy migration v5.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="panel p-4 overflow-x-auto">
+                    <h3 className="text-sm font-bold text-[#331B08] mb-3">Công nợ phải trả theo đối tác</h3>
+                    <table className="variant-table w-full">
+                      <thead>
+                        <tr><th>Đối tác/NCC</th><th>Số chứng từ</th><th className="text-right">Còn phải trả</th></tr>
+                      </thead>
+                      <tbody>
+                        {reportsOverview.payableByPartner.length ? reportsOverview.payableByPartner.map((row) => (
+                          <tr key={row.key}>
+                            <td className="text-xs font-bold text-[#331B08]">{row.label}</td>
+                            <td className="text-xs">{row.quantity ?? 0}</td>
+                            <td className="text-xs text-right font-bold text-amber-700">{formatVnd(row.amountVnd)}</td>
+                          </tr>
+                        )) : (
+                          <tr><td colSpan={3} className="py-6 text-center text-xs text-gray-500">Chưa có sổ công nợ phải trả hoặc chưa chạy migration v5.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="panel p-4 overflow-x-auto">
+                    <h3 className="text-sm font-bold text-[#331B08] mb-3">Đối soát theo loại batch</h3>
+                    <table className="variant-table w-full">
+                      <thead>
+                        <tr><th>Loại</th><th>Batch</th><th className="text-right">Đã khớp</th><th className="text-right">Chênh lệch</th></tr>
+                      </thead>
+                      <tbody>
+                        {reportsOverview.reconciliationByType.length ? reportsOverview.reconciliationByType.map((row) => (
+                          <tr key={row.key}>
+                            <td className="text-xs font-bold text-[#331B08]">{row.label}</td>
+                            <td className="text-xs">{row.quantity ?? 0}</td>
+                            <td className="text-xs text-right font-bold text-green-700">{formatVnd(row.amountVnd)}</td>
+                            <td className="text-xs text-right font-bold text-red-700">{formatVnd(row.secondaryAmountVnd ?? 0)}</td>
+                          </tr>
+                        )) : (
+                          <tr><td colSpan={4} className="py-6 text-center text-xs text-gray-500">Chưa có batch đối soát hoặc chưa chạy migration v5.</td></tr>
                         )}
                       </tbody>
                     </table>

@@ -25,6 +25,35 @@ interface JournalLineReportRow {
   credit_amount: number | string;
 }
 
+interface ReceivableLedgerReportRow {
+  customer_name: string;
+  due_date?: string | null;
+  debit_amount: number | string;
+  credit_amount: number | string;
+  status: string;
+}
+
+interface PayableLedgerReportRow {
+  partner_name: string;
+  due_date?: string | null;
+  debit_amount: number | string;
+  credit_amount: number | string;
+  status: string;
+}
+
+interface ReconciliationBatchReportRow {
+  type: string;
+  status: string;
+  total_external_amount: number | string;
+  total_matched_amount: number | string;
+  total_difference_amount: number | string;
+}
+
+interface BankTransactionReportRow {
+  reconciliation_status: string;
+  amount: number | string;
+}
+
 function latestQuote(order: CustomerOrder) {
   return [...order.quoteVersions].sort((a, b) => b.version - a.version)[0];
 }
@@ -242,6 +271,166 @@ async function readAccounting(user: UserAccount, alerts: ReportAlert[]) {
   };
 }
 
+async function readReceivables(user: UserAccount, alerts: ReportAlert[]) {
+  const supabase = createSupabaseServiceClient();
+  let query = supabase
+    .from("receivable_ledger_entries")
+    .select("customer_name, due_date, debit_amount, credit_amount, status")
+    .neq("status", "void");
+
+  if (user.organizationId) {
+    query = query.eq("organization_id", user.organizationId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    alerts.push({
+      severity: "warning",
+      area: "receivable",
+      message: `Chưa đọc được sổ công nợ phải thu: ${error.message}. Hãy chạy supabase/update_v5_receivables_reconciliation.sql.`
+    });
+    return {
+      receivableOpenVnd: 0,
+      receivableOverdueVnd: 0,
+      receivableByCustomer: [] as ReportBreakdownRow[]
+    };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const byCustomer = new Map<string, ReportBreakdownRow>();
+  let open = 0;
+  let overdue = 0;
+
+  for (const row of (data ?? []) as ReceivableLedgerReportRow[]) {
+    const balance = Number(row.debit_amount ?? 0) - Number(row.credit_amount ?? 0);
+    if (balance <= 0 || row.status === "settled") continue;
+    open += balance;
+    if (row.due_date && row.due_date < today) overdue += balance;
+    addAmount(byCustomer, row.customer_name, row.customer_name, balance, 1);
+  }
+
+  return {
+    receivableOpenVnd: open,
+    receivableOverdueVnd: overdue,
+    receivableByCustomer: [...byCustomer.values()].sort((a, b) => b.amountVnd - a.amountVnd).slice(0, 12)
+  };
+}
+
+async function readPayables(user: UserAccount, alerts: ReportAlert[]) {
+  const supabase = createSupabaseServiceClient();
+  let query = supabase
+    .from("payable_ledger_entries")
+    .select("partner_name, due_date, debit_amount, credit_amount, status")
+    .neq("status", "void");
+
+  if (user.organizationId) {
+    query = query.eq("organization_id", user.organizationId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    alerts.push({
+      severity: "warning",
+      area: "payable",
+      message: `Chưa đọc được sổ công nợ phải trả: ${error.message}. Hãy chạy supabase/update_v5_receivables_reconciliation.sql.`
+    });
+    return {
+      payableOpenVnd: 0,
+      payableOverdueVnd: 0,
+      payableByPartner: [] as ReportBreakdownRow[]
+    };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const byPartner = new Map<string, ReportBreakdownRow>();
+  let open = 0;
+  let overdue = 0;
+
+  for (const row of (data ?? []) as PayableLedgerReportRow[]) {
+    const balance = Number(row.credit_amount ?? 0) - Number(row.debit_amount ?? 0);
+    if (balance <= 0 || row.status === "settled") continue;
+    open += balance;
+    if (row.due_date && row.due_date < today) overdue += balance;
+    addAmount(byPartner, row.partner_name, row.partner_name, balance, 1);
+  }
+
+  return {
+    payableOpenVnd: open,
+    payableOverdueVnd: overdue,
+    payableByPartner: [...byPartner.values()].sort((a, b) => b.amountVnd - a.amountVnd).slice(0, 12)
+  };
+}
+
+async function readReconciliation(user: UserAccount, alerts: ReportAlert[]) {
+  const supabase = createSupabaseServiceClient();
+  let batchesQuery = supabase
+    .from("reconciliation_batches")
+    .select("type, status, total_external_amount, total_matched_amount, total_difference_amount");
+  let bankQuery = supabase
+    .from("bank_transactions")
+    .select("reconciliation_status, amount");
+
+  if (user.organizationId) {
+    batchesQuery = batchesQuery.eq("organization_id", user.organizationId);
+    bankQuery = bankQuery.eq("organization_id", user.organizationId);
+  }
+
+  const [batchesResult, bankResult] = await Promise.all([batchesQuery, bankQuery]);
+  if (batchesResult.error || bankResult.error) {
+    alerts.push({
+      severity: "warning",
+      area: "reconciliation",
+      message: `Chưa đọc được dữ liệu đối soát: ${batchesResult.error?.message ?? bankResult.error?.message}. Hãy chạy supabase/update_v5_receivables_reconciliation.sql.`
+    });
+    return {
+      reconciliationMatchedVnd: 0,
+      reconciliationUnmatchedVnd: 0,
+      openReconciliationBatches: 0,
+      unmatchedBankTransactions: 0,
+      reconciliationByType: [] as ReportBreakdownRow[]
+    };
+  }
+
+  const byType = new Map<string, ReportBreakdownRow>();
+  let matched = 0;
+  let difference = 0;
+  let openBatches = 0;
+
+  for (const row of (batchesResult.data ?? []) as ReconciliationBatchReportRow[]) {
+    const matchedAmount = Number(row.total_matched_amount ?? 0);
+    const diffAmount = Number(row.total_difference_amount ?? 0);
+    matched += matchedAmount;
+    difference += diffAmount;
+    if (["open", "reviewing"].includes(row.status)) openBatches += 1;
+
+    const current = byType.get(row.type) ?? {
+      key: row.type,
+      label: row.type,
+      quantity: 0,
+      amountVnd: 0,
+      secondaryAmountVnd: 0
+    };
+    current.quantity = (current.quantity ?? 0) + 1;
+    current.amountVnd += matchedAmount;
+    current.secondaryAmountVnd = (current.secondaryAmountVnd ?? 0) + diffAmount;
+    byType.set(row.type, current);
+  }
+
+  const unmatchedBankTransactions = ((bankResult.data ?? []) as BankTransactionReportRow[])
+    .filter((row) => row.reconciliation_status === "unmatched").length;
+  const unmatchedBankAmount = ((bankResult.data ?? []) as BankTransactionReportRow[])
+    .filter((row) => row.reconciliation_status === "unmatched")
+    .reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+
+  return {
+    reconciliationMatchedVnd: matched,
+    reconciliationUnmatchedVnd: difference + unmatchedBankAmount,
+    openReconciliationBatches: openBatches,
+    unmatchedBankTransactions,
+    reconciliationByType: [...byType.values()].sort((a, b) => b.amountVnd - a.amountVnd).slice(0, 12)
+  };
+}
+
 export async function getAdminReportsOverview(user: UserAccount): Promise<AdminReportsOverview> {
   const alerts: ReportAlert[] = [
     {
@@ -258,9 +447,12 @@ export async function getAdminReportsOverview(user: UserAccount): Promise<AdminR
 
   const orders = await getOrders(user);
   const sales = summarizeOrders(orders);
-  const [inventory, accounting] = await Promise.all([
+  const [inventory, accounting, receivables, payables, reconciliation] = await Promise.all([
     readInventory(user, alerts),
-    readAccounting(user, alerts)
+    readAccounting(user, alerts),
+    readReceivables(user, alerts),
+    readPayables(user, alerts),
+    readReconciliation(user, alerts)
   ]);
 
   if (sales.invoiceRequestedOrders > 0) {
@@ -284,6 +476,27 @@ export async function getAdminReportsOverview(user: UserAccount): Promise<AdminR
       message: `Trial balance đang lệch ${accounting.trialBalanceDifferenceVnd.toLocaleString("vi-VN")} VND. Không được khóa kỳ cho tới khi xử lý.`
     });
   }
+  if (receivables.receivableOverdueVnd > 0) {
+    alerts.push({
+      severity: "critical",
+      area: "receivable",
+      message: `Công nợ phải thu quá hạn ${receivables.receivableOverdueVnd.toLocaleString("vi-VN")} VND cần nhắc thanh toán hoặc khóa hạn mức đại lý.`
+    });
+  }
+  if (payables.payableOverdueVnd > 0) {
+    alerts.push({
+      severity: "warning",
+      area: "payable",
+      message: `Công nợ phải trả quá hạn ${payables.payableOverdueVnd.toLocaleString("vi-VN")} VND cần kiểm tra nhà cung cấp/đối tác vận chuyển.`
+    });
+  }
+  if (reconciliation.reconciliationUnmatchedVnd > 0 || reconciliation.unmatchedBankTransactions > 0) {
+    alerts.push({
+      severity: "warning",
+      area: "reconciliation",
+      message: `Còn ${reconciliation.unmatchedBankTransactions} giao dịch ngân hàng chưa khớp, tổng chênh/chưa đối soát ${reconciliation.reconciliationUnmatchedVnd.toLocaleString("vi-VN")} VND.`
+    });
+  }
 
   return {
     generatedAt: new Date().toISOString(),
@@ -299,6 +512,14 @@ export async function getAdminReportsOverview(user: UserAccount): Promise<AdminR
       paymentRequestedVnd: sales.paymentRequestedVnd,
       paymentConfirmedVnd: sales.paymentConfirmedVnd,
       paymentPendingProofVnd: sales.paymentPendingProofVnd,
+      receivableOpenVnd: receivables.receivableOpenVnd,
+      receivableOverdueVnd: receivables.receivableOverdueVnd,
+      payableOpenVnd: payables.payableOpenVnd,
+      payableOverdueVnd: payables.payableOverdueVnd,
+      reconciliationMatchedVnd: reconciliation.reconciliationMatchedVnd,
+      reconciliationUnmatchedVnd: reconciliation.reconciliationUnmatchedVnd,
+      openReconciliationBatches: reconciliation.openReconciliationBatches,
+      unmatchedBankTransactions: reconciliation.unmatchedBankTransactions,
       inventoryValueVnd: inventory.inventoryValueVnd,
       onHandQty: inventory.onHandQty,
       availableQty: inventory.availableQty,
@@ -311,6 +532,9 @@ export async function getAdminReportsOverview(user: UserAccount): Promise<AdminR
     },
     salesByStatus: sales.salesByStatus,
     salesBySupplier: sales.salesBySupplier,
+    receivableByCustomer: receivables.receivableByCustomer,
+    payableByPartner: payables.payableByPartner,
+    reconciliationByType: reconciliation.reconciliationByType,
     inventoryBySku: inventory.inventoryBySku,
     accountingByAccount: accounting.accountingByAccount,
     alerts

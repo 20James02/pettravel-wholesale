@@ -268,7 +268,7 @@ export interface OperationsOverview {
 
 export interface ReportAlert {
   severity: "info" | "warning" | "critical";
-  area: "sales" | "inventory" | "accounting" | "reconciliation" | "invoice" | "data";
+  area: "sales" | "inventory" | "accounting" | "reconciliation" | "invoice" | "receivable" | "payable" | "data";
   message: string;
 }
 
@@ -283,6 +283,14 @@ export interface ReportKpis {
   paymentRequestedVnd: number;
   paymentConfirmedVnd: number;
   paymentPendingProofVnd: number;
+  receivableOpenVnd: number;
+  receivableOverdueVnd: number;
+  payableOpenVnd: number;
+  payableOverdueVnd: number;
+  reconciliationMatchedVnd: number;
+  reconciliationUnmatchedVnd: number;
+  openReconciliationBatches: number;
+  unmatchedBankTransactions: number;
   inventoryValueVnd: number;
   onHandQty: number;
   availableQty: number;
@@ -308,6 +316,9 @@ export interface AdminReportsOverview {
   kpis: ReportKpis;
   salesByStatus: ReportBreakdownRow[];
   salesBySupplier: ReportBreakdownRow[];
+  receivableByCustomer: ReportBreakdownRow[];
+  payableByPartner: ReportBreakdownRow[];
+  reconciliationByType: ReportBreakdownRow[];
   inventoryBySku: ReportBreakdownRow[];
   accountingByAccount: ReportBreakdownRow[];
   alerts: ReportAlert[];
