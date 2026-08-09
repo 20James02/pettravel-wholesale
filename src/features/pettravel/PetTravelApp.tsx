@@ -652,35 +652,7 @@ export function PetTravelApp() {
     }
   }
 
-  /** Login via demo API, then fetch relevant data */
-  async function handleLogin(userId: string, targetMode: AppMode) {
-    setIsLoading(true);
-    try {
-      const res = await fetch("/api/auth/demo-login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId })
-      });
-      if (!res.ok) { setIsLoading(false); return; }
-      const data = await res.json();
-      setCurrentUser(data.user);
-      setMode(targetMode);
-      setActiveTab(targetMode === "admin" ? "admin" : "catalog");
 
-      await fetchProducts();
-      await fetchOrders();
-      await fetchCategories();
-      if (targetMode === "admin") {
-        await fetchAdminData();
-        await fetchUsers();
-        await fetchPromotions();
-      } else {
-        setProfileFullName(data.user.name);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }
 
   /** Logout: clear cookie + reset state */
   async function handleLogout() {
@@ -1287,62 +1259,7 @@ export function PetTravelApp() {
     });
   }, [adminOrderItems, allProducts, adminCategoryFilter, adminSupplierFilter]);
 
-  // --- 1. LOGIN/PORTAL SELECTOR VIEW ---
-  if (mode === "guest") {
-    return (
-      <main className="min-h-screen flex items-center justify-center p-6 bg-gradient-to-b from-[#FFFDFB] to-[#FFF7ED]">
-        <div className="panel max-w-xl w-full text-center flex flex-col gap-6 p-8 relative overflow-hidden">
-          <div className="absolute top-4 right-4 text-orange-400 opacity-20">
-            <Sparkles size={80} />
-          </div>
-          
-          <div className="flex flex-col items-center gap-2">
-            <div className="brand-logo text-5xl floating-mascot">🐾</div>
-            <h1 className="text-3xl font-extrabold text-[#331B08] mt-2">Pet Travel WholeSale</h1>
-            <p className="muted text-sm max-w-md mx-auto">
-              Hệ thống quản lý báo giá sỉ thiết kế thông minh, đối soát an toàn bảo mật dành riêng cho đại lý và vận hành.
-            </p>
-          </div>
 
-          <div className="border-t border-dashed border-orange-100 my-2"></div>
-
-          <div className="flex flex-col gap-4">
-            <h2 className="text-xs font-bold text-orange-950/80 uppercase tracking-widest">Chọn cổng làm việc để bắt đầu</h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <button
-                type="button"
-                className="panel p-6 border-2 border-orange-200 bg-white hover:border-orange-500 hover:-translate-y-1 transition text-left flex flex-col gap-3 group relative cursor-pointer"
-                disabled={isLoading}
-                onClick={() => handleLogin("u_customer_minh", "customer")}
-              >
-                <div className="w-12 h-12 rounded-2xl bg-orange-100 flex items-center justify-center text-2xl group-hover:scale-110 transition">{isLoading ? "⏳" : "🛒"}</div>
-                <div>
-                  <h3 className="m-0 text-md font-bold text-[#331B08]">Đại lý lấy sỉ</h3>
-                  <p className="muted m-0 text-xs mt-1">Lên đơn đề xuất, tải chứng từ cọc, theo dõi hành trình.</p>
-                </div>
-                <ChevronRight size={18} className="absolute bottom-4 right-4 text-orange-300 group-hover:translate-x-1 transition" />
-              </button>
-
-              <button
-                type="button"
-                className="panel p-6 border-2 border-orange-200 bg-white hover:border-orange-500 hover:-translate-y-1 transition text-left flex flex-col gap-3 group relative cursor-pointer"
-                disabled={isLoading}
-                onClick={() => handleLogin("u_admin", "admin")}
-              >
-                <div className="w-12 h-12 rounded-2xl bg-orange-100 flex items-center justify-center text-2xl group-hover:scale-110 transition">{isLoading ? "⏳" : "⚙️"}</div>
-                <div>
-                  <h3 className="m-0 text-md font-bold text-[#331B08]">Nhân viên Vận hành</h3>
-                  <p className="muted m-0 text-xs mt-1">Thẩm định giá sỉ, quản lý kho, phát hành VietQR và đối soát.</p>
-                </div>
-                <ChevronRight size={18} className="absolute bottom-4 right-4 text-orange-300 group-hover:translate-x-1 transition" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </main>
-    );
-  }
 
   // --- 2. MAIN APPLICATION SHELL ---
   return (
