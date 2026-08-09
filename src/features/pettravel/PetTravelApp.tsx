@@ -4377,7 +4377,7 @@ export function PetTravelApp() {
                 <input
                   type="email"
                   className="text-input text-sm py-2 px-3"
-                  placeholder="admin@pettravel.com hoặc minh@paw.com..."
+                  placeholder="admin@pettravel.vn hoặc minh@happypaws.vn..."
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
                   required
@@ -4412,7 +4412,7 @@ export function PetTravelApp() {
                   type="button"
                   className="py-1 px-2 bg-orange-100 hover:bg-orange-200 text-[#78350F] rounded-lg text-[10px] font-bold cursor-pointer"
                   onClick={() => {
-                    setLoginEmail("admin@pettravel.com");
+                    setLoginEmail("admin@pettravel.vn");
                     setLoginPassword("admin123");
                   }}
                 >
@@ -4422,7 +4422,7 @@ export function PetTravelApp() {
                   type="button"
                   className="py-1 px-2 bg-orange-100 hover:bg-orange-200 text-[#78350F] rounded-lg text-[10px] font-bold cursor-pointer"
                   onClick={() => {
-                    setLoginEmail("minh@paw.com");
+                    setLoginEmail("minh@happypaws.vn");
                     setLoginPassword("minh123");
                   }}
                 >
@@ -4432,7 +4432,7 @@ export function PetTravelApp() {
                   type="button"
                   className="py-1 px-2 bg-orange-100 hover:bg-orange-200 text-[#78350F] rounded-lg text-[10px] font-bold cursor-pointer"
                   onClick={() => {
-                    setLoginEmail("lan@petland.com");
+                    setLoginEmail("lan@petland.vn");
                     setLoginPassword("lan123");
                   }}
                 >
