@@ -12,12 +12,28 @@ app = FastAPI(
 
 @app.middleware("http")
 async def vercel_path_rewrite(request: Request, call_next):
-    path = request.scope.get("path", "")
-    if path.startswith("/api/index.py"):
-        request.scope["path"] = path.replace("/api/index.py", "", 1) or "/"
-    elif path == "/api":
+    original_path = request.scope.get("path", "")
+    # Try multiple Vercel headers to find original path
+    forwarded = (
+        request.headers.get("x-matched-path")
+        or request.headers.get("x-invoke-path")
+        or request.headers.get("x-forwarded-path")
+        or request.headers.get("x-original-url")
+    )
+    if forwarded:
+        clean = forwarded.split("?")[0]
+        request.scope["path"] = clean
+    elif original_path.startswith("/api/index.py"):
+        request.scope["path"] = original_path.replace("/api/index.py", "", 1) or "/"
+    elif original_path == "/api":
         request.scope["path"] = "/"
-    return await call_next(request)
+    
+    response = await call_next(request)
+    # Inject debug headers
+    response.headers["X-Debug-Original-Path"] = original_path
+    response.headers["X-Debug-Forwarded"] = str(forwarded)
+    response.headers["X-Debug-Final-Path"] = request.scope.get("path", "")
+    return response
 
 app.add_middleware(
     CORSMiddleware,
