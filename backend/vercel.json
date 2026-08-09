@@ -1,7 +1,7 @@
 {
   "functions": {
     "api/index.py": {
-      "runtime": "python"
+      "runtime": "vercel-python@3.12"
     }
   },
   "rewrites": [
