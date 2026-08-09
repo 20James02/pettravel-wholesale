@@ -24,29 +24,34 @@ async def get_available_stock(sku: str, db: AsyncSession) -> int:
     available = variant.stock - reserved_qty
     return max(0, available)
 
+import uuid
+
 async def reserve_stock(order_id: str, items: List[Dict[str, Any]], db: AsyncSession) -> bool:
     """
     Giữ chỗ tồn kho cho đơn hàng sỉ trong 72 giờ.
-    Nếu bất kỳ SKU nào không đủ tồn kho khả dụng, trả về False.
+    Gom nhóm số lượng theo SKU và kiểm tra tổng tồn kho khả dụng trước khi tạo giữ chỗ.
     """
     expires_at = datetime.now(timezone.utc) + timedelta(hours=72)
     
-    # Kiểm tra tồn kho khả dụng cho tất cả items trước
+    # 1. Gom nhóm tổng số lượng yêu cầu theo từng variant_sku
+    required_by_sku: Dict[str, int] = {}
     for item in items:
         sku = item["variant_sku"]
-        req_qty = item["quantity"]
+        required_by_sku[sku] = required_by_sku.get(sku, 0) + item["quantity"]
         
+    # 2. Kiểm tra tồn kho khả dụng cho tất cả SKU đã gộp
+    for sku, req_qty in required_by_sku.items():
         available = await get_available_stock(sku, db)
         if available < req_qty:
             return False
             
-    # Tạo bản ghi giữ hàng cho từng item
+    # 3. Tạo bản ghi giữ hàng cho từng item
     for item in items:
         sku = item["variant_sku"]
         req_qty = item["quantity"]
         
         db_reservation = StockReservation(
-            id=f"res_{datetime.now(timezone.utc).timestamp()}_{sku}",
+            id=f"res_{uuid.uuid4().hex[:12]}_{sku}",
             order_id=order_id,
             variant_sku=sku,
             quantity=req_qty,

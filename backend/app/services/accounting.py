@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 from app.models.wholesale import JournalEntry, JournalLine, Order, QuoteVersion, ProductVariant
@@ -24,7 +25,8 @@ async def create_journal_entry(
         
     entry_id = f"je_{uuid.uuid4().hex[:12]}"
     time_suffix = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    entry_no = f"JE-{source_type.upper()}-{time_suffix}"
+    random_tag = uuid.uuid4().hex[:4].upper()
+    entry_no = f"JE-{source_type.upper()}-{time_suffix}-{random_tag}"
     
     db_entry = JournalEntry(
         id=entry_id,
@@ -33,7 +35,7 @@ async def create_journal_entry(
         status="posted" if posted else "draft",
         source_type=source_type,
         source_id=source_id,
-        posted_at=datetime.utcnow() if posted else None
+        posted_at=datetime.now(timezone.utc) if posted else None
     )
     db.add(db_entry)
     await db.flush()
@@ -115,7 +117,9 @@ async def post_order_sales_and_cost(order_id: str, db: AsyncSession) -> List[Jou
     1. Bút toán doanh thu: Nợ 131 (Phải thu đại lý) / Có 511 (Doanh thu bán hàng sỉ).
     2. Bút toán giá vốn: Nợ 632 (Giá vốn) / Có 156 (Hàng hóa kho).
     """
-    ord_res = await db.execute(select(Order).filter(Order.id == order_id))
+    ord_res = await db.execute(
+        select(Order).options(selectinload(Order.items)).filter(Order.id == order_id)
+    )
     order = ord_res.scalars().first()
     if not order:
         raise ValueError("Đơn hàng không tồn tại.")

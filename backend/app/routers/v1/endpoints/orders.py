@@ -87,7 +87,7 @@ async def create_wholesale_order(
         deposit_amount=deposit_amount,
         cod_remaining=subtotal - deposit_amount,
         shipping_fee_option="included",
-        expires_at=datetime.utcnow() + timedelta(days=1)
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1)
     )
     db.add(db_quote)
     

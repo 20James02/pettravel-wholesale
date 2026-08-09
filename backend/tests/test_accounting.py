@@ -89,3 +89,70 @@ async def test_order_deposit_receipt_posting(db_session):
     assert lines[1].account_code == "131"
     assert lines[1].debit_amount_vnd == 0
     assert lines[1].credit_amount_vnd == 3000000
+
+@pytest.mark.asyncio
+async def test_order_sales_and_cost_posting(db_session):
+    # 1. Chuẩn bị đơn hàng, báo giá và sản phẩm
+    user = User(id="u_demo2", email="demo2@pettravel.vn", name="Demo Client 2", hashed_password="...")
+    db_session.add(user)
+    
+    order = Order(
+        id="ord_2",
+        number="PTW-260810-ABC",
+        customer_name="Demo Client 2",
+        customer_company="Demo Company 2",
+        customer_id="u_demo2",
+        commercial_status="submitted",
+        payment_status="unrequested"
+    )
+    db_session.add(order)
+    
+    quote = QuoteVersion(
+        id="q_2",
+        order_id="ord_2",
+        version=1,
+        status="published",
+        subtotal=10000000,
+        final_total=10000000,
+        deposit_amount=3000000,
+        cod_remaining=7000000,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1)
+    )
+    db_session.add(quote)
+    
+    item = OrderItem(
+        id="item_2",
+        order_id="ord_2",
+        product_code="PRD-BOWL",
+        product_name="Bát Ăn Inox",
+        variant_sku="SKU-BOWL-RED",
+        variant_label="Đỏ",
+        quantity=10,
+        unit_price_snapshot=1000000,
+        supplier_id="sup_pettravel"
+    )
+    db_session.add(item)
+    await db_session.commit()
+    
+    # 2. Hạch toán doanh thu và giá vốn
+    entries = await post_order_sales_and_cost("ord_2", db_session)
+    assert len(entries) == 2
+    
+    # Bút toán 1: Doanh thu (131 / 511)
+    je_rev = entries[0]
+    assert je_rev.status == "posted"
+    rev_lines_res = await db_session.execute(select(JournalLine).filter(JournalLine.entry_id == je_rev.id))
+    rev_lines = rev_lines_res.scalars().all()
+    assert len(rev_lines) == 2
+    assert rev_lines[0].account_code == "131" and rev_lines[0].debit_amount_vnd == 10000000
+    assert rev_lines[1].account_code == "511" and rev_lines[1].credit_amount_vnd == 10000000
+    
+    # Bút toán 2: Giá vốn (632 / 156)
+    je_cost = entries[1]
+    assert je_cost.status == "posted"
+    cost_lines_res = await db_session.execute(select(JournalLine).filter(JournalLine.entry_id == je_cost.id))
+    cost_lines = cost_lines_res.scalars().all()
+    assert len(cost_lines) == 2
+    assert cost_lines[0].account_code == "632"
+    assert cost_lines[1].account_code == "156"
+
