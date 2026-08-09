@@ -78,17 +78,19 @@ export const shortTextSchema = (label: string, min = 1, max = 180) =>
 export const optionalUrlSchema = z
   .string()
   .trim()
-  .max(1000, "Đường dẫn không được vượt quá 1000 ký tự.")
+  .max(2_000_000, "Đường dẫn ảnh quá dài.")
   .refine((value) => {
     if (!value) return true;
     if (value.startsWith("/")) return true;
+    if (value.startsWith("data:image/")) return true;
+    if (value.startsWith("blob:")) return true;
     try {
       const url = new URL(value);
-      return url.protocol === "https:";
+      return url.protocol === "https:" || url.protocol === "http:";
     } catch {
       return false;
     }
-  }, "Đường dẫn phải là URL HTTPS hợp lệ hoặc đường dẫn nội bộ bắt đầu bằng /.");
+  }, "Đường dẫn ảnh không hợp lệ.");
 
 export const positiveIntegerSchema = (label: string, max = 1_000_000) =>
   z

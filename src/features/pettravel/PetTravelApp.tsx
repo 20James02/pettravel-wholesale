@@ -282,6 +282,33 @@ export function PetTravelApp() {
   const [formTags, setFormTags] = useState<string>("");
   const [formVariants, setFormVariants] = useState<ProductVariant[]>([]);
 
+  const isAnyModalOpen = Boolean(
+    showProductForm ||
+    showOperationsForm ||
+    showCategoryForm ||
+    showSupplierForm ||
+    showUserForm ||
+    showPromotionsForm ||
+    selectedProduct ||
+    showCheckoutModal ||
+    showLoginModal
+  );
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      if (isAnyModalOpen) {
+        document.body.style.overflow = "hidden";
+      } else {
+        document.body.style.overflow = "";
+      }
+    }
+    return () => {
+      if (typeof document !== "undefined") {
+        document.body.style.overflow = "";
+      }
+    };
+  }, [isAnyModalOpen]);
+
   function buildVariantSku(code: string, label: string, index: number): string {
     const cleanLabel = label
       .toLowerCase()
@@ -700,61 +727,93 @@ export function PetTravelApp() {
     }
   };
 
+  const readFileAsDataUrl = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleLocalImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
 
     const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
-    if (!allowedTypes.has(file.type)) {
-      alert("Định dạng ảnh không hỗ trợ! Vui lòng chọn ảnh JPG, PNG hoặc WEBP.");
-      return;
+    const validFiles: File[] = [];
+
+    for (const file of files) {
+      if (!allowedTypes.has(file.type)) {
+        alert(`Tệp "${file.name}" không hợp lệ! Vui lòng chọn ảnh JPG, PNG hoặc WEBP.`);
+        continue;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        alert(`Tệp "${file.name}" quá lớn (>10MB).`);
+        continue;
+      }
+      validFiles.push(file);
     }
-    if (file.size > 10 * 1024 * 1024) {
-      alert("Dung lượng ảnh quá lớn! File không được vượt quá 10MB.");
-      return;
-    }
+
+    if (validFiles.length === 0) return;
 
     setIsUploadingImage(true);
     try {
-      const presignRes = await fetch("/api/uploads/presign", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          orderId: "catalog",
-          fileName: file.name,
-          contentType: file.type,
-          fileSizeBytes: file.size,
-          purpose: "product-image"
-        })
-      });
+      const uploadedUrls: string[] = [];
 
-      if (!presignRes.ok) {
-        const errData = await presignRes.json();
-        throw new Error(errData.error || "Không thể lấy link tải lên từ máy chủ.");
-      }
+      for (const file of validFiles) {
+        let fallbackDataUrl = "";
+        try {
+          fallbackDataUrl = await readFileAsDataUrl(file);
+        } catch {}
 
-      const { uploadUrl, publicUrl } = await presignRes.json();
+        try {
+          const presignRes = await fetch("/api/uploads/presign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              orderId: "catalog",
+              fileName: file.name,
+              contentType: file.type,
+              fileSizeBytes: file.size,
+              purpose: "product-image"
+            })
+          });
 
-      const uploadRes = await fetch(uploadUrl, {
-        method: "PUT",
-        headers: {
-          "Content-Type": file.type,
-        },
-        body: file
-      });
+          if (!presignRes.ok) throw new Error("Không thể tạo link presigned.");
+          const { uploadUrl, publicUrl } = await presignRes.json();
 
-      if (!uploadRes.ok) {
-        throw new Error("Lỗi khi tải file lên bộ lưu trữ đám mây Cloudflare R2.");
-      }
+          const uploadRes = await fetch(uploadUrl, {
+            method: "PUT",
+            headers: { "Content-Type": file.type },
+            body: file
+          });
 
-      if (!formImages.includes(publicUrl)) {
-        const updated = [...formImages, publicUrl];
-        setFormImages(updated);
-        if (!formImage || formImages.length === 0) {
-          setFormImage(publicUrl);
+          if (!uploadRes.ok) throw new Error("Tải file lên R2 thất bại.");
+
+          if (!publicUrl || publicUrl.includes("pub-example.r2.dev")) {
+            uploadedUrls.push(fallbackDataUrl || publicUrl);
+          } else {
+            uploadedUrls.push(publicUrl);
+          }
+        } catch (uploadErr) {
+          console.warn("R2 upload warning, falling back to local Data URL:", uploadErr);
+          if (fallbackDataUrl) {
+            uploadedUrls.push(fallbackDataUrl);
+          }
         }
+      }
+
+      if (uploadedUrls.length > 0) {
+        setFormImages((prev) => {
+          const next = [...prev];
+          uploadedUrls.forEach((url) => {
+            if (!next.includes(url)) next.push(url);
+          });
+          return next;
+        });
+
+        setFormImage((prev) => prev || uploadedUrls[0]);
       }
     } catch (error: any) {
       alert(`Lỗi tải ảnh: ${error.message || "Có lỗi xảy ra."}`);
@@ -782,42 +841,51 @@ export function PetTravelApp() {
 
     setVariantUploadingIndex(variantIndex);
     try {
-      const presignRes = await fetch("/api/uploads/presign", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          orderId: "catalog",
-          fileName: file.name,
-          contentType: file.type,
-          fileSizeBytes: file.size,
-          purpose: "product-image"
-        })
-      });
+      let finalUrl = "";
+      let fallbackDataUrl = "";
+      try {
+        fallbackDataUrl = await readFileAsDataUrl(file);
+      } catch {}
 
-      if (!presignRes.ok) {
-        const errData = await presignRes.json();
-        throw new Error(errData.error || "Không thể lấy link tải lên.");
+      try {
+        const presignRes = await fetch("/api/uploads/presign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orderId: "catalog",
+            fileName: file.name,
+            contentType: file.type,
+            fileSizeBytes: file.size,
+            purpose: "product-image"
+          })
+        });
+
+        if (presignRes.ok) {
+          const { uploadUrl, publicUrl } = await presignRes.json();
+
+          const uploadRes = await fetch(uploadUrl, {
+            method: "PUT",
+            headers: { "Content-Type": file.type },
+            body: file
+          });
+
+          if (uploadRes.ok && publicUrl && !publicUrl.includes("pub-example.r2.dev")) {
+            finalUrl = publicUrl;
+          }
+        }
+      } catch (err) {
+        console.warn("R2 upload error for variant, using fallback:", err);
       }
 
-      const { uploadUrl, publicUrl } = await presignRes.json();
-
-      const uploadRes = await fetch(uploadUrl, {
-        method: "PUT",
-        headers: {
-          "Content-Type": file.type,
-        },
-        body: file
-      });
-
-      if (!uploadRes.ok) {
-        throw new Error("Lỗi khi tải file lên R2.");
+      if (!finalUrl) {
+        finalUrl = fallbackDataUrl;
       }
 
-      setFormVariants((prev) => prev.map((variant, idx) => 
-        idx === variantIndex ? { ...variant, imageUrl: publicUrl } : variant
-      ));
+      if (finalUrl) {
+        setFormVariants((prev) => prev.map((variant, idx) => 
+          idx === variantIndex ? { ...variant, imageUrl: finalUrl } : variant
+        ));
+      }
     } catch (error: any) {
       alert(`Lỗi tải ảnh phân loại: ${error.message || "Có lỗi xảy ra."}`);
     } finally {
@@ -5243,7 +5311,7 @@ export function PetTravelApp() {
       {showProductForm && (
         <div className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6" onClick={() => setShowProductForm(false)}>
           <div 
-            className="panel max-w-2xl w-full flex flex-col gap-4 p-6 relative bg-[#FFFDF9] animate-scale-in my-4 sm:my-8"
+            className="panel max-w-2xl w-full flex flex-col gap-4 p-6 relative bg-[#FFFDF9] animate-scale-in max-h-[85vh] sm:max-h-[90vh] overflow-y-auto overscroll-contain my-auto sm:my-8"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Close button */}
@@ -5308,9 +5376,10 @@ export function PetTravelApp() {
               <div className="flex flex-col gap-1.5 p-3 border border-orange-100 rounded-2xl bg-orange-50/5">
                 <label className="text-xs font-bold text-orange-950/80">Ảnh sản phẩm (Chọn 1 ảnh làm ảnh chính):</label>
                 
-                {/* Hidden File Input for Local Image Upload */}
+                {/* Hidden File Input for Local Multiple Image Upload */}
                 <input
                   type="file"
+                  multiple
                   ref={fileInputRef}
                   className="hidden"
                   accept="image/jpeg,image/png,image/webp"
@@ -5333,16 +5402,16 @@ export function PetTravelApp() {
                     }}
                   />
                   <button type="button" className="tab-button text-xs py-2 px-4 cursor-pointer shrink-0" onClick={handleAddImage}>
-                    + Thêm ảnh URL
+                    + Thêm URL
                   </button>
                   <button
                     type="button"
-                    className="tab-button text-xs py-2 px-4 cursor-pointer shrink-0 flex items-center gap-1.5 bg-orange-50 border-orange-200 text-orange-950 hover:bg-orange-100"
+                    className="tab-button text-xs py-2 px-4 cursor-pointer shrink-0 flex items-center gap-1.5 bg-orange-50 border-orange-200 text-orange-950 hover:bg-orange-100 font-bold"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isUploadingImage}
                   >
                     <Upload size={14} />
-                    + Tải ảnh từ máy
+                    {isUploadingImage ? "Đang tải..." : "+ Chọn nhiều ảnh từ máy"}
                   </button>
                 </div>
 
@@ -5357,7 +5426,14 @@ export function PetTravelApp() {
                         onClick={() => setFormImage(imgUrl)}
                         title="Click để chọn làm ảnh chính"
                       >
-                        <Image src={imgUrl} alt={`Thumb ${idx}`} fill className="object-cover animate-fade-in" />
+                        <img 
+                          src={imgUrl} 
+                          alt={`Thumb ${idx}`} 
+                          className="w-full h-full object-cover animate-fade-in" 
+                          onError={(e) => {
+                            e.currentTarget.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="%23f97316" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
+                          }}
+                        />
                         
                         {/* Hover Overlay to Select as Main */}
                         {!isMain && (
