@@ -2,18 +2,166 @@ import "server-only";
 
 import { createSupabaseServiceClient } from "./supabase";
 import crypto from "crypto";
+import { Client } from "pg";
 import type {
   Product,
   ProductVariant,
   Supplier,
   CustomerOrder,
   UserAccount,
+  RoleKey,
   OrderItem,
   QuoteVersion,
   PaymentRequest,
   PaymentProof,
-  QuoteAdjustment
+  QuoteAdjustment,
+  OrderComment
 } from "@/lib/domain";
+
+type NumericValue = number | string | null;
+
+interface SupplierOfferRow {
+  id: string;
+  supplier_id: string;
+  wholesale_price: NumericValue;
+  min_order_qty: NumericValue;
+  stock_qty: NumericValue;
+  lead_time_days: NumericValue;
+  active: boolean;
+}
+
+interface ProductVariantRow {
+  id: string;
+  sku: string;
+  label: string;
+  active: boolean;
+  supplier_offers?: SupplierOfferRow[] | null;
+}
+
+interface ProductRow {
+  id: string;
+  code: string;
+  name: string;
+  brand: string;
+  category: string;
+  description?: string | null;
+  image_url?: string | null;
+  images?: string[] | null;
+  dimensions?: string | null;
+  weight?: NumericValue;
+  tags?: string[] | null;
+  product_variants?: ProductVariantRow[] | null;
+}
+
+interface SupplierRow {
+  id: string;
+  code: string;
+  name: string;
+  lead_time_days: number;
+  admin_only: boolean;
+}
+
+interface RelationUserRow {
+  id?: string;
+  full_name?: string | null;
+  organization_id?: string | null;
+  organizations?: { name?: string | null } | null;
+}
+
+interface OrderItemRow {
+  id: string;
+  product_code_snapshot: string;
+  product_name_snapshot: string;
+  variant_sku_snapshot: string;
+  variant_label_snapshot: string;
+  quantity: number;
+  unit_price_snapshot: NumericValue;
+  supplier_id: string;
+}
+
+interface QuoteAdjustmentRow {
+  id: string;
+  type: QuoteAdjustment["type"];
+  label: string;
+  amount: NumericValue;
+  requires_approval: boolean;
+}
+
+interface QuoteVersionRow {
+  id: string;
+  version: number;
+  status: QuoteVersion["status"];
+  subtotal: NumericValue;
+  final_total: NumericValue;
+  deposit_amount: NumericValue;
+  cod_remaining: NumericValue;
+  expires_at: string;
+  quote_adjustments?: QuoteAdjustmentRow[] | null;
+}
+
+interface PaymentProofRow {
+  id: string;
+  storage_key?: string | null;
+  file_name: string;
+  content_type?: string | null;
+  file_size_bytes?: number | null;
+  status: PaymentProof["status"];
+  uploaded_at: string;
+}
+
+interface PaymentRequestRow {
+  id: string;
+  purpose: PaymentRequest["purpose"];
+  amount: NumericValue;
+  reference: string;
+  qr_payload: string;
+  status: PaymentRequest["status"];
+  expires_at: string;
+  payment_proofs?: PaymentProofRow[] | null;
+}
+
+interface OrderCommentRow {
+  id: string;
+  audience: OrderComment["audience"];
+  message: string;
+  created_at: string;
+  app_users?: { full_name?: string | null } | null;
+}
+
+interface OrderRow {
+  id: string;
+  order_number: string;
+  commercial_status: CustomerOrder["commercialStatus"];
+  payment_status: CustomerOrder["paymentStatus"];
+  fulfillment_status: CustomerOrder["fulfillmentStatus"];
+  payment_intent: CustomerOrder["paymentIntent"];
+  invoice_requested: boolean;
+  updated_at: string;
+  created_at: string;
+  recipient_name?: string | null;
+  recipient_phone?: string | null;
+  recipient_address?: string | null;
+  assigned_staff_id?: string | null;
+  assigned_staff?: { full_name?: string | null } | null;
+  app_users?: RelationUserRow | null;
+  order_items?: OrderItemRow[] | null;
+  quote_versions?: QuoteVersionRow[] | null;
+  payment_requests?: PaymentRequestRow[] | null;
+  order_comments?: OrderCommentRow[] | null;
+}
+
+interface AppUserDbRow {
+  id: string;
+  email: string;
+  full_name: string;
+  phone?: string | null;
+  avatar_url?: string | null;
+  created_at: string;
+  organizations?: { name?: string | null } | Array<{ name?: string | null }> | null;
+  user_roles?: Array<{
+    roles?: { key?: RoleKey | null } | Array<{ key?: RoleKey | null }> | null;
+  }> | null;
+}
 
 // Static UUID mappings for demo users & organizations to bootstrap database.
 export const DEMO_MAPPINGS = {
@@ -29,13 +177,96 @@ export const DEMO_MAPPINGS = {
   }
 };
 
-import { hashPassword } from "./auth";
+import { hashPassword, isConfiguredAdminEmail } from "./auth";
+
+function relationOne<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+function getRoleFromUserRow(row: AppUserDbRow): RoleKey {
+  if (isConfiguredAdminEmail(row.email)) {
+    return "super_admin";
+  }
+
+  const roleKey = row.user_roles
+    ?.map((userRole) => relationOne(userRole.roles)?.key)
+    .find((key): key is RoleKey => Boolean(key));
+
+  return roleKey ?? "customer_owner";
+}
+
+async function assignUserRole(
+  supabase: ReturnType<typeof createSupabaseServiceClient>,
+  userId: string,
+  roleKey: RoleKey
+): Promise<void> {
+  const { data: role, error: roleErr } = await supabase
+    .from("roles")
+    .select("id")
+    .eq("key", roleKey)
+    .single();
+
+  if (roleErr || !role) {
+    throw new Error(`Role không tồn tại trong Supabase: ${roleKey}`);
+  }
+
+  await supabase.from("user_roles").delete().eq("user_id", userId);
+  const { error: assignErr } = await supabase.from("user_roles").insert({
+    user_id: userId,
+    role_id: role.id
+  });
+
+  if (assignErr) throw new Error(assignErr.message);
+}
+
+async function resolveOrderOrganizationId(
+  supabase: ReturnType<typeof createSupabaseServiceClient>,
+  order: CustomerOrder,
+  actorId: string
+): Promise<string> {
+  const { data: existingOrder } = await supabase
+    .from("customer_orders")
+    .select("organization_id")
+    .eq("id", order.id)
+    .maybeSingle();
+
+  if (existingOrder?.organization_id) {
+    return existingOrder.organization_id;
+  }
+
+  const ownerId = order.customerId || actorId;
+  const { data: owner, error: ownerErr } = await supabase
+    .from("app_users")
+    .select("organization_id")
+    .eq("id", ownerId)
+    .single();
+
+  if (ownerErr || !owner?.organization_id) {
+    throw new Error("Không xác định được tổ chức của đơn hàng.");
+  }
+
+  return owner.organization_id;
+}
 
 /**
  * Automatically upsert demo organizations & users to Supabase
  * to ensure that foreign keys are valid when demo accounts place orders.
  */
 export async function bootstrapDemoUsers(supabase = createSupabaseServiceClient()) {
+  if (process.env.NODE_ENV === "production" || process.env.ALLOW_DEMO_DATA !== "true") {
+    return;
+  }
+
+  const demoAdminPassword = process.env.DEMO_ADMIN_PASSWORD;
+  const demoMinhPassword = process.env.DEMO_MINH_PASSWORD;
+  const demoLanPassword = process.env.DEMO_LAN_PASSWORD;
+
+  if (!demoAdminPassword || !demoMinhPassword || !demoLanPassword) {
+    console.warn("Demo user bootstrap skipped because demo passwords are not configured.");
+    return;
+  }
+
   try {
     // 1. Upsert organizations
     await supabase.from("organizations").upsert([
@@ -51,7 +282,7 @@ export async function bootstrapDemoUsers(supabase = createSupabaseServiceClient(
         email: "admin@pettravel.vn",
         full_name: "Admin Pet Travel",
         phone: "0912345678",
-        password_hash: hashPassword("admin123"),
+        password_hash: hashPassword(demoAdminPassword),
         organization_id: DEMO_MAPPINGS.orgs.internal,
         status: "active"
       },
@@ -60,7 +291,7 @@ export async function bootstrapDemoUsers(supabase = createSupabaseServiceClient(
         email: "minh@happypaws.vn",
         full_name: "Nguyễn Minh",
         phone: "0987654321",
-        password_hash: hashPassword("minh123"),
+        password_hash: hashPassword(demoMinhPassword),
         organization_id: DEMO_MAPPINGS.orgs.happy_paws,
         status: "active"
       },
@@ -69,11 +300,15 @@ export async function bootstrapDemoUsers(supabase = createSupabaseServiceClient(
         email: "lan@petland.vn",
         full_name: "Trần Ngọc Lan",
         phone: "0901234567",
-        password_hash: hashPassword("lan123"),
+        password_hash: hashPassword(demoLanPassword),
         organization_id: DEMO_MAPPINGS.orgs.petland,
         status: "active"
       }
     ], { onConflict: "id" });
+
+    await assignUserRole(supabase, DEMO_MAPPINGS.users.admin, "super_admin");
+    await assignUserRole(supabase, DEMO_MAPPINGS.users.minh, "customer_owner");
+    await assignUserRole(supabase, DEMO_MAPPINGS.users.lan, "customer_owner");
   } catch (err) {
     console.error("Failed to bootstrap demo users in database:", err);
   }
@@ -83,6 +318,10 @@ export async function bootstrapDemoUsers(supabase = createSupabaseServiceClient(
  * Seeds initial products, variants, and suppliers if the database is empty.
  */
 export async function seedInitialDataIfNeeded() {
+  if (process.env.NODE_ENV === "production" || process.env.ALLOW_DEMO_DATA !== "true") {
+    return;
+  }
+
   const supabase = createSupabaseServiceClient();
   await ensureDbInitialized(supabase);
   try {
@@ -201,13 +440,13 @@ export async function getProducts(role: "guest" | "customer" | "admin"): Promise
 
   if (error || !data) return [];
 
-  return data.map((p: any) => {
-    const variants = p.product_variants
-      ?.filter((pv: any) => pv.active)
-      .flatMap((pv: any) => {
-        const offers = pv.supplier_offers?.filter((so: any) => so.active) ?? [];
+  return (data as ProductRow[]).map((p) => {
+    const variants: ProductVariant[] = p.product_variants
+      ?.filter((pv) => pv.active)
+      .flatMap((pv) => {
+        const offers = pv.supplier_offers?.filter((so) => so.active) ?? [];
         if (offers.length === 0) return [];
-        return offers.map((so: any) => ({
+        return offers.map((so) => ({
           id: pv.id,
           sku: pv.sku,
           label: pv.label,
@@ -292,7 +531,7 @@ export async function getSuppliers(): Promise<Supplier[]> {
   const supabase = createSupabaseServiceClient();
   const { data, error } = await supabase.from("suppliers").select("*").eq("active", true);
   if (error || !data) return [];
-  return data.map((s: any) => ({
+  return (data as SupplierRow[]).map((s) => ({
     id: s.id,
     code: s.code,
     name: s.name,
@@ -422,19 +661,18 @@ export async function getOrders(user: UserAccount): Promise<CustomerOrder[]> {
   `);
 
   if (!user.isAdmin) {
-    // If not admin, get user's organization orders
-    const mappedOrgId = user.id === DEMO_MAPPINGS.users.minh
-      ? DEMO_MAPPINGS.orgs.happy_paws
-      : DEMO_MAPPINGS.orgs.petland;
-    query = query.eq("organization_id", mappedOrgId);
+    if (!user.organizationId) {
+      return [];
+    }
+    query = query.eq("organization_id", user.organizationId);
   }
 
   const { data, error } = await query.order("created_at", { ascending: false });
   if (error || !data) return [];
 
-  return data.map((o: any) => {
+  return (data as OrderRow[]).map((o) => {
     // Map items
-    const items = o.order_items?.map((i: any) => ({
+    const items: OrderItem[] = o.order_items?.map((i) => ({
       id: i.id,
       productCode: i.product_code_snapshot,
       productName: i.product_name_snapshot,
@@ -446,7 +684,16 @@ export async function getOrders(user: UserAccount): Promise<CustomerOrder[]> {
     })) ?? [];
 
     // Map quote versions
-    const quoteVersions = o.quote_versions?.map((qv: any) => ({
+    const quoteVersions: QuoteVersion[] = o.quote_versions?.map((qv) => {
+      const adjustments: QuoteAdjustment[] = qv.quote_adjustments?.map((qa) => ({
+        id: qa.id,
+        type: qa.type,
+        label: qa.label,
+        amount: Number(qa.amount),
+        requiresApproval: qa.requires_approval
+      })) ?? [];
+
+      return {
       id: qv.id,
       version: qv.version,
       status: qv.status,
@@ -455,18 +702,15 @@ export async function getOrders(user: UserAccount): Promise<CustomerOrder[]> {
       depositAmount: Number(qv.deposit_amount),
       codRemaining: Number(qv.cod_remaining),
       expiresAt: qv.expires_at,
-      adjustments: qv.quote_adjustments?.map((qa: any) => ({
-        id: qa.id,
-        type: qa.type,
-        label: qa.label,
-        amount: Number(qa.amount),
-        requiresApproval: qa.requires_approval
-      })) ?? []
-    })) ?? [];
+      adjustments
+      };
+    }) ?? [];
 
     // Map payments and proofs
-    const paymentRequests = o.payment_requests?.map((pr: any) => ({
+    const latestQuoteVersion = quoteVersions.at(-1)?.version ?? 1;
+    const paymentRequests: PaymentRequest[] = o.payment_requests?.map((pr) => ({
       id: pr.id,
+      quoteVersion: latestQuoteVersion,
       purpose: pr.purpose,
       amount: Number(pr.amount),
       reference: pr.reference,
@@ -475,8 +719,8 @@ export async function getOrders(user: UserAccount): Promise<CustomerOrder[]> {
       expiresAt: pr.expires_at
     })) ?? [];
 
-    const paymentProofs = o.payment_requests?.flatMap((pr: any) => 
-      pr.payment_proofs?.map((pf: any) => ({
+    const paymentProofs: PaymentProof[] = o.payment_requests?.flatMap((pr) => 
+      pr.payment_proofs?.map((pf) => ({
         id: pf.id,
         paymentRequestId: pr.id,
         fileName: pf.file_name,
@@ -486,9 +730,9 @@ export async function getOrders(user: UserAccount): Promise<CustomerOrder[]> {
     ) ?? [];
 
     // Map comments
-    const comments = o.order_comments
-      ?.filter((c: any) => user.isAdmin || c.audience === "customer_visible")
-      .map((c: any) => ({
+    const comments: OrderComment[] = o.order_comments
+      ?.filter((c) => user.isAdmin || c.audience === "customer_visible")
+      .map((c) => ({
         id: c.id,
         author: c.app_users?.full_name ?? "Đại lý sỉ",
         audience: c.audience,
@@ -526,11 +770,7 @@ export async function getOrders(user: UserAccount): Promise<CustomerOrder[]> {
 export async function saveOrder(order: CustomerOrder, creatorId: string): Promise<void> {
   const supabase = createSupabaseServiceClient();
 
-  const orgId = creatorId === DEMO_MAPPINGS.users.minh
-    ? DEMO_MAPPINGS.orgs.happy_paws
-    : creatorId === DEMO_MAPPINGS.users.lan
-      ? DEMO_MAPPINGS.orgs.petland
-      : DEMO_MAPPINGS.orgs.internal;
+  const orgId = await resolveOrderOrganizationId(supabase, order, creatorId);
 
   // 1. Upsert customer_orders
   const { error: orderErr } = await supabase.from("customer_orders").upsert({
@@ -671,7 +911,7 @@ export async function getAdminPolicy(): Promise<AdminPolicy> {
       requireManagerApprovalAbove: 500000
     };
   }
-  const val = data.value as any;
+  const val = data.value as Partial<AdminPolicy>;
   return {
     freeShippingThreshold: Number(val.freeShippingThreshold) || 5000000,
     defaultDepositRate: Number(val.defaultDepositRate) || 0.3,
@@ -732,22 +972,28 @@ export async function getAppUsers(): Promise<AppUserRow[]> {
       created_at,
       organizations (
         name
+      ),
+      user_roles (
+        roles (
+          key
+        )
       )
     `)
     .order("created_at", { ascending: false });
 
   if (error || !data) return [];
 
-  return data.map((u: any) => {
-    const isAdmin = u.email === "admin@pettravel.vn";
+  return (data as AppUserDbRow[]).map((u) => {
+    const role = getRoleFromUserRow(u);
+    const org = relationOne(u.organizations);
     return {
       id: u.id,
       email: u.email,
       fullName: u.full_name,
       phone: u.phone ?? "",
       avatarUrl: u.avatar_url ?? "",
-      role: isAdmin ? "super_admin" : "customer_owner",
-      company: u.organizations?.name ?? "",
+      role,
+      company: org?.name ?? "",
       createdAt: u.created_at
     };
   });
@@ -758,7 +1004,7 @@ export async function createAppUser(input: {
   fullName: string;
   phone: string;
   passwordRaw: string;
-  role: string;
+  role: RoleKey;
   company?: string;
 }): Promise<void> {
   const supabase = createSupabaseServiceClient();
@@ -824,6 +1070,7 @@ export async function createAppUser(input: {
   });
 
   if (userErr) throw new Error(userErr.message);
+  await assignUserRole(supabase, newUserId, input.role);
 }
 
 export async function updateUserProfile(
@@ -831,7 +1078,7 @@ export async function updateUserProfile(
   input: { fullName?: string; avatarUrl?: string; newPasswordRaw?: string }
 ): Promise<void> {
   const supabase = createSupabaseServiceClient();
-  const updateData: Record<string, any> = {};
+  const updateData: Record<string, string> = {};
 
   if (input.fullName !== undefined) {
     updateData.full_name = input.fullName.trim();
@@ -856,6 +1103,10 @@ export async function updateUserProfile(
 let isDbInitialized = false;
 
 export async function ensureDbInitialized(supabase = createSupabaseServiceClient()) {
+  if (process.env.NODE_ENV === "production" || process.env.ALLOW_RUNTIME_MIGRATIONS !== "true") {
+    return;
+  }
+
   if (isDbInitialized) return;
   isDbInitialized = true;
 
@@ -877,7 +1128,7 @@ export async function ensureDbInitialized(supabase = createSupabaseServiceClient
     $$;
 
     -- 2. Thêm trường assigned_staff_id để khóa đơn hàng
-    ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS assigned_staff_id uuid REFERENCES app_users(id) ON DELETE SET NULL;
+    ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS assigned_staff_id text REFERENCES app_users(id) ON DELETE SET NULL;
   `;
 
   let migrationSuccess = false;
@@ -886,7 +1137,6 @@ export async function ensureDbInitialized(supabase = createSupabaseServiceClient
   const dbUrl = process.env.DATABASE_URL;
   if (dbUrl) {
     try {
-      const { Client } = require("pg");
       const client = new Client({
         connectionString: dbUrl,
         ssl: { rejectUnauthorized: false } // Required for external SSL connection to Supabase
@@ -897,8 +1147,9 @@ export async function ensureDbInitialized(supabase = createSupabaseServiceClient
       await client.end();
       migrationSuccess = true;
       console.log("Database schema successfully auto-updated and PostgREST cache reloaded via direct PG connection!");
-    } catch (dbErr: any) {
-      console.warn("Direct PG migration failed, falling back to RPC:", dbErr.message);
+    } catch (dbErr: unknown) {
+      const message = dbErr instanceof Error ? dbErr.message : String(dbErr);
+      console.warn("Direct PG migration failed, falling back to RPC:", message);
     }
   }
 
@@ -924,4 +1175,3 @@ export async function ensureDbInitialized(supabase = createSupabaseServiceClient
     console.warn("Seeding demo users skipped:", err);
   }
 }
-

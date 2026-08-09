@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionUser, requireAdmin } from "@/server/auth";
+import { getSessionUser, requirePermission, requireSameOrigin } from "@/server/auth";
 import { getCategories, saveCategories } from "@/server/db";
 
 export const runtime = "nodejs";
@@ -16,7 +16,8 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    await requireAdmin();
+    requireSameOrigin(req);
+    await requirePermission("catalog.write");
   } catch (resp) {
     if (resp instanceof Response) return resp;
     return NextResponse.json({ error: "Lỗi xác thực." }, { status: 403 });
@@ -42,7 +43,8 @@ export async function POST(req: Request) {
 
 export async function PUT(req: Request) {
   try {
-    await requireAdmin();
+    requireSameOrigin(req);
+    await requirePermission("catalog.write");
   } catch (resp) {
     if (resp instanceof Response) return resp;
     return NextResponse.json({ error: "Lỗi xác thực." }, { status: 403 });
@@ -65,7 +67,8 @@ export async function PUT(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    await requireAdmin();
+    requireSameOrigin(req);
+    await requirePermission("catalog.write");
   } catch (resp) {
     if (resp instanceof Response) return resp;
     return NextResponse.json({ error: "Lỗi xác thực." }, { status: 403 });

@@ -10,6 +10,7 @@ export interface PresignUploadInput {
   orderId: string;
   fileName: string;
   contentType: string;
+  fileSizeBytes: number;
   purpose: "payment-proof" | "invoice" | "product-image";
 }
 
@@ -47,6 +48,7 @@ export async function createR2UploadUrl(input: PresignUploadInput) {
     Bucket: getRequiredEnv("R2_BUCKET"),
     Key: key,
     ContentType: input.contentType,
+    ContentLength: input.fileSizeBytes,
     Metadata: {
       orderId: input.orderId,
       purpose: input.purpose

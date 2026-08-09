@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionUser } from "@/server/auth";
+import { getSessionUser, requireSameOrigin } from "@/server/auth";
 
 export const runtime = "nodejs";
 
@@ -23,7 +23,13 @@ export async function GET() {
 }
 
 /** Logout — clear session cookie */
-export async function DELETE() {
+export async function DELETE(request: Request) {
+  try {
+    requireSameOrigin(request);
+  } catch (resp) {
+    if (resp instanceof Response) return resp;
+  }
+
   const response = NextResponse.json({ ok: true });
   response.cookies.set("pt_session", "", {
     httpOnly: true,

@@ -31,6 +31,9 @@ Sao chep `.env.example` thanh `.env.local`, dien cac bien:
 - `R2_SECRET_ACCESS_KEY`
 - `R2_BUCKET`
 - `R2_PUBLIC_BASE_URL`
+- `ADMIN_EMAILS`
+- `JWT_SECRET`
+- `PASSWORD_PEPPER`
 
 Khong commit `.env.local` hoac secret that.
 
@@ -41,6 +44,7 @@ Khong commit `.env.local` hoac secret that.
 3. Bat RLS va review policy truoc khi mo production.
 4. Tao user bang Admin flow, khong mo public signup.
 5. Server dung `SUPABASE_SERVICE_ROLE_KEY` chi trong route/server action, khong dua xuong client.
+6. Khong bat `ALLOW_DEMO_DATA` hoac `ALLOW_RUNTIME_MIGRATIONS` tren production.
 
 ## Cloudflare R2
 
@@ -53,9 +57,46 @@ Khong commit `.env.local` hoac secret that.
 
 1. Import repo len Vercel.
 2. Them env cho `Production`, `Preview`, `Development`.
-3. Build command: `npm run build`.
-4. Sau khi thay doi env, redeploy de bien moi co tac dung.
-5. Kiem tra `/api/health`, trang chu, upload presign va order room tren preview truoc khi promote production.
+3. Bat buoc them `JWT_SECRET` va `PASSWORD_PEPPER`, moi bien toi thieu 32 ky tu random. Neu thieu, dang nhap production se fail-secure.
+4. Build command: `npm run build`.
+5. Sau khi thay doi env, redeploy de bien moi co tac dung.
+6. Kiem tra `/api/health`, trang chu, upload presign va order room tren preview truoc khi promote production.
+
+Tao secret nhanh tren may local:
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+Chay lenh 2 lan, dung gia tri khac nhau cho `JWT_SECRET` va `PASSWORD_PEPPER`.
+
+## Checklist thu cong truoc deploy that
+
+1. Supabase SQL Editor: chay `supabase/schema.sql` tren project moi hoac tao migration rieng neu database da co bang.
+2. Supabase Table Editor: dam bao `roles`, `permissions`, `role_permissions` da co du lieu seed.
+3. Vercel env: them du cac bien trong `.env.example`; rieng `JWT_SECRET`, `PASSWORD_PEPPER`, `SUPABASE_SERVICE_ROLE_KEY`, `R2_SECRET_ACCESS_KEY` chi dat o Server/Encrypted env, khong dua vao client.
+4. Admin bootstrap: dat cung mot email owner trong `ADMIN_EMAILS` va `ADMIN_BOOTSTRAP_EMAIL`, dat `ADMIN_BOOTSTRAP_TOKEN` random toi thieu 32 ky tu, redeploy, sau do goi endpoint bootstrap mot lan:
+
+```powershell
+$body = @{
+  email = "owner@example.com"
+  fullName = "Owner Pet Travel"
+  phone = "0900000000"
+  password = "doi-mat-khau-manh-12-ky-tu"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "https://your-vercel-domain.vercel.app/api/admin/bootstrap" `
+  -Headers @{ "x-bootstrap-token" = "ADMIN_BOOTSTRAP_TOKEN_CUA_BAN" } `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+Sau khi login owner thanh cong, xoa `ADMIN_BOOTSTRAP_TOKEN` khoi Vercel env va redeploy.
+5. Cloudflare R2 CORS: cho domain Vercel production/preview duoc `PUT`, `GET`, `HEAD`; allowed headers toi thieu `Content-Type`, `Content-Length`; expose `ETag`.
+6. Verify live: login owner, tao user dai ly, tao san pham co variant, khach chot don, admin bao gia, tao QR, upload chung tu, admin xac nhan coc, gan van don.
+7. Sau verify: dat `ALLOW_DEMO_DATA=false`, `ALLOW_RUNTIME_MIGRATIONS=false`, redeploy production.
 
 ## Nghiep vu chinh
 
@@ -81,4 +122,4 @@ Khong commit `.env.local` hoac secret that.
 
 ## Trang thai hien tai
 
-Day la nen tang khoi tao co UI va domain model chay duoc voi mock data. Ket noi Supabase CRUD, auth admin-created, realtime channel va R2 upload flow that se la milestone tiep theo.
+Local lint, type-check, audit va production build da pass. Live Supabase/R2/Vercel can duoc xac minh bang env that sau khi deploy preview.

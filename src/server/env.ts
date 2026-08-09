@@ -12,7 +12,15 @@ const serverEnvSchema = z.object({
   R2_PUBLIC_BASE_URL: z.string().url().optional(),
   PAYMENT_QR_BANK_NAME: z.string().optional(),
   PAYMENT_QR_ACCOUNT_NO: z.string().optional(),
-  PAYMENT_QR_ACCOUNT_NAME: z.string().optional()
+  PAYMENT_QR_ACCOUNT_NAME: z.string().optional(),
+  ADMIN_BOOTSTRAP_EMAIL: z.string().email().optional(),
+  ADMIN_BOOTSTRAP_TOKEN: z.string().min(32).optional(),
+  ADMIN_EMAILS: z.string().optional(),
+  JWT_SECRET: z.string().min(32).optional(),
+  PASSWORD_PEPPER: z.string().min(32).optional(),
+  ALLOW_DEMO_DATA: z.enum(["true", "false"]).optional(),
+  ALLOW_RUNTIME_MIGRATIONS: z.enum(["true", "false"]).optional(),
+  CRON_SECRET: z.string().optional()
 });
 
 const rawEnv = Object.fromEntries(

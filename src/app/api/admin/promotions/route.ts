@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAdmin } from "@/server/auth";
+import { requireAdmin, requirePermission, requireSameOrigin } from "@/server/auth";
 import { createSupabaseServiceClient } from "@/server/supabase";
 
 export const runtime = "nodejs";
@@ -16,7 +16,7 @@ const promotionsSchema = z.object({
 
 export async function GET() {
   try {
-    await requireAdmin();
+    await requirePermission("order.adjust");
   } catch (resp) {
     if (resp instanceof Response) return resp;
     return NextResponse.json({ error: "Lỗi xác thực." }, { status: 403 });
@@ -48,6 +48,7 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
+    requireSameOrigin(request);
     await requireAdmin();
   } catch (resp) {
     if (resp instanceof Response) return resp;

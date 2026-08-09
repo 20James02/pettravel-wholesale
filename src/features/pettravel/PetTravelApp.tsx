@@ -7,9 +7,6 @@ import {
   Boxes,
   Building2,
   CheckCircle2,
-  CreditCard,
-  FileCheck2,
-  FileText,
   LockKeyhole,
   MessageSquare,
   MessageCircle,
@@ -31,11 +28,10 @@ import {
   ChevronRight,
   LogOut,
   Sparkles,
-  Heart,
   Check,
   Clock
 } from "lucide-react";
-import { type ComponentType, type ReactNode, useMemo, useState, useEffect, useCallback } from "react";
+import { type ReactNode, useMemo, useState, useEffect, useCallback } from "react";
 import Lenis from "lenis";
 import type {
   AdminPolicy,
@@ -46,9 +42,7 @@ import type {
   RoleKey,
   Supplier,
   UserAccount,
-  ProductVariant,
-  PaymentProof,
-  PaymentRequest
+  ProductVariant
 } from "@/lib/domain";
 import { formatVnd, percent } from "@/lib/money";
 
@@ -76,11 +70,6 @@ const DEFAULT_POLICY: AdminPolicy = {
   maxOperatorDiscountRate: 0.08, requireManagerApprovalAbove: 500000
 };
 
-const paymentIntentLabels: Record<PaymentIntent, string> = {
-  deposit_cod: "Đặt cọc trước 30% + Thanh toán phần còn lại khi nhận hàng (COD)",
-  pay_full: "Thanh toán toàn bộ 100% sau khi giá được duyệt"
-};
-
 function StatusPill({
   tone = "success",
   children
@@ -90,6 +79,32 @@ function StatusPill({
 }) {
   const className = tone === "success" ? "status-pill success" : tone === "warning" ? "status-pill warning" : "status-pill info";
   return <span className={className}>{children}</span>;
+}
+
+interface AdminUserRow {
+  id: string;
+  email: string;
+  fullName: string;
+  phone: string;
+  avatarUrl: string;
+  role: string;
+  company: string;
+  createdAt: string;
+}
+
+interface PromotionsPolicyState extends AdminPolicy {
+  giftThreshold?: number;
+  giftName?: string;
+}
+
+interface ProfileUpdatePayload {
+  fullName?: string;
+  avatarUrl?: string;
+  newPassword?: string;
+}
+
+interface OrderMutationResponse {
+  order: CustomerOrder;
 }
 
 function latestQuote(order: CustomerOrder) {
@@ -107,7 +122,6 @@ export function PetTravelApp() {
   // Auth & data state
   const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
   const [allOrders, setAllOrders] = useState<CustomerOrder[]>([]);
-  const [canCreateOrder, setCanCreateOrder] = useState<boolean>(true);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [adminPolicy, setAdminPolicy] = useState<AdminPolicy>(DEFAULT_POLICY);
   const [rolePermissions, setRolePermissions] = useState<Record<RoleKey, PermissionKey[]>>({} as Record<RoleKey, PermissionKey[]>);
@@ -144,20 +158,14 @@ export function PetTravelApp() {
 
   // Auth & Profile states
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
-  const [showRegisterModal, setShowRegisterModal] = useState<boolean>(false);
   const [loginEmail, setLoginEmail] = useState<string>("");
   const [loginPassword, setLoginPassword] = useState<string>("");
-  const [regFullName, setRegFullName] = useState<string>("");
-  const [regEmail, setRegEmail] = useState<string>("");
-  const [regPhone, setRegPhone] = useState<string>("");
-  const [regCompany, setRegCompany] = useState<string>("");
-  const [regPassword, setRegPassword] = useState<string>("");
   const [profileFullName, setProfileFullName] = useState<string>("");
   const [profileAvatarUrl, setProfileAvatarUrl] = useState<string>("");
   const [profileNewPassword, setProfileNewPassword] = useState<string>("");
 
   // Admin User management states
-  const [userList, setUserList] = useState<any[]>([]);
+  const [userList, setUserList] = useState<AdminUserRow[]>([]);
   const [createFullName, setCreateFullName] = useState<string>("");
   const [createEmail, setCreateEmail] = useState<string>("");
   const [createPhone, setCreatePhone] = useState<string>("");
@@ -166,7 +174,7 @@ export function PetTravelApp() {
   const [createCompany, setCreateCompany] = useState<string>("");
 
   // Admin Promotions settings states
-  const [promotionsPolicy, setPromotionsPolicy] = useState<any>({
+  const [promotionsPolicy, setPromotionsPolicy] = useState<PromotionsPolicyState>({
     freeShippingThreshold: 5000000,
     defaultDepositRate: 0.3,
     maxOperatorDiscountRate: 0.08,
@@ -205,31 +213,30 @@ export function PetTravelApp() {
   const [formDescription, setFormDescription] = useState<string>("");
   const [formTags, setFormTags] = useState<string>("");
   const [formVariants, setFormVariants] = useState<ProductVariant[]>([]);
-  
-  // Auto-generate SKUs on code / variant labels change
-  useEffect(() => {
-    if (showProductForm && formCode) {
-      setFormVariants((prev) =>
-        prev.map((v, index) => {
-          const cleanLabel = v.label
-            .toLowerCase()
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .replace(/[^a-z0-9]/g, "-")
-            .replace(/^-+|-+$/g, "")
-            .toUpperCase();
-          const cleanCode = formCode.toUpperCase().replace(/[^A-Z0-9-]/g, "");
-          const suffix = cleanLabel ? `-${cleanLabel}` : `-${index + 1}`;
-          const generatedSku = `${cleanCode}${suffix}`;
-          if (v.sku === generatedSku) return v;
-          return {
-            ...v,
-            sku: generatedSku
-          };
-        })
-      );
-    }
-  }, [formCode, formVariants.map(v => v.label).join(','), showProductForm]);
+
+  function buildVariantSku(code: string, label: string, index: number): string {
+    const cleanLabel = label
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .toUpperCase();
+    const cleanCode = code.toUpperCase().replace(/[^A-Z0-9-]/g, "");
+    return `${cleanCode}${cleanLabel ? `-${cleanLabel}` : `-${index + 1}`}`;
+  }
+
+  function syncVariantSkus(code: string, variants: ProductVariant[]): ProductVariant[] {
+    return variants.map((variant, index) => ({
+      ...variant,
+      sku: buildVariantSku(code, variant.label, index)
+    }));
+  }
+
+  function updateFormCode(nextCode: string) {
+    setFormCode(nextCode);
+    setFormVariants((prev) => syncVariantSkus(nextCode, prev));
+  }
 
   // Cart state
   const [cartItems, setCartItems] = useState<Array<{
@@ -281,7 +288,6 @@ export function PetTravelApp() {
   const [adminShippingFee, setAdminShippingFee] = useState<number>(0);
   const [shippingFeeOption, setShippingFeeOption] = useState<"included" | "separate_cod">("included");
   const [customDepositInput, setCustomDepositInput] = useState<string>("");
-  const [isQuoteAccepted, setIsQuoteAccepted] = useState<boolean>(false);
   const [isManagerApproved, setIsManagerApproved] = useState<boolean>(false);
 
   // ── API fetch helpers ──────────────────────────────────────
@@ -299,7 +305,6 @@ export function PetTravelApp() {
       if (!res.ok) return;
       const data = await res.json();
       setAllOrders(data.orders ?? []);
-      setCanCreateOrder(data.canCreateOrder ?? true);
       // Auto-select first order for customer, or keep selected for admin
       if (data.orders?.length > 0) {
         const firstOrder = data.orders[0];
@@ -354,8 +359,8 @@ export function PetTravelApp() {
       const res = await fetch("/api/admin/promotions");
       if (res.ok) {
         const data = await res.json();
-        setPromotionsPolicy(data.policy ?? promotionsPolicy);
         if (data.policy) {
+          setPromotionsPolicy(data.policy);
           setAdminPolicy({
             freeShippingThreshold: data.policy.freeShippingThreshold,
             defaultDepositRate: data.policy.defaultDepositRate,
@@ -365,7 +370,7 @@ export function PetTravelApp() {
         }
       }
     } catch { /* silent */ }
-  }, [promotionsPolicy]);
+  }, []);
 
   async function handleAddCategory(e: React.FormEvent) {
     e.preventDefault();
@@ -521,47 +526,6 @@ export function PetTravelApp() {
     }
   }
 
-  /** Register customer account */
-  async function handleRegister(e: React.FormEvent) {
-    e.preventDefault();
-    if (!regFullName.trim() || !regEmail.trim() || !regPhone.trim() || !regCompany.trim() || !regPassword) {
-      alert("Vui lòng điền đầy đủ thông tin các trường!");
-      return;
-    }
-    setIsLoading(true);
-    try {
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fullName: regFullName.trim(),
-          email: regEmail.trim(),
-          phone: regPhone.trim(),
-          company: regCompany.trim(),
-          password: regPassword
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || "Đăng ký thất bại.");
-        return;
-      }
-      alert(data.message || "Đăng ký tài khoản thành công!");
-      setShowRegisterModal(false);
-      setShowLoginModal(true);
-      setLoginEmail(regEmail.trim());
-      setRegFullName("");
-      setRegEmail("");
-      setRegPhone("");
-      setRegCompany("");
-      setRegPassword("");
-    } catch {
-      alert("Lỗi kết nối.");
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
   /** Admin creates User or Admin account */
   async function handleCreateUser(e: React.FormEvent) {
     e.preventDefault();
@@ -603,7 +567,7 @@ export function PetTravelApp() {
   async function handleUpdateProfile(e: React.FormEvent) {
     e.preventDefault();
     try {
-      const payload: any = {};
+      const payload: ProfileUpdatePayload = {};
       if (profileFullName.trim()) payload.fullName = profileFullName.trim();
       if (profileAvatarUrl.trim()) payload.avatarUrl = profileAvatarUrl.trim();
       if (profileNewPassword) payload.newPassword = profileNewPassword;
@@ -683,11 +647,9 @@ export function PetTravelApp() {
       const ship = q.adjustments.find((a) => a.type === "shipping_fee");
       setAdminDiscount(disc ? Math.abs(disc.amount) : 0);
       setAdminShippingFee(ship ? ship.amount : 0);
-      setIsQuoteAccepted(q.status === "accepted");
     } else {
       setAdminDiscount(0);
       setAdminShippingFee(0);
-      setIsQuoteAccepted(false);
     }
   }
 
@@ -700,10 +662,10 @@ export function PetTravelApp() {
         body: JSON.stringify(order)
       });
       if (!res.ok) return;
-      const data = await res.json();
+      const data = await res.json() as OrderMutationResponse;
       setAllOrders((prev) => prev.map((o) => (o.id === data.order.id ? data.order : o)));
       setWorkingOrder(data.order);
-      setAdminOrderItems(data.order.items.map((item: any) => ({ ...item })));
+      setAdminOrderItems(data.order.items.map((item) => ({ ...item })));
       setIsOrderModified(false);
     } catch { /* silent */ }
   }
@@ -777,6 +739,8 @@ export function PetTravelApp() {
       }
     }
     checkSession();
+    // Initial session restore intentionally runs once; fetch helpers are stable enough for this mount-only bootstrap.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const activeUser = currentUser ? {
@@ -840,7 +804,6 @@ export function PetTravelApp() {
       ],
       updatedAt: new Date().toISOString()
     };
-    setIsQuoteAccepted(false);
     await syncOrder(updatedOrder);
   }
 
@@ -915,31 +878,6 @@ export function PetTravelApp() {
       updatedAt: new Date().toISOString()
     };
 
-    setIsQuoteAccepted(false);
-    await syncOrder(updatedOrder);
-  }
-
-  // 3. Customer accepts quote directly (as backup)
-  async function acceptQuote() {
-    setIsQuoteAccepted(true);
-    const updatedQuoteVersions = workingOrder.quoteVersions.map((q, idx) =>
-      idx === workingOrder.quoteVersions.length - 1 ? { ...q, status: "accepted" as const } : q
-    );
-    const updatedOrder: CustomerOrder = {
-      ...workingOrder,
-      quoteVersions: updatedQuoteVersions,
-      comments: [
-        {
-          id: `c_acc_${Date.now()}`,
-          author: workingOrder.customerName,
-          audience: "customer_visible",
-          message: `Đại lý đã đồng ý với Bản báo giá lần ${quote.version}. Tiến hành thanh toán cọc sỉ.`,
-          createdAt: new Date().toISOString()
-        },
-        ...workingOrder.comments
-      ],
-      updatedAt: new Date().toISOString()
-    };
     await syncOrder(updatedOrder);
   }
 
@@ -1117,22 +1055,8 @@ export function PetTravelApp() {
       };
 
       await syncOrder(updatedOrder);
-      setIsQuoteAccepted(false);
       setActiveTab("order");
     } else {
-      const initialQuote = {
-        id: `q_1_${Date.now()}`,
-        version: 1,
-        status: "published" as const,
-        subtotal,
-        adjustments: [],
-        finalTotal: subtotal,
-        depositAmount: initialDeposit,
-        codRemaining: isDeposit ? subtotal - initialDeposit : 0,
-        shippingFeeOption: "included" as const,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-      };
-
       try {
         const res = await fetch("/api/orders", {
           method: "POST",
@@ -1140,16 +1064,17 @@ export function PetTravelApp() {
           body: JSON.stringify({
             items: cartItems.map((item) => ({ ...item })),
             paymentIntent: workingOrder.paymentIntent,
-            quoteVersions: [initialQuote]
+            recipientName,
+            recipientPhone,
+            recipientAddress
           })
         });
         if (!res.ok) return;
-        const data = await res.json();
+        const data = await res.json() as OrderMutationResponse;
         setWorkingOrder(data.order);
         setAllOrders((prev) => [data.order, ...prev]);
         setSelectedOrderId(data.order.id);
-        setCartItems(data.order.items.map((item: any) => ({ ...item })));
-        setIsQuoteAccepted(false);
+        setCartItems(data.order.items.map((item) => ({ ...item })));
         setActiveTab("order");
       } catch { /* silent */ }
     }
@@ -1513,14 +1438,6 @@ export function PetTravelApp() {
                 >
                   <LockKeyhole size={14} />
                   Đăng nhập
-                </button>
-                <button
-                  className="tab-button text-xs py-2 px-3 bg-orange-100 hover:bg-orange-200 border-orange-200 text-orange-850 font-bold rounded-xl flex items-center gap-1 cursor-pointer transition"
-                  type="button"
-                  onClick={() => setShowRegisterModal(true)}
-                >
-                  <UserRound size={14} />
-                  Đăng ký đại lý
                 </button>
               </>
             ) : (
@@ -2036,6 +1953,7 @@ export function PetTravelApp() {
                   <div className="flex items-center gap-4 py-2 border-b border-orange-100/50">
                     <div className="w-16 h-16 rounded-full overflow-hidden bg-orange-50 border-2 border-orange-200 flex items-center justify-center text-xl font-bold text-orange-600 shrink-0">
                       {profileAvatarUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
                         <img src={profileAvatarUrl} alt="Avatar" width={64} height={64} className="object-cover w-full h-full" />
                       ) : (
                         currentUser?.name?.charAt(0) || "U"
@@ -2671,7 +2589,8 @@ export function PetTravelApp() {
                   setEditingProduct(null);
                   setShowProductForm(true);
                   // Setup empty form
-                  setFormCode(`PRO-${Date.now().toString().slice(-4)}`);
+                  const nextProductCode = `PRO-${Date.now().toString().slice(-4)}`;
+                  setFormCode(nextProductCode);
                   setFormName("");
                   setFormCategory(allCategories[0] || "");
                   setFormProductSupplier(suppliers[0]?.id || "");
@@ -2681,10 +2600,10 @@ export function PetTravelApp() {
                   setFormWeight(0);
                   setFormDescription("");
                   setFormTags("");
-                  setFormVariants([
+                  setFormVariants(syncVariantSkus(nextProductCode, [
                     { id: `v_${Date.now()}_1`, sku: "", label: "Túi 1.5kg", wholesalePrice: 150000, minOrderQty: 10, stock: 100, supplierId: suppliers[0]?.id || "sup_pettravel" },
                     { id: `v_${Date.now()}_2`, sku: "", label: "Túi 5kg", wholesalePrice: 420000, minOrderQty: 5, stock: 50, supplierId: suppliers[0]?.id || "sup_pettravel" }
-                  ]);
+                  ]));
                 }}
               >
                 + Thêm sản phẩm sỉ
@@ -2750,7 +2669,7 @@ export function PetTravelApp() {
                               setFormWeight(p.weight ?? 0);
                               setFormDescription(p.description ?? "");
                               setFormTags(p.tags.join(", "));
-                              setFormVariants(p.variants.map(v => ({ ...v })));
+                              setFormVariants(syncVariantSkus(p.code, p.variants.map(v => ({ ...v }))));
                             }}
                           >
                             Sửa
@@ -3365,14 +3284,15 @@ export function PetTravelApp() {
                           <td className="py-3">
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-full overflow-hidden bg-orange-50 flex items-center justify-center font-bold text-orange-750 text-xs shrink-0 border border-orange-200">
-                                {u.avatar_url ? (
-                                  <img src={u.avatar_url} alt="" className="w-full h-full object-cover" />
+                                {u.avatarUrl ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={u.avatarUrl} alt="" className="w-full h-full object-cover" />
                                 ) : (
-                                  u.full_name?.charAt(0) || "U"
+                                  u.fullName?.charAt(0) || "U"
                                 )}
                               </div>
                               <div className="flex flex-col">
-                                <strong className="text-[#331B08]">{u.full_name}</strong>
+                                <strong className="text-[#331B08]">{u.fullName}</strong>
                                 <span className="text-[10px] text-gray-400">{u.email}</span>
                               </div>
                             </div>
@@ -3380,7 +3300,7 @@ export function PetTravelApp() {
                           <td className="font-semibold text-gray-655">{u.phone || "—"}</td>
                           <td>
                             <div className="flex flex-col">
-                              <strong className="text-[#78350F]">{u.organizations?.name || "Pet Travel Nội bộ"}</strong>
+                              <strong className="text-[#78350F]">{u.company || "Pet Travel Nội bộ"}</strong>
                               <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">{u.role}</span>
                             </div>
                           </td>
@@ -3898,7 +3818,7 @@ export function PetTravelApp() {
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-bold text-orange-950/80">Mã sản phẩm (Code):</label>
-                  <input type="text" className="text-input text-xs py-2 px-3" value={formCode} onChange={(e) => setFormCode(e.target.value)} placeholder="Ví dụ: PRO-102" />
+                  <input type="text" className="text-input text-xs py-2 px-3" value={formCode} onChange={(e) => updateFormCode(e.target.value)} placeholder="Ví dụ: PRO-102" />
                 </div>
               </div>
 
@@ -4016,7 +3936,7 @@ export function PetTravelApp() {
                         ...prev,
                         {
                           id: `v_${Date.now()}`,
-                          sku: "",
+                          sku: buildVariantSku(formCode, "Phân loại mới", prev.length),
                           label: "Phân loại mới",
                           wholesalePrice: 100000,
                           minOrderQty: 10,
@@ -4040,9 +3960,12 @@ export function PetTravelApp() {
                           className="text-input text-[10px] py-1 px-2 w-full" 
                           value={v.label} 
                           onChange={(e) => {
-                            const updated = [...formVariants];
-                            updated[index].label = e.target.value;
-                            setFormVariants(updated);
+                            const nextLabel = e.target.value;
+                            setFormVariants((prev) => prev.map((variant, variantIndex) =>
+                              variantIndex === index
+                                ? { ...variant, label: nextLabel, sku: buildVariantSku(formCode, nextLabel, variantIndex) }
+                                : variant
+                            ));
                           }} 
                         />
                       </div>
@@ -4330,7 +4253,7 @@ export function PetTravelApp() {
                   className="py-1 px-2 bg-orange-100 hover:bg-orange-200 text-[#78350F] rounded-lg text-[10px] font-bold cursor-pointer"
                   onClick={() => {
                     setLoginEmail("admin@pettravel.vn");
-                    setLoginPassword("admin123");
+                    setLoginPassword("");
                   }}
                 >
                   Admin
@@ -4340,7 +4263,7 @@ export function PetTravelApp() {
                   className="py-1 px-2 bg-orange-100 hover:bg-orange-200 text-[#78350F] rounded-lg text-[10px] font-bold cursor-pointer"
                   onClick={() => {
                     setLoginEmail("minh@happypaws.vn");
-                    setLoginPassword("minh123");
+                    setLoginPassword("");
                   }}
                 >
                   Minh (Đại lý)
@@ -4350,7 +4273,7 @@ export function PetTravelApp() {
                   className="py-1 px-2 bg-orange-100 hover:bg-orange-200 text-[#78350F] rounded-lg text-[10px] font-bold cursor-pointer"
                   onClick={() => {
                     setLoginEmail("lan@petland.vn");
-                    setLoginPassword("lan123");
+                    setLoginPassword("");
                   }}
                 >
                   Lan (Đại lý)
@@ -4359,126 +4282,7 @@ export function PetTravelApp() {
             </div>
 
             <div className="text-center text-xs mt-1">
-              <span className="muted">Chưa có tài khoản đại lý? </span>
-              <button
-                type="button"
-                className="text-orange-600 font-bold hover:underline cursor-pointer"
-                onClick={() => {
-                  setShowLoginModal(false);
-                  setShowRegisterModal(true);
-                }}
-              >
-                Đăng ký ngay
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* --- CUTE REGISTER MODAL --- */}
-      {showRegisterModal && (
-        <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowRegisterModal(false)}>
-          <div 
-            className="panel max-w-sm w-full flex flex-col gap-4 p-6 relative overflow-hidden bg-[#FFFDF9] animate-scale-in"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button 
-              type="button" 
-              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 font-bold hover:bg-orange-200 transition active:scale-90"
-              onClick={() => setShowRegisterModal(false)}
-            >
-              ✕
-            </button>
-
-            <div className="text-center">
-              <span className="text-3xl">🤝</span>
-              <h3 className="text-lg font-bold text-[#331B08] mt-2">Đăng ký Đại lý sỉ</h3>
-              <p className="muted text-xs">Hãy tham gia chuỗi cung ứng sỉ Pet Travel để hưởng chiết khấu ưu đãi và công nợ 70%.</p>
-            </div>
-
-            <form onSubmit={handleRegister} className="flex flex-col gap-3 mt-1">
-              <div className="flex flex-col gap-0.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Họ và Tên đại diện</label>
-                <input
-                  type="text"
-                  className="text-input text-xs py-1.5 px-3"
-                  placeholder="Ví dụ: Nguyễn Văn A..."
-                  value={regFullName}
-                  onChange={(e) => setRegFullName(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Email liên hệ</label>
-                <input
-                  type="email"
-                  className="text-input text-xs py-1.5 px-3"
-                  placeholder="name@company.com..."
-                  value={regEmail}
-                  onChange={(e) => setRegEmail(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Số điện thoại</label>
-                <input
-                  type="tel"
-                  className="text-input text-xs py-1.5 px-3"
-                  placeholder="Ví dụ: 0912345678..."
-                  value={regPhone}
-                  onChange={(e) => setRegPhone(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Tên Công ty/Cửa hàng sỉ</label>
-                <input
-                  type="text"
-                  className="text-input text-xs py-1.5 px-3"
-                  placeholder="Ví dụ: Happy Paws Shop..."
-                  value={regCompany}
-                  onChange={(e) => setRegCompany(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Mật khẩu đăng nhập</label>
-                <input
-                  type="password"
-                  className="text-input text-xs py-1.5 px-3"
-                  placeholder="Tối thiểu 6 ký tự..."
-                  value={regPassword}
-                  onChange={(e) => setRegPassword(e.target.value)}
-                  required
-                  minLength={6}
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="primary-button text-xs py-3 justify-center font-bold bg-orange-500 hover:bg-orange-600 text-white cursor-pointer mt-2"
-                disabled={isLoading}
-              >
-                {isLoading ? "Đang xử lý..." : "Đăng ký làm Đại lý"}
-              </button>
-            </form>
-
-            <div className="text-center text-xs mt-1">
-              <span className="muted">Đã có tài khoản? </span>
-              <button
-                type="button"
-                className="text-orange-600 font-bold hover:underline cursor-pointer"
-                onClick={() => {
-                  setShowRegisterModal(false);
-                  setShowLoginModal(true);
-                }}
-              >
-                Đăng nhập ngay
-              </button>
+              <span className="muted">Tài khoản đại lý được cấp bởi Admin Pet Travel.</span>
             </div>
           </div>
         </div>

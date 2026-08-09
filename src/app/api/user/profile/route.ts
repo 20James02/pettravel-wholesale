@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/server/auth";
+import { requireAuth, requireSameOrigin } from "@/server/auth";
 import { updateUserProfile } from "@/server/db";
 
 export const runtime = "nodejs";
@@ -8,12 +8,13 @@ export const runtime = "nodejs";
 const updateProfileSchema = z.object({
   fullName: z.string().min(2).optional(),
   avatarUrl: z.string().url().or(z.string().length(0)).optional(),
-  newPassword: z.string().min(6).optional()
+  newPassword: z.string().min(12).max(128).optional()
 });
 
 export async function PUT(request: Request) {
   let user;
   try {
+    requireSameOrigin(request);
     user = await requireAuth();
   } catch (resp) {
     if (resp instanceof Response) return resp;

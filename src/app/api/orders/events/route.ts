@@ -1,6 +1,14 @@
+import { requireAuth } from "@/server/auth";
+
 export const runtime = "nodejs";
 
 export async function GET() {
+  try {
+    await requireAuth();
+  } catch (resp) {
+    if (resp instanceof Response) return resp;
+  }
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {

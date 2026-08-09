@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAdmin } from "@/server/auth";
+import { requirePermission, requireSameOrigin } from "@/server/auth";
 import { getAppUsers, createAppUser } from "@/server/db";
 
 export const runtime = "nodejs";
@@ -9,14 +9,22 @@ const createUserSchema = z.object({
   fullName: z.string().min(2),
   email: z.string().email(),
   phone: z.string().min(9),
-  password: z.string().min(6),
-  role: z.string(),
+  password: z.string().min(12).max(128),
+  role: z.enum([
+    "super_admin",
+    "admin_manager",
+    "order_operator",
+    "accountant",
+    "warehouse",
+    "customer_owner",
+    "customer_staff"
+  ]),
   company: z.string().optional()
 });
 
 export async function GET() {
   try {
-    await requireAdmin();
+    await requirePermission("rbac.write");
   } catch (resp) {
     if (resp instanceof Response) return resp;
     return NextResponse.json({ error: "Lỗi xác thực." }, { status: 403 });
@@ -33,7 +41,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await requireAdmin();
+    requireSameOrigin(request);
+    await requirePermission("rbac.write");
   } catch (resp) {
     if (resp instanceof Response) return resp;
     return NextResponse.json({ error: "Lỗi xác thực." }, { status: 403 });

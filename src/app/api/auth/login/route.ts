@@ -1,17 +1,18 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createSupabaseServiceClient } from "@/server/supabase";
-import { encodeSession, hashPassword } from "@/server/auth";
+import { encodeSession, isConfiguredAdminEmail, requireSameOrigin, verifyPassword } from "@/server/auth";
 
 export const runtime = "nodejs";
 
 const loginSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6)
+  password: z.string().min(8).max(128)
 });
 
 export async function POST(request: Request) {
   try {
+    requireSameOrigin(request);
     const { email, password } = loginSchema.parse(await request.json());
     const supabase = createSupabaseServiceClient();
 
@@ -36,17 +37,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const hash = hashPassword(password);
-    if (user.password_hash !== hash) {
+    if (!verifyPassword(password, user.password_hash)) {
       return NextResponse.json(
         { error: "Tài khoản không tồn tại hoặc thông tin đăng nhập sai." },
         { status: 401 }
       );
     }
 
-    const isAdmin = user.email === "admin@pettravel.vn";
+    const isAdmin = isConfiguredAdminEmail(user.email);
     const token = encodeSession(user.id);
-    const org: any = user.organizations;
+    const org = Array.isArray(user.organizations) ? user.organizations[0] : user.organizations;
 
     const response = NextResponse.json({
       user: {
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: 60 * 60 * 24 * 30 // 30 days
+      maxAge: 60 * 60 * 12
     });
 
     return response;

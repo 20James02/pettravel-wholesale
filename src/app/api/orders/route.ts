@@ -1,9 +1,74 @@
 import { NextResponse } from "next/server";
-import { getSessionUser } from "@/server/auth";
-import { getOrders, saveOrder } from "@/server/db";
-import type { CustomerOrder } from "@/lib/domain";
+import { z } from "zod";
+import { getSessionUser, requireSameOrigin } from "@/server/auth";
+import { getOrders, getProducts, saveOrder } from "@/server/db";
+import type { CustomerOrder, OrderComment, OrderItem, PaymentProof } from "@/lib/domain";
 
 export const runtime = "nodejs";
+
+const customerOrderItemSchema = z.object({
+  variantSku: z.string().min(1).max(120),
+  quantity: z.number().int().positive().max(10_000)
+}).passthrough();
+
+const createCustomerOrderSchema = z.object({
+  items: z.array(customerOrderItemSchema).min(1).max(200),
+  paymentIntent: z.enum(["deposit_cod", "pay_full"]).default("deposit_cod"),
+  recipientName: z.string().trim().min(2).max(120),
+  recipientPhone: z.string().trim().min(8).max(30),
+  recipientAddress: z.string().trim().min(6).max(500)
+});
+
+const customerCommentSchema = z.object({
+  id: z.string().min(1).max(120).optional(),
+  message: z.string().trim().min(1).max(2000)
+});
+
+const customerProofSchema = z.object({
+  id: z.string().min(1).max(120),
+  paymentRequestId: z.string().min(1).max(120),
+  fileName: z.string().min(3).max(180),
+  uploadedAt: z.string().optional()
+});
+
+const customerOrderUpdateSchema = z.object({
+  id: z.string().min(1).max(120),
+  paymentIntent: z.enum(["deposit_cod", "pay_full"]).optional(),
+  invoiceRequested: z.boolean().optional(),
+  recipientName: z.string().trim().min(2).max(120).optional(),
+  recipientPhone: z.string().trim().min(8).max(30).optional(),
+  recipientAddress: z.string().trim().min(6).max(500).optional(),
+  comments: z.array(customerCommentSchema).max(20).optional(),
+  paymentProofs: z.array(customerProofSchema).max(20).optional()
+});
+
+async function buildCustomerItems(
+  rawItems: Array<z.infer<typeof customerOrderItemSchema>>
+): Promise<OrderItem[]> {
+  const catalog = await getProducts("customer");
+
+  return rawItems.map((item, index) => {
+    const product = catalog.find((candidate) =>
+      candidate.variants.some((variant) => variant.sku === item.variantSku)
+    );
+    const variant = product?.variants.find((candidate) => candidate.sku === item.variantSku);
+
+    if (!product || !variant) {
+      throw new Error(`SKU khong hop le hoac khong kha dung: ${item.variantSku}`);
+    }
+
+    return {
+      id: `oi_${Date.now()}_${index}`,
+      productCode: product.code,
+      productName: product.name,
+      variantSku: variant.sku,
+      variantLabel: variant.label,
+      quantity: item.quantity,
+      unitPriceSnapshot: variant.wholesalePrice,
+      supplierId: variant.supplierId
+    };
+  });
+}
 
 // Helper to sanitize orders for customers (masking internal notes/fields)
 function sanitizeOrderForCustomer(order: CustomerOrder): CustomerOrder {
@@ -52,6 +117,12 @@ export async function GET() {
  * POST /api/orders — Create a new order proposal (Customer only)
  */
 export async function POST(request: Request) {
+  try {
+    requireSameOrigin(request);
+  } catch (resp) {
+    if (resp instanceof Response) return resp;
+  }
+
   const user = await getSessionUser();
   if (!user) {
     return NextResponse.json({ error: "Chưa đăng nhập." }, { status: 401 });
@@ -76,8 +147,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = await request.json();
-    const { items, paymentIntent, quoteVersions, recipientName, recipientPhone, recipientAddress } = body;
+    const body = createCustomerOrderSchema.parse(await request.json());
+    const items = await buildCustomerItems(body.items);
 
     const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, "");
     const seq = String(orders.length + 1001);
@@ -92,13 +163,13 @@ export async function POST(request: Request) {
       commercialStatus: "submitted",
       paymentStatus: "unrequested",
       fulfillmentStatus: "not_started",
-      paymentIntent: paymentIntent ?? "deposit_cod",
+      paymentIntent: body.paymentIntent,
       invoiceRequested: false,
-      recipientName: recipientName ?? "",
-      recipientPhone: recipientPhone ?? "",
-      recipientAddress: recipientAddress ?? "",
-      items: items ?? [],
-      quoteVersions: quoteVersions ?? [],
+      recipientName: body.recipientName,
+      recipientPhone: body.recipientPhone,
+      recipientAddress: body.recipientAddress,
+      items,
+      quoteVersions: [],
       paymentRequests: [],
       paymentProofs: [],
       fulfillmentGroups: [],
@@ -127,13 +198,22 @@ export async function POST(request: Request) {
  * PUT /api/orders — Update an existing order (Customer or Admin)
  */
 export async function PUT(request: Request) {
+  try {
+    requireSameOrigin(request);
+  } catch (resp) {
+    if (resp instanceof Response) return resp;
+  }
+
   const user = await getSessionUser();
   if (!user) {
     return NextResponse.json({ error: "Chưa đăng nhập." }, { status: 401 });
   }
 
   try {
-    const updatedOrder: CustomerOrder = await request.json();
+    const rawBody = await request.json();
+    const updatedOrder: CustomerOrder = user.isAdmin
+      ? rawBody
+      : ({ id: customerOrderUpdateSchema.parse(rawBody).id } as CustomerOrder);
     
     // Find existing order
     const orders = await getOrders(user);
@@ -168,12 +248,50 @@ export async function PUT(request: Request) {
         };
       }
     } else {
+      const customerPayload = customerOrderUpdateSchema.parse(rawBody);
+      const existingPaymentRequestIds = new Set(existing.paymentRequests.map((request) => request.id));
+      const safeComments: OrderComment[] = [
+        ...existing.comments,
+        ...(customerPayload.comments ?? []).map((comment) => ({
+          id: comment.id ?? `c_${Date.now()}_${cryptoRandomSuffix()}`,
+          author: user.name,
+          audience: "customer_visible" as const,
+          message: comment.message,
+          createdAt: new Date().toISOString()
+        }))
+      ];
+      const safeProofs: PaymentProof[] = [
+        ...existing.paymentProofs,
+        ...(customerPayload.paymentProofs ?? [])
+          .filter((proof) => existingPaymentRequestIds.has(proof.paymentRequestId))
+          .map((proof) => ({
+            id: proof.id,
+            paymentRequestId: proof.paymentRequestId,
+            fileName: proof.fileName,
+            uploadedAt: proof.uploadedAt ?? new Date().toISOString(),
+            status: "pending_admin_confirmation" as const
+          }))
+      ];
+
       orderToSave = {
-        ...updatedOrder,
+        ...existing,
+        paymentIntent: customerPayload.paymentIntent ?? existing.paymentIntent,
+        invoiceRequested: customerPayload.invoiceRequested ?? existing.invoiceRequested,
+        recipientName: customerPayload.recipientName ?? existing.recipientName,
+        recipientPhone: customerPayload.recipientPhone ?? existing.recipientPhone,
+        recipientAddress: customerPayload.recipientAddress ?? existing.recipientAddress,
         customerId: existing.customerId,
+        customerName: existing.customerName,
+        customerCompany: existing.customerCompany,
+        commercialStatus: existing.commercialStatus,
+        paymentStatus: existing.paymentStatus,
+        fulfillmentStatus: existing.fulfillmentStatus,
+        items: existing.items,
         fulfillmentGroups: existing.fulfillmentGroups,
         quoteVersions: existing.quoteVersions,
         paymentRequests: existing.paymentRequests,
+        paymentProofs: safeProofs,
+        comments: safeComments,
         assignedStaffId: existing.assignedStaffId,
         assignedStaffName: existing.assignedStaffName
       };
@@ -187,4 +305,8 @@ export async function PUT(request: Request) {
     const msg = error instanceof Error ? error.message : "Lỗi cập nhật đơn hàng.";
     return NextResponse.json({ error: msg }, { status: 400 });
   }
+}
+
+function cryptoRandomSuffix(): string {
+  return crypto.randomUUID().slice(0, 8);
 }

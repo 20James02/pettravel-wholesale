@@ -55,6 +55,7 @@ export interface UserAccount {
   id: string;
   name: string;
   company: string;
+  organizationId?: string;
   email: string;
   role: RoleKey;
   isAdmin: boolean;
