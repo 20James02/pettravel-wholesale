@@ -37,5 +37,14 @@ def read_root():
         "message": "Welcome to Pet Travel B2B Wholesale API portal!"
     }
 
+@app.get("/debug")
+def debug_path(request: Request):
+    return {
+        "scope_path": request.scope.get("path"),
+        "scope_raw_path": request.scope.get("raw_path", b"").decode("utf-8", errors="replace"),
+        "url": str(request.url),
+        "headers": {k: v for k, v in request.headers.items() if k.startswith("x-") or k == "host"}
+    }
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
