@@ -1565,14 +1565,20 @@ export function PetTravelApp() {
             recipientAddress
           })
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          const errData = await res.json().catch(() => null);
+          alert(errData?.error || "Không thể tạo đơn hàng. Vui lòng thử lại.");
+          return;
+        }
         const data = await res.json() as OrderMutationResponse;
         setWorkingOrder(data.order);
         setAllOrders((prev) => [data.order, ...prev]);
         setSelectedOrderId(data.order.id);
         setCartItems(data.order.items.map((item) => ({ ...item })));
         setActiveTab("order");
-      } catch { /* silent */ }
+      } catch (err) {
+        alert("Lỗi kết nối. Vui lòng kiểm tra mạng và thử lại.");
+      }
     }
   }
 
@@ -1665,6 +1671,12 @@ export function PetTravelApp() {
   const customerVisibleComments = workingOrder.comments.filter((comment) => {
     return isAdmin || comment.audience === "customer_visible";
   });
+
+  const availableCategories = useMemo(() => {
+    const catsFromProducts = allProducts.map((p) => p.category).filter(Boolean);
+    const catsFromDb = allCategories.filter(Boolean);
+    return ["Tất cả", ...Array.from(new Set([...catsFromProducts, ...catsFromDb]))];
+  }, [allProducts, allCategories]);
 
   const filteredProducts = useMemo(() => {
     return allProducts.filter((p) => {
@@ -2082,13 +2094,13 @@ export function PetTravelApp() {
         {/* --- A. PRODUCT CATALOG TAB --- */}
         {activeTab === "catalog" && (
           <div className="flex flex-col gap-6">
-            {/* Category filter tabs */}
+            {/* Category filter tabs (Động theo DB) */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1">
-              {["Tất cả", "Thức ăn", "Đồ chơi", "Vệ sinh"].map((cat) => (
+              {availableCategories.map((cat) => (
                 <button
                   key={cat}
                   type="button"
-                  className={`tab-button min-h-[38px] ${categoryFilter === cat ? 'bg-orange-500 text-white border-orange-600' : ''}`}
+                  className={`tab-button min-h-[38px] whitespace-nowrap ${categoryFilter === cat ? 'bg-orange-500 text-white border-orange-600 font-bold' : ''}`}
                   onClick={() => setCategoryFilter(cat)}
                 >
                   {cat}
@@ -2161,7 +2173,7 @@ export function PetTravelApp() {
 
               {/* Lọc giỏ hàng theo category */}
               <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                {["Tất cả", "Túi vận chuyển", "Ăn uống du lịch", "Vệ sinh"].map((cat) => (
+                {availableCategories.map((cat) => (
                   <button
                     key={cat}
                     type="button"
@@ -2296,7 +2308,7 @@ export function PetTravelApp() {
                     disabled={cartItems.length === 0}
                     onClick={handleSubmitCartProposal}
                   >
-                    Xác nhận lần đầu
+                    {workingOrder.id ? `Cập nhật đơn hàng (lần ${workingOrder.quoteVersions.length + 1})` : "Xác nhận đặt hàng sỉ"}
                   </button>
                 </div>
               </div>
@@ -2893,10 +2905,9 @@ export function PetTravelApp() {
                           value={adminCategoryFilter}
                           onChange={(e) => setAdminCategoryFilter(e.target.value)}
                         >
-                          <option value="Tất cả">Tất cả phân loại</option>
-                          <option value="Túi vận chuyển">Túi vận chuyển</option>
-                          <option value="Ăn uống du lịch">Ăn uống du lịch</option>
-                          <option value="Vệ sinh">Vệ sinh</option>
+                          {availableCategories.map((cat) => (
+                            <option key={cat} value={cat}>{cat === "Tất cả" ? "Tất cả phân loại" : cat}</option>
+                          ))}
                         </select>
                       </div>
 
