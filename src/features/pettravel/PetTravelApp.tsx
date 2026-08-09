@@ -4,8 +4,10 @@ import Image from "next/image";
 import {
   AlertTriangle,
   Bell,
+  BookOpenCheck,
   Boxes,
   Building2,
+  Calculator,
   CheckCircle2,
   LockKeyhole,
   MessageSquare,
@@ -27,6 +29,7 @@ import {
   ShoppingCart,
   ChevronRight,
   LogOut,
+  RefreshCw,
   Sparkles,
   Check,
   Clock
@@ -34,6 +37,7 @@ import {
 import { type ReactNode, useMemo, useState, useEffect, useCallback } from "react";
 import Lenis from "lenis";
 import type {
+  AccountingOverview,
   AdminPolicy,
   CustomerOrder,
   PaymentIntent,
@@ -63,7 +67,7 @@ import {
 } from "@/lib/validation";
 
 type AppMode = "guest" | "customer" | "admin";
-type TabKey = "catalog" | "cart" | "order" | "admin" | "admin_products" | "admin_reconciliation" | "admin_invoices" | "settings" | "admin_suppliers" | "admin_categories" | "admin_users" | "profile" | "admin_promotions";
+type TabKey = "catalog" | "cart" | "order" | "admin" | "admin_products" | "admin_reconciliation" | "admin_accounting" | "admin_invoices" | "settings" | "admin_suppliers" | "admin_categories" | "admin_users" | "profile" | "admin_promotions";
 
 interface ApiUser {
   id: string;
@@ -141,6 +145,9 @@ export function PetTravelApp() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [adminPolicy, setAdminPolicy] = useState<AdminPolicy>(DEFAULT_POLICY);
   const [rolePermissions, setRolePermissions] = useState<Record<RoleKey, PermissionKey[]>>({} as Record<RoleKey, PermissionKey[]>);
+  const [accountingOverview, setAccountingOverview] = useState<AccountingOverview | null>(null);
+  const [isAccountingLoading, setIsAccountingLoading] = useState<boolean>(false);
+  const [accountingError, setAccountingError] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
@@ -388,6 +395,28 @@ export function PetTravelApp() {
     } catch { /* silent */ }
   }, []);
 
+  const fetchAccountingOverview = useCallback(async () => {
+    setIsAccountingLoading(true);
+    setAccountingError("");
+    try {
+      const res = await fetch("/api/accounting/overview");
+      const data = await res.json();
+
+      if (!res.ok) {
+        setAccountingOverview(null);
+        setAccountingError(data.error || "Không thể tải dữ liệu kế toán.");
+        return;
+      }
+
+      setAccountingOverview(data.overview ?? null);
+    } catch {
+      setAccountingOverview(null);
+      setAccountingError("Không thể kết nối tới dịch vụ kế toán.");
+    } finally {
+      setIsAccountingLoading(false);
+    }
+  }, []);
+
   async function handleAddCategory(e: React.FormEvent) {
     e.preventDefault();
     try {
@@ -560,6 +589,7 @@ export function PetTravelApp() {
         await fetchAdminData();
         await fetchUsers();
         await fetchPromotions();
+        await fetchAccountingOverview();
       } else {
         setProfileFullName(data.user.name);
       }
@@ -1451,6 +1481,18 @@ export function PetTravelApp() {
               >
                 <WalletCards size={18} />
                 Đối soát & Sao kê
+              </button>
+              <button
+                className="tab-button w-full justify-start"
+                type="button"
+                data-active={activeTab === "admin_accounting"}
+                onClick={() => {
+                  setActiveTab("admin_accounting");
+                  fetchAccountingOverview();
+                }}
+              >
+                <Calculator size={18} />
+                Kế toán
               </button>
               <button
                 className="tab-button w-full justify-start"
@@ -3121,6 +3163,156 @@ export function PetTravelApp() {
                   })}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* --- D3B. ACCOUNTING OVERVIEW TAB (ADMIN ONLY) --- */}
+        {activeTab === "admin_accounting" && isAdmin && (
+          <div className="flex flex-col gap-6 animate-fade-in w-full">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <BookOpenCheck size={22} className="text-orange-600" />
+                  <h2 className="text-xl font-bold text-[#331B08]">Kế toán doanh nghiệp</h2>
+                </div>
+                <p className="muted text-xs">
+                  Theo dõi kỳ kế toán, bút toán nháp/đã ghi sổ và chuẩn bị luồng tự động ghi nhận cọc, COD, doanh thu, VAT.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="tab-button text-xs py-2 px-4 border-orange-200 bg-white hover:bg-orange-50 cursor-pointer font-bold rounded-xl"
+                onClick={fetchAccountingOverview}
+                disabled={isAccountingLoading}
+              >
+                <RefreshCw size={14} className={isAccountingLoading ? "animate-spin" : ""} />
+                {isAccountingLoading ? "Đang tải..." : "Làm mới số liệu"}
+              </button>
+            </div>
+
+            {accountingError && (
+              <div className="p-4 border border-red-200 bg-red-50 rounded-2xl flex items-start gap-3">
+                <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-sm text-red-950 block">Không tải được dữ liệu kế toán</strong>
+                  <p className="text-xs text-red-800 m-0 mt-1">
+                    {accountingError}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="metrics-grid">
+              <div className="metric">
+                <span className="muted text-sm flex items-center gap-1 font-semibold">
+                  <BookOpenCheck size={14} className="text-orange-600" /> Kỳ kế toán
+                </span>
+                <strong>{accountingOverview ? accountingOverview.periodsTotal : "—"}</strong>
+                <span className="text-[10px] muted">
+                  Mở: {accountingOverview?.openPeriods ?? 0} · Đóng: {accountingOverview?.closedPeriods ?? 0}
+                </span>
+              </div>
+              <div className="metric">
+                <span className="muted text-sm flex items-center gap-1 font-semibold">
+                  <Clock size={14} className="text-amber-600" /> Bút toán nháp
+                </span>
+                <strong className="text-amber-700">{accountingOverview ? accountingOverview.draftEntries : "—"}</strong>
+                <span className="text-[10px] muted">Chưa ghi sổ, còn được kiểm tra/sửa trước khi post.</span>
+              </div>
+              <div className="metric">
+                <span className="muted text-sm flex items-center gap-1 font-semibold">
+                  <CheckCircle2 size={14} className="text-green-600" /> Đã ghi sổ
+                </span>
+                <strong className="text-green-700">{accountingOverview ? accountingOverview.postedEntries : "—"}</strong>
+                <span className="text-[10px] muted">Bút toán đã post sẽ bị khóa, chỉ đảo bút toán khi cần sửa.</span>
+              </div>
+              <div className="metric">
+                <span className="muted text-sm flex items-center gap-1 font-semibold">
+                  <AlertTriangle size={14} className="text-red-600" /> Bút toán hủy
+                </span>
+                <strong className="text-red-700">{accountingOverview ? accountingOverview.voidEntries : "—"}</strong>
+                <span className="text-[10px] muted">Theo dõi sai sót/hủy để audit cuối kỳ.</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_0.6fr] gap-6">
+              <div className="panel p-4 flex flex-col gap-4 overflow-x-auto">
+                <div className="flex items-center justify-between border-b border-dashed border-orange-100 pb-2">
+                  <h3 className="text-sm font-bold text-[#331B08]">Bút toán gần nhất</h3>
+                  <StatusPill tone={accountingOverview?.recentEntries.length ? "info" : "warning"}>
+                    {accountingOverview?.recentEntries.length ? `${accountingOverview.recentEntries.length} dòng` : "Chưa có dữ liệu"}
+                  </StatusPill>
+                </div>
+
+                <table className="variant-table w-full">
+                  <thead>
+                    <tr>
+                      <th>Số bút toán</th>
+                      <th>Nguồn</th>
+                      <th>Diễn giải</th>
+                      <th>Ngày tạo</th>
+                      <th>Trạng thái</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {accountingOverview?.recentEntries.length ? (
+                      accountingOverview.recentEntries.map((entry) => (
+                        <tr key={entry.id}>
+                          <td className="text-xs font-mono font-bold text-orange-950">{entry.entryNo}</td>
+                          <td>
+                            <span className="text-xs font-bold block text-[#331B08]">{entry.sourceType}</span>
+                            <span className="text-[10px] muted font-mono">{entry.sourceId}</span>
+                          </td>
+                          <td className="text-xs text-[#331B08] font-semibold">{entry.description}</td>
+                          <td className="text-xs text-gray-500 font-mono">
+                            {new Date(entry.createdAt).toLocaleString("vi-VN")}
+                          </td>
+                          <td>
+                            <span className={`status-pill text-[10px] ${
+                              entry.status === "posted" ? "success" : entry.status === "draft" ? "warning" : "info"
+                            }`}>
+                              {entry.status === "posted" ? "Đã ghi sổ" : entry.status === "draft" ? "Nháp" : "Đã hủy"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-xs text-gray-500 font-medium">
+                          Chưa có bút toán. Sau bước tiếp theo, hệ thống sẽ tự sinh bút toán khi kế toán xác nhận cọc/COD hoặc ghi nhận doanh thu.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <aside className="panel p-4 flex flex-col gap-4">
+                <div className="section-title">
+                  <h3 className="text-lg font-bold">Kiểm soát an toàn</h3>
+                </div>
+                <div className="flex flex-col gap-3 text-xs text-[#331B08]">
+                  <div className="p-3 border border-green-200 bg-green-50/40 rounded-2xl">
+                    <strong className="block text-green-800">Server-authoritative</strong>
+                    <p className="m-0 mt-1 text-green-900">
+                      Tổng tiền đơn và bút toán được tính lại ở server, không tin số tiền gửi từ client.
+                    </p>
+                  </div>
+                  <div className="p-3 border border-orange-200 bg-orange-50/40 rounded-2xl">
+                    <strong className="block text-orange-900">Khóa sau khi ghi sổ</strong>
+                    <p className="m-0 mt-1 text-orange-950">
+                      Bút toán đã post không được sửa/xóa. Nếu sai phải tạo bút toán đảo để giữ audit trail.
+                    </p>
+                  </div>
+                  <div className="p-3 border border-blue-200 bg-blue-50/40 rounded-2xl">
+                    <strong className="block text-blue-900">Giai đoạn tiếp theo</strong>
+                    <p className="m-0 mt-1 text-blue-950">
+                      Gắn tự động vào luồng xác nhận cọc, thanh toán đủ, COD và phát hành hóa đơn VAT.
+                    </p>
+                  </div>
+                </div>
+              </aside>
             </div>
           </div>
         )}
