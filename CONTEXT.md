@@ -22,13 +22,29 @@ A double-entry accounting record made of two or more journal lines. A valid jour
 
 One debit or credit line inside a journal entry. A journal line may debit or credit an amount, but never both at the same time.
 
+### Operations Document
+
+A business document used by warehouse, purchasing, sales, or accounting operations before or alongside accounting posting. Examples include purchase receipts, sales invoices, expense documents, defect reports, and stock adjustments.
+
 ### Posted Entry
 
 A journal entry that has passed validation and has been posted to the accounting books. Posted entries are immutable.
 
+### Purchase Receipt
+
+An operations document recording goods received from a supplier. Posting a purchase receipt increases inventory quantity and can later create accounting entries for inventory and payable/cash.
+
 ### Reversal Entry
 
 A new journal entry that reverses a previously posted journal entry. Reversal entries are used instead of editing posted entries.
+
+### Stock Movement
+
+An immutable inventory movement that changes warehouse quantity, reserved quantity, or defective quantity for a product variant. Stock movement totals must be derived server-side from an approved operations document.
+
+### Defect Report
+
+An operations document recording damaged, expired, missing, or otherwise unsellable stock. Defect reports move quantity out of available inventory and into defective tracking until the business decides to return, write off, or investigate.
 
 ### VND Amount
 

@@ -40,6 +40,8 @@ import type {
   AccountingOverview,
   AdminPolicy,
   CustomerOrder,
+  OperationsDocumentType,
+  OperationsOverview,
   PaymentIntent,
   PermissionKey,
   Product,
@@ -56,6 +58,7 @@ import {
   getValidationErrorMessage,
   loginPasswordSchema,
   optionalUrlSchema,
+  operationsDocumentSchema,
   passwordSchema,
   phoneSchema,
   productSchema,
@@ -67,7 +70,7 @@ import {
 } from "@/lib/validation";
 
 type AppMode = "guest" | "customer" | "admin";
-type TabKey = "catalog" | "cart" | "order" | "admin" | "admin_products" | "admin_reconciliation" | "admin_accounting" | "admin_invoices" | "settings" | "admin_suppliers" | "admin_categories" | "admin_users" | "profile" | "admin_promotions";
+type TabKey = "catalog" | "cart" | "order" | "admin" | "admin_products" | "admin_reconciliation" | "admin_operations" | "admin_accounting" | "admin_invoices" | "settings" | "admin_suppliers" | "admin_categories" | "admin_users" | "profile" | "admin_promotions";
 
 interface ApiUser {
   id: string;
@@ -134,6 +137,17 @@ function latestQuote(order: CustomerOrder) {
   return order.quoteVersions[order.quoteVersions.length - 1];
 }
 
+function operationsTypeLabel(type: OperationsDocumentType): string {
+  const labels: Record<OperationsDocumentType, string> = {
+    purchase_receipt: "Phiếu nhập hàng",
+    sales_invoice: "Hóa đơn bán hàng",
+    expense: "Chi phí phát sinh",
+    defect_report: "Hàng lỗi / hư hỏng",
+    stock_adjustment: "Kiểm kê / điều chỉnh"
+  };
+  return labels[type];
+}
+
 export function PetTravelApp() {
   const [mode, setMode] = useState<AppMode>("guest");
   const [activeTab, setActiveTab] = useState<TabKey>("catalog");
@@ -148,6 +162,9 @@ export function PetTravelApp() {
   const [accountingOverview, setAccountingOverview] = useState<AccountingOverview | null>(null);
   const [isAccountingLoading, setIsAccountingLoading] = useState<boolean>(false);
   const [accountingError, setAccountingError] = useState<string>("");
+  const [operationsOverview, setOperationsOverview] = useState<OperationsOverview | null>(null);
+  const [isOperationsLoading, setIsOperationsLoading] = useState<boolean>(false);
+  const [operationsError, setOperationsError] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
@@ -205,6 +222,17 @@ export function PetTravelApp() {
     giftThreshold: 10000000,
     giftName: "Bát ăn inox cao cấp chống trượt"
   });
+
+  // Operations, purchasing, inventory, invoice, expense quick-entry state
+  const [operationType, setOperationType] = useState<OperationsDocumentType>("purchase_receipt");
+  const [operationPartner, setOperationPartner] = useState<string>("");
+  const [operationSku, setOperationSku] = useState<string>("");
+  const [operationDescription, setOperationDescription] = useState<string>("");
+  const [operationQuantity, setOperationQuantity] = useState<number>(1);
+  const [operationUnitCost, setOperationUnitCost] = useState<number>(0);
+  const [operationExpenseCategory, setOperationExpenseCategory] = useState<string>("Chi phí phát sinh");
+  const [operationExpenseAmount, setOperationExpenseAmount] = useState<number>(0);
+  const [operationPostNow, setOperationPostNow] = useState<boolean>(false);
 
   // Dynamic Categories state
   const [allCategories, setAllCategories] = useState<string[]>([]);
@@ -417,6 +445,84 @@ export function PetTravelApp() {
     }
   }, []);
 
+  const fetchOperationsOverview = useCallback(async () => {
+    setIsOperationsLoading(true);
+    setOperationsError("");
+    try {
+      const res = await fetch("/api/admin/operations/overview");
+      const data = await res.json();
+
+      if (!res.ok) {
+        setOperationsOverview(null);
+        setOperationsError(data.error || "Không thể tải dữ liệu kho và mua hàng.");
+        return;
+      }
+
+      setOperationsOverview(data.overview ?? null);
+    } catch {
+      setOperationsOverview(null);
+      setOperationsError("Không thể kết nối tới dịch vụ kho và mua hàng.");
+    } finally {
+      setIsOperationsLoading(false);
+    }
+  }, []);
+
+  async function handleCreateOperationsDocument(e: React.FormEvent) {
+    e.preventDefault();
+    setOperationsError("");
+
+    const isExpense = operationType === "expense";
+    const payload = {
+      type: operationType,
+      partnerName: operationPartner,
+      note: operationDescription,
+      expenseCategory: isExpense ? operationExpenseCategory : undefined,
+      amountVnd: isExpense ? Number(operationExpenseAmount) : undefined,
+      lines: isExpense
+        ? undefined
+        : [{
+            sku: operationSku,
+            description: operationDescription || operationSku,
+            quantity: Number(operationQuantity),
+            unitCostVnd: Number(operationUnitCost)
+          }],
+      shouldPost: operationPostNow
+    };
+
+    const parsed = operationsDocumentSchema.safeParse(payload);
+    if (!parsed.success) {
+      setOperationsError(getValidationErrorMessage(parsed.error, "Dữ liệu chứng từ không hợp lệ."));
+      return;
+    }
+
+    setIsOperationsLoading(true);
+    try {
+      const res = await fetch("/api/admin/operations/documents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed.data)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setOperationsError(data.error || "Không thể tạo chứng từ vận hành.");
+        return;
+      }
+
+      setOperationPartner("");
+      setOperationSku("");
+      setOperationDescription("");
+      setOperationQuantity(1);
+      setOperationUnitCost(0);
+      setOperationExpenseAmount(0);
+      setOperationPostNow(false);
+      await fetchOperationsOverview();
+    } catch {
+      setOperationsError("Không thể kết nối máy chủ khi tạo chứng từ.");
+    } finally {
+      setIsOperationsLoading(false);
+    }
+  }
+
   async function handleAddCategory(e: React.FormEvent) {
     e.preventDefault();
     try {
@@ -589,6 +695,7 @@ export function PetTravelApp() {
         await fetchAdminData();
         await fetchUsers();
         await fetchPromotions();
+        await fetchOperationsOverview();
         await fetchAccountingOverview();
       } else {
         setProfileFullName(data.user.name);
@@ -1481,6 +1588,18 @@ export function PetTravelApp() {
               >
                 <WalletCards size={18} />
                 Đối soát & Sao kê
+              </button>
+              <button
+                className="tab-button w-full justify-start"
+                type="button"
+                data-active={activeTab === "admin_operations"}
+                onClick={() => {
+                  setActiveTab("admin_operations");
+                  fetchOperationsOverview();
+                }}
+              >
+                <PackageCheck size={18} />
+                Kho & Mua hàng
               </button>
               <button
                 className="tab-button w-full justify-start"
@@ -3163,6 +3282,245 @@ export function PetTravelApp() {
                   })}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* --- D3A. WAREHOUSE, PURCHASING & OPERATIONS TAB (ADMIN ONLY) --- */}
+        {activeTab === "admin_operations" && isAdmin && (
+          <div className="flex flex-col gap-6 animate-fade-in w-full">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <PackageCheck size={22} className="text-orange-600" />
+                  <h2 className="text-xl font-bold text-[#331B08]">Kho & Mua hàng</h2>
+                </div>
+                <p className="muted text-xs">
+                  Quản lý nghiệp vụ nhập hàng, tồn kho, hàng lỗi, hóa đơn bán hàng và chi phí phát sinh trước khi ghi sổ kế toán.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="tab-button text-xs py-2 px-4 border-orange-200 bg-white hover:bg-orange-50 cursor-pointer font-bold rounded-xl"
+                onClick={fetchOperationsOverview}
+                disabled={isOperationsLoading}
+              >
+                <RefreshCw size={14} className={isOperationsLoading ? "animate-spin" : ""} />
+                {isOperationsLoading ? "Đang tải..." : "Làm mới kho"}
+              </button>
+            </div>
+
+            {operationsError && (
+              <div className="p-4 border border-red-200 bg-red-50 rounded-2xl flex items-start gap-3">
+                <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-sm text-red-950 block">Không xử lý được nghiệp vụ vận hành</strong>
+                  <p className="text-xs text-red-800 m-0 mt-1">{operationsError}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="metrics-grid">
+              <div className="metric">
+                <span className="muted text-sm flex items-center gap-1 font-semibold">
+                  <Boxes size={14} className="text-orange-600" /> Tồn thực tế
+                </span>
+                <strong>{operationsOverview ? operationsOverview.inventory.onHandQty.toLocaleString("vi-VN") : "—"}</strong>
+                <span className="text-[10px] muted">Khả dụng: {operationsOverview?.inventory.availableQty.toLocaleString("vi-VN") ?? 0}</span>
+              </div>
+              <div className="metric">
+                <span className="muted text-sm flex items-center gap-1 font-semibold">
+                  <AlertTriangle size={14} className="text-red-600" /> Hàng lỗi
+                </span>
+                <strong className="text-red-700">{operationsOverview ? operationsOverview.inventory.defectiveQty.toLocaleString("vi-VN") : "—"}</strong>
+                <span className="text-[10px] muted">{operationsOverview?.defectiveSkuCount ?? 0} SKU đang có lỗi/hư hỏng.</span>
+              </div>
+              <div className="metric">
+                <span className="muted text-sm flex items-center gap-1 font-semibold">
+                  <WalletCards size={14} className="text-green-600" /> Giá trị tồn
+                </span>
+                <strong className="text-green-700">{formatVnd(operationsOverview?.inventory.inventoryValueVnd ?? 0)}</strong>
+                <span className="text-[10px] muted">Tính theo giá vốn bình quân hiện có.</span>
+              </div>
+              <div className="metric">
+                <span className="muted text-sm flex items-center gap-1 font-semibold">
+                  <Clock size={14} className="text-amber-600" /> Chờ xử lý
+                </span>
+                <strong className="text-amber-700">
+                  {(operationsOverview?.openPurchaseReceipts ?? 0) + (operationsOverview?.pendingInvoices ?? 0) + (operationsOverview?.pendingExpenses ?? 0)}
+                </strong>
+                <span className="text-[10px] muted">Phiếu nhập, hóa đơn, chi phí còn nháp/chờ duyệt.</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-[0.85fr_1.15fr] gap-6">
+              <form onSubmit={handleCreateOperationsDocument} className="panel p-4 flex flex-col gap-4">
+                <div className="section-title">
+                  <h3 className="text-lg font-bold">Tạo chứng từ nhanh</h3>
+                  <StatusPill tone={operationPostNow ? "warning" : "info"}>
+                    {operationPostNow ? "Post ngay" : "Lưu nháp"}
+                  </StatusPill>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Loại nghiệp vụ</label>
+                    <select
+                      className="text-input text-sm py-2 px-3 bg-white border"
+                      value={operationType}
+                      onChange={(e) => setOperationType(e.target.value as OperationsDocumentType)}
+                    >
+                      <option value="purchase_receipt">Nhập hàng từ nhà cung cấp</option>
+                      <option value="sales_invoice">Tạo hóa đơn bán hàng</option>
+                      <option value="expense">Chi phí phát sinh</option>
+                      <option value="defect_report">Ghi nhận hàng lỗi</option>
+                      <option value="stock_adjustment">Kiểm kê / điều chỉnh tăng</option>
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Đối tác / Nhà cung cấp</label>
+                    <input
+                      type="text"
+                      className="text-input text-sm py-2 px-3"
+                      value={operationPartner}
+                      onChange={(e) => setOperationPartner(e.target.value)}
+                      placeholder="Ví dụ: Pet Travel, GHN, NCC A..."
+                    />
+                  </div>
+                </div>
+
+                {operationType === "expense" ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Nhóm chi phí</label>
+                      <input
+                        type="text"
+                        className="text-input text-sm py-2 px-3"
+                        value={operationExpenseCategory}
+                        onChange={(e) => setOperationExpenseCategory(e.target.value)}
+                        placeholder="Vận chuyển, đóng gói, marketing..."
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Số tiền chi phí</label>
+                      <input
+                        type="number"
+                        className="text-input text-sm py-2 px-3"
+                        value={operationExpenseAmount}
+                        onChange={(e) => setOperationExpenseAmount(parseInt(e.target.value, 10) || 0)}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <div className="flex flex-col gap-1.5 md:col-span-2">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">SKU / Mã phân loại</label>
+                      <input
+                        type="text"
+                        className="text-input text-sm py-2 px-3 font-mono"
+                        value={operationSku}
+                        onChange={(e) => setOperationSku(e.target.value)}
+                        placeholder="VD: PT-BAG-001-M-BL"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Số lượng</label>
+                      <input
+                        type="number"
+                        className="text-input text-sm py-2 px-3"
+                        value={operationQuantity}
+                        onChange={(e) => setOperationQuantity(parseInt(e.target.value, 10) || 1)}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Đơn giá vốn</label>
+                      <input
+                        type="number"
+                        className="text-input text-sm py-2 px-3"
+                        value={operationUnitCost}
+                        onChange={(e) => setOperationUnitCost(parseInt(e.target.value, 10) || 0)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-bold text-orange-950/80 uppercase">Diễn giải / ghi chú</label>
+                  <textarea
+                    className="text-input text-sm py-2 px-3 min-h-[84px]"
+                    value={operationDescription}
+                    onChange={(e) => setOperationDescription(e.target.value)}
+                    placeholder="Nhập lý do, số lô, tình trạng hàng, ghi chú chi phí..."
+                  />
+                </div>
+
+                <label className="flex items-start gap-2 text-xs text-orange-950 font-bold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={operationPostNow}
+                    onChange={(e) => setOperationPostNow(e.target.checked)}
+                  />
+                  <span>
+                    Post ngay chứng từ này. Khi post, hệ thống sẽ sinh stock movement và cập nhật tồn kho; chứng từ đã post không được sửa trực tiếp.
+                  </span>
+                </label>
+
+                <button
+                  type="submit"
+                  className="primary-button text-xs py-3 justify-center font-bold cursor-pointer"
+                  disabled={isOperationsLoading}
+                >
+                  {isOperationsLoading ? "Đang xử lý..." : "Lưu chứng từ vận hành"}
+                </button>
+              </form>
+
+              <div className="panel p-4 flex flex-col gap-4 overflow-x-auto">
+                <div className="flex items-center justify-between border-b border-dashed border-orange-100 pb-2">
+                  <h3 className="text-sm font-bold text-[#331B08]">Chứng từ vận hành gần nhất</h3>
+                  <StatusPill tone={operationsOverview?.recentDocuments.length ? "info" : "warning"}>
+                    {operationsOverview?.recentDocuments.length ? `${operationsOverview.recentDocuments.length} chứng từ` : "Chưa có dữ liệu"}
+                  </StatusPill>
+                </div>
+
+                <table className="variant-table w-full">
+                  <thead>
+                    <tr>
+                      <th>Số chứng từ</th>
+                      <th>Nghiệp vụ</th>
+                      <th>Đối tác</th>
+                      <th className="text-right">Giá trị</th>
+                      <th>Trạng thái</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {operationsOverview?.recentDocuments.length ? (
+                      operationsOverview.recentDocuments.map((doc) => (
+                        <tr key={doc.id}>
+                          <td className="text-xs font-mono font-bold text-orange-950">{doc.documentNo}</td>
+                          <td className="text-xs text-[#331B08] font-bold">{operationsTypeLabel(doc.type)}</td>
+                          <td className="text-xs text-gray-600">{doc.partnerName || "Pet Travel nội bộ"}</td>
+                          <td className="text-right text-xs font-bold text-[#331B08]">{formatVnd(doc.totalAmountVnd)}</td>
+                          <td>
+                            <span className={`status-pill text-[10px] ${
+                              doc.status === "posted" ? "success" : doc.status === "draft" ? "warning" : "info"
+                            }`}>
+                              {doc.status === "posted" ? "Đã post" : doc.status === "draft" ? "Nháp" : doc.status === "void" ? "Đã hủy" : "Chờ duyệt"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-xs text-gray-500 font-medium">
+                          Chưa có chứng từ. Hãy tạo phiếu nhập hoặc chi phí đầu tiên sau khi chạy migration Supabase v4.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}

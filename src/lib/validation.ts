@@ -166,6 +166,44 @@ export const recipientSchema = z.object({
   recipientAddress: shortTextSchema("Địa chỉ giao hàng", 6, 500)
 });
 
+export const operationsDocumentTypeSchema = z.enum([
+  "purchase_receipt",
+  "sales_invoice",
+  "expense",
+  "defect_report",
+  "stock_adjustment"
+]);
+
+export const operationsLineSchema = z.object({
+  productVariantId: idSchema.optional(),
+  sku: skuSchema.optional(),
+  description: shortTextSchema("Nội dung dòng chứng từ", 2, 240),
+  quantity: positiveIntegerSchema("Số lượng", 1_000_000),
+  unitCostVnd: vndAmountSchema("Đơn giá vốn", 10_000_000_000),
+  supplierId: idSchema.optional()
+});
+
+export const operationsDocumentSchema = z.object({
+  type: operationsDocumentTypeSchema,
+  documentNo: shortTextSchema("Số chứng từ", 2, 80).optional(),
+  partnerName: shortTextSchema("Đối tác", 2, 180).optional().or(z.literal("")),
+  note: z.string().trim().max(1000, "Ghi chú không được vượt quá 1000 ký tự.").optional().or(z.literal("")),
+  lines: z.array(operationsLineSchema).max(100, "Tối đa 100 dòng trên một chứng từ.").optional(),
+  expenseCategory: shortTextSchema("Nhóm chi phí", 2, 120).optional().or(z.literal("")),
+  amountVnd: vndAmountSchema("Số tiền", 10_000_000_000).optional(),
+  shouldPost: z.boolean().optional()
+}).superRefine((value, ctx) => {
+  if (value.type === "purchase_receipt" || value.type === "defect_report" || value.type === "stock_adjustment") {
+    if (!value.lines || value.lines.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Chứng từ kho phải có ít nhất một dòng hàng.", path: ["lines"] });
+    }
+  }
+
+  if (value.type === "expense" && (!value.amountVnd || value.amountVnd <= 0)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Chứng từ chi phí phải có số tiền lớn hơn 0.", path: ["amountVnd"] });
+  }
+});
+
 export const getValidationErrorMessage = (error: unknown, fallback = "Dữ liệu nhập không hợp lệ."): string => {
   if (error instanceof z.ZodError) {
     return error.issues[0]?.message ?? fallback;

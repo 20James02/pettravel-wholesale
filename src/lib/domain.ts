@@ -23,6 +23,9 @@ export type PermissionKey =
   | "accounting.post"
   | "accounting.close_period"
   | "accounting.export"
+  | "operations.read"
+  | "operations.write"
+  | "operations.post"
   | "rbac.write";
 
 export type CommercialStatus =
@@ -231,4 +234,34 @@ export interface AccountingOverview {
   postedEntries: number;
   voidEntries: number;
   recentEntries: JournalEntrySummary[];
+}
+
+export type OperationsDocumentType = "purchase_receipt" | "sales_invoice" | "expense" | "defect_report" | "stock_adjustment";
+export type OperationsDocumentStatus = "draft" | "pending_review" | "posted" | "void";
+
+export interface InventoryMetric {
+  onHandQty: number;
+  reservedQty: number;
+  availableQty: number;
+  defectiveQty: number;
+  inventoryValueVnd: number;
+}
+
+export interface OperationsDocumentSummary {
+  id: string;
+  documentNo: string;
+  type: OperationsDocumentType;
+  status: OperationsDocumentStatus;
+  partnerName?: string;
+  totalAmountVnd: number;
+  createdAt: string;
+}
+
+export interface OperationsOverview {
+  inventory: InventoryMetric;
+  openPurchaseReceipts: number;
+  pendingInvoices: number;
+  pendingExpenses: number;
+  defectiveSkuCount: number;
+  recentDocuments: OperationsDocumentSummary[];
 }

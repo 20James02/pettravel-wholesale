@@ -927,22 +927,35 @@ export async function getRolePermissions(): Promise<Record<string, string[]>> {
       "supplier.read", "supplier.write",
       "order.read", "order.quote", "order.adjust",
       "order.confirm_payment", "order.ship",
-      "order.comment_internal", "rbac.write"
+      "order.comment_internal",
+      "accounting.read", "accounting.write", "accounting.post", "accounting.export",
+      "operations.read", "operations.write", "operations.post",
+      "rbac.write"
     ],
     admin_manager: [
       "catalog.read", "catalog.write",
       "supplier.read", "supplier.write",
       "order.read", "order.quote", "order.adjust",
       "order.confirm_payment", "order.ship",
-      "order.comment_internal"
+      "order.comment_internal",
+      "accounting.read", "accounting.write", "accounting.post", "accounting.export",
+      "operations.read", "operations.write", "operations.post"
     ],
     order_operator: [
       "catalog.read", "supplier.read",
       "order.read", "order.quote", "order.adjust",
-      "order.ship", "order.comment_internal"
+      "order.ship", "order.comment_internal",
+      "operations.read", "operations.write"
     ],
-    accountant: ["order.read", "order.confirm_payment", "order.comment_internal"],
-    warehouse: ["catalog.read", "supplier.read", "order.read", "order.ship", "order.comment_internal"],
+    accountant: [
+      "order.read", "order.confirm_payment", "order.comment_internal",
+      "accounting.read", "accounting.write", "accounting.post", "accounting.export",
+      "operations.read", "operations.write", "operations.post"
+    ],
+    warehouse: [
+      "catalog.read", "supplier.read", "order.read", "order.ship", "order.comment_internal",
+      "operations.read", "operations.write", "operations.post"
+    ],
     customer_owner: ["catalog.read", "order.read"],
     customer_staff: ["catalog.read", "order.read"]
   };
