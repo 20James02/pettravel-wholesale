@@ -15,16 +15,19 @@ origins = settings.BACKEND_CORS_ORIGINS
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(api_router, prefix="/v1")
+app.include_router(api_router, prefix="/api/index.py/api/v1")
 
 @app.get("/")
 @app.get("/api")
+@app.get("/api/index.py")
 def read_root():
     return {
         "status": "healthy",
