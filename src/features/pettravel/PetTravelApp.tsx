@@ -770,7 +770,12 @@ export function PetTravelApp() {
             setCurrentUser(data.user);
             const targetMode = data.user.isAdmin ? "admin" : "customer";
             setMode(targetMode);
-            setActiveTab(targetMode === "admin" ? "admin" : "catalog");
+            setActiveTab(prev => {
+              if (prev === "catalog") {
+                return targetMode === "admin" ? "admin" : "catalog";
+              }
+              return prev;
+            });
 
             await fetchProducts();
             await fetchOrders();
@@ -800,7 +805,7 @@ export function PetTravelApp() {
       }
     }
     checkSession();
-  }, [fetchProducts, fetchOrders, fetchCategories, fetchAdminData, fetchUsers, fetchPromotions]);
+  }, []);
 
   const activeUser = currentUser ? {
     id: currentUser.id, name: currentUser.name, company: currentUser.company,
