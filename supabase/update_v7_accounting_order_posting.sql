@@ -124,6 +124,16 @@ begin
     raise exception 'Actor is not attached to an internal accounting organization.';
   end if;
 
+  if not exists (
+    select 1
+    from user_roles ur
+    join role_permissions rp on rp.role_id = ur.role_id
+    where ur.user_id = p_actor_id
+      and rp.permission_key = 'accounting.post'
+  ) then
+    raise exception 'Actor is not allowed to post accounting entries.';
+  end if;
+
   select
     co.id,
     co.order_number,
@@ -554,3 +564,13 @@ begin
   );
 end;
 $$;
+
+revoke all on function pt_ensure_accounting_period(text, date) from public;
+revoke all on function pt_ensure_accounting_period(text, date) from anon;
+revoke all on function pt_ensure_accounting_period(text, date) from authenticated;
+grant execute on function pt_ensure_accounting_period(text, date) to service_role;
+
+revoke all on function pt_post_order_accounting(text, text, text, integer, boolean) from public;
+revoke all on function pt_post_order_accounting(text, text, text, integer, boolean) from anon;
+revoke all on function pt_post_order_accounting(text, text, text, integer, boolean) from authenticated;
+grant execute on function pt_post_order_accounting(text, text, text, integer, boolean) to service_role;

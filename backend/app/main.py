@@ -1,0 +1,35 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.api.router import api_router
+from app.core.config import settings
+import uvicorn
+
+app = FastAPI(
+    title="Pet Travel Wholesale B2B API",
+    description="Backend API for Pet Travel Wholesale warehouse management, purchasing, double-entry accounting, and VietQR matching.",
+    version="1.0.0"
+)
+
+# CORS configuration to allow local Next.js frontend calls
+origins = settings.BACKEND_CORS_ORIGINS
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(api_router, prefix=settings.API_V1_STR)
+
+@app.get("/")
+def read_root():
+    return {
+        "status": "healthy",
+        "service": "pettravel-wholesale-backend",
+        "message": "Welcome to Pet Travel B2B Wholesale API portal!"
+    }
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
