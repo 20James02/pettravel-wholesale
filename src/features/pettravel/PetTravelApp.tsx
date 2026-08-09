@@ -5687,6 +5687,16 @@ export function PetTravelApp() {
                       return;
                     }
 
+                    const cleanCode = formCode.trim().toUpperCase();
+                    if (!editingProduct && allProducts.some(p => p.code.toUpperCase() === cleanCode)) {
+                      alert(`Mã sản phẩm "${formCode}" đã tồn tại trong danh sách. Vui lòng nhập mã sản phẩm khác!`);
+                      return;
+                    }
+                    if (editingProduct && allProducts.some(p => p.id !== editingProduct.id && p.code.toUpperCase() === cleanCode)) {
+                      alert(`Mã sản phẩm "${formCode}" đã trùng với một sản phẩm khác. Vui lòng nhập mã sản phẩm khác!`);
+                      return;
+                    }
+
                     const productData = {
                       id: editingProduct?.id || `p_${Date.now()}`,
                       code: formCode,

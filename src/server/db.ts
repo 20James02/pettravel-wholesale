@@ -480,7 +480,7 @@ export async function getProducts(role: "guest" | "customer" | "admin"): Promise
 export async function saveProduct(product: Product): Promise<void> {
   const supabase = createSupabaseServiceClient();
 
-  // 1. Upsert product
+  // 1. Upsert product (dùng onConflict: "code" để tự động UPDATE nếu mã sản phẩm đã tồn tại)
   const { error: prodErr } = await supabase.from("products").upsert({
     id: product.id,
     code: product.code,
@@ -494,9 +494,14 @@ export async function saveProduct(product: Product): Promise<void> {
     weight: product.weight,
     tags: product.tags,
     active: true
-  });
+  }, { onConflict: "code" });
 
-  if (prodErr) throw new Error(prodErr.message);
+  if (prodErr) {
+    if (prodErr.message.includes("products_code_key") || prodErr.message.includes("duplicate key")) {
+      throw new Error(`Mã sản phẩm "${product.code}" đã tồn tại trên một sản phẩm khác. Vui lòng đổi mã sản phẩm.`);
+    }
+    throw new Error(prodErr.message);
+  }
 
   // 2. Upsert variants and offers
   for (const v of product.variants) {
