@@ -1,0 +1,18 @@
+-- 1. Add phone, password_hash, and avatar_url to app_users
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS phone text;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS password_hash text;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS avatar_url text;
+
+-- Add unique constraint on phone if it doesn't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'app_users_phone_key'
+    ) THEN
+        ALTER TABLE app_users ADD CONSTRAINT app_users_phone_key UNIQUE (phone);
+    END IF;
+END
+$$;
+
+-- 2. Add assigned_staff_id to customer_orders for locking active sessions
+ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS assigned_staff_id uuid REFERENCES app_users(id) ON DELETE SET NULL;

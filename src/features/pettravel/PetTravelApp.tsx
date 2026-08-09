@@ -53,7 +53,7 @@ import type {
 import { formatVnd, percent } from "@/lib/money";
 
 type AppMode = "guest" | "customer" | "admin";
-type TabKey = "catalog" | "cart" | "order" | "admin" | "admin_products" | "admin_reconciliation" | "admin_invoices" | "settings" | "admin_suppliers" | "admin_categories";
+type TabKey = "catalog" | "cart" | "order" | "admin" | "admin_products" | "admin_reconciliation" | "admin_invoices" | "settings" | "admin_suppliers" | "admin_categories" | "admin_users" | "profile" | "admin_promotions";
 
 interface ApiUser {
   id: string;
@@ -141,6 +141,39 @@ export function PetTravelApp() {
   const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
   const [chatInput, setChatInput] = useState<string>("");
   const [isInternalComment, setIsInternalComment] = useState<boolean>(false);
+
+  // Auth & Profile states
+  const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
+  const [showRegisterModal, setShowRegisterModal] = useState<boolean>(false);
+  const [loginEmail, setLoginEmail] = useState<string>("");
+  const [loginPassword, setLoginPassword] = useState<string>("");
+  const [regFullName, setRegFullName] = useState<string>("");
+  const [regEmail, setRegEmail] = useState<string>("");
+  const [regPhone, setRegPhone] = useState<string>("");
+  const [regCompany, setRegCompany] = useState<string>("");
+  const [regPassword, setRegPassword] = useState<string>("");
+  const [profileFullName, setProfileFullName] = useState<string>("");
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string>("");
+  const [profileNewPassword, setProfileNewPassword] = useState<string>("");
+
+  // Admin User management states
+  const [userList, setUserList] = useState<any[]>([]);
+  const [createFullName, setCreateFullName] = useState<string>("");
+  const [createEmail, setCreateEmail] = useState<string>("");
+  const [createPhone, setCreatePhone] = useState<string>("");
+  const [createPassword, setCreatePassword] = useState<string>("");
+  const [createRole, setCreateRole] = useState<string>("customer_owner");
+  const [createCompany, setCreateCompany] = useState<string>("");
+
+  // Admin Promotions settings states
+  const [promotionsPolicy, setPromotionsPolicy] = useState<any>({
+    freeShippingThreshold: 5000000,
+    defaultDepositRate: 0.3,
+    maxOperatorDiscountRate: 0.08,
+    requireManagerApprovalAbove: 500000,
+    giftThreshold: 10000000,
+    giftName: "Bát ăn inox cao cấp chống trượt"
+  });
 
   // Dynamic Categories state
   const [allCategories, setAllCategories] = useState<string[]>([]);
@@ -306,6 +339,34 @@ export function PetTravelApp() {
     } catch { /* silent */ }
   }, []);
 
+  const fetchUsers = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/users");
+      if (res.ok) {
+        const data = await res.json();
+        setUserList(data.users ?? []);
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  const fetchPromotions = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/promotions");
+      if (res.ok) {
+        const data = await res.json();
+        setPromotionsPolicy(data.policy ?? promotionsPolicy);
+        if (data.policy) {
+          setAdminPolicy({
+            freeShippingThreshold: data.policy.freeShippingThreshold,
+            defaultDepositRate: data.policy.defaultDepositRate,
+            maxOperatorDiscountRate: data.policy.maxOperatorDiscountRate,
+            requireManagerApprovalAbove: data.policy.requireManagerApprovalAbove
+          });
+        }
+      }
+    } catch { /* silent */ }
+  }, [promotionsPolicy]);
+
   async function handleAddCategory(e: React.FormEvent) {
     e.preventDefault();
     if (!newCategoryName.trim()) return;
@@ -416,6 +477,181 @@ export function PetTravelApp() {
     setNewImageUrlInput("");
   };
 
+  /** Login via credentials (email + password) */
+  async function handleCredentialsLogin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!loginEmail.trim() || !loginPassword) {
+      alert("Vui lòng nhập đầy đủ Email và Mật khẩu!");
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: loginEmail.trim(), password: loginPassword })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Đăng nhập thất bại.");
+        return;
+      }
+      setCurrentUser(data.user);
+      const targetMode = data.user.isAdmin ? "admin" : "customer";
+      setMode(targetMode);
+      setActiveTab(targetMode === "admin" ? "admin" : "catalog");
+      setShowLoginModal(false);
+      setLoginEmail("");
+      setLoginPassword("");
+
+      await fetchProducts();
+      await fetchOrders();
+      await fetchCategories();
+      if (targetMode === "admin") {
+        await fetchAdminData();
+        await fetchUsers();
+        await fetchPromotions();
+      } else {
+        setProfileFullName(data.user.name);
+      }
+    } catch {
+      alert("Lỗi kết nối đăng nhập.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  /** Register customer account */
+  async function handleRegister(e: React.FormEvent) {
+    e.preventDefault();
+    if (!regFullName.trim() || !regEmail.trim() || !regPhone.trim() || !regCompany.trim() || !regPassword) {
+      alert("Vui lòng điền đầy đủ thông tin các trường!");
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName: regFullName.trim(),
+          email: regEmail.trim(),
+          phone: regPhone.trim(),
+          company: regCompany.trim(),
+          password: regPassword
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Đăng ký thất bại.");
+        return;
+      }
+      alert(data.message || "Đăng ký tài khoản thành công!");
+      setShowRegisterModal(false);
+      setShowLoginModal(true);
+      setLoginEmail(regEmail.trim());
+      setRegFullName("");
+      setRegEmail("");
+      setRegPhone("");
+      setRegCompany("");
+      setRegPassword("");
+    } catch {
+      alert("Lỗi kết nối.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  /** Admin creates User or Admin account */
+  async function handleCreateUser(e: React.FormEvent) {
+    e.preventDefault();
+    if (!createFullName.trim() || !createEmail.trim() || !createPhone.trim() || !createPassword) {
+      alert("Vui lòng điền đầy đủ các thông tin bắt buộc!");
+      return;
+    }
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName: createFullName.trim(),
+          email: createEmail.trim(),
+          phone: createPhone.trim(),
+          password: createPassword,
+          role: createRole,
+          company: createRole === "customer_owner" ? createCompany.trim() : undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Lỗi tạo tài khoản.");
+        return;
+      }
+      alert(data.message || "Tạo tài khoản thành công!");
+      setCreateFullName("");
+      setCreateEmail("");
+      setCreatePhone("");
+      setCreatePassword("");
+      setCreateCompany("");
+      await fetchUsers();
+    } catch {
+      alert("Lỗi kết nối.");
+    }
+  }
+
+  /** Update profile name, avatar and password */
+  async function handleUpdateProfile(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      const payload: any = {};
+      if (profileFullName.trim()) payload.fullName = profileFullName.trim();
+      if (profileAvatarUrl.trim()) payload.avatarUrl = profileAvatarUrl.trim();
+      if (profileNewPassword) payload.newPassword = profileNewPassword;
+
+      const res = await fetch("/api/user/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Lỗi cập nhật hồ sơ.");
+        return;
+      }
+      alert(data.message || "Cập nhật hồ sơ thành công!");
+      setProfileNewPassword("");
+      if (currentUser) {
+        setCurrentUser({
+          ...currentUser,
+          name: profileFullName.trim() || currentUser.name
+        });
+      }
+    } catch {
+      alert("Lỗi kết nối.");
+    }
+  }
+
+  /** Admin saves promotions config */
+  async function handleSavePromotions(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      const res = await fetch("/api/admin/promotions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(promotionsPolicy)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Không thể lưu cấu hình.");
+        return;
+      }
+      alert("Lưu cấu hình ưu đãi thành công!");
+      await fetchPromotions();
+    } catch {
+      alert("Lỗi kết nối.");
+    }
+  }
+
   /** Login via demo API, then fetch relevant data */
   async function handleLogin(userId: string, targetMode: AppMode) {
     setIsLoading(true);
@@ -431,12 +667,15 @@ export function PetTravelApp() {
       setMode(targetMode);
       setActiveTab(targetMode === "admin" ? "admin" : "catalog");
 
-      // Fetch data in parallel
       await fetchProducts();
       await fetchOrders();
       await fetchCategories();
       if (targetMode === "admin") {
         await fetchAdminData();
+        await fetchUsers();
+        await fetchPromotions();
+      } else {
+        setProfileFullName(data.user.name);
       }
     } finally {
       setIsLoading(false);
@@ -520,6 +759,49 @@ export function PetTravelApp() {
     };
   }, []);
 
+  // Restore user session on mount
+  useEffect(() => {
+    async function checkSession() {
+      try {
+        const res = await fetch("/api/auth/me");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) {
+            setCurrentUser(data.user);
+            const targetMode = data.user.isAdmin ? "admin" : "customer";
+            setMode(targetMode);
+            setActiveTab(targetMode === "admin" ? "admin" : "catalog");
+
+            await fetchProducts();
+            await fetchOrders();
+            await fetchCategories();
+            if (targetMode === "admin") {
+              await fetchAdminData();
+              await fetchUsers();
+              await fetchPromotions();
+            } else {
+              setProfileFullName(data.user.name);
+              setProfileAvatarUrl(data.user.avatarUrl ?? "");
+            }
+          } else {
+            setMode("guest");
+            await fetchProducts();
+            await fetchCategories();
+          }
+        } else {
+          setMode("guest");
+          await fetchProducts();
+          await fetchCategories();
+        }
+      } catch {
+        setMode("guest");
+        await fetchProducts();
+        await fetchCategories();
+      }
+    }
+    checkSession();
+  }, [fetchProducts, fetchOrders, fetchCategories, fetchAdminData, fetchUsers, fetchPromotions]);
+
   const activeUser = currentUser ? {
     id: currentUser.id, name: currentUser.name, company: currentUser.company,
     email: currentUser.email, role: currentUser.role, isAdmin: currentUser.isAdmin
@@ -529,8 +811,9 @@ export function PetTravelApp() {
   const quote = latestQuote(workingOrder);
 
   // Computed values
+  const isLockedByOther = isAdmin && !!workingOrder.assignedStaffId && workingOrder.assignedStaffId !== currentUser?.id && currentUser?.role !== "super_admin";
   const requiresManagerApproval = (adminDiscount / (quote?.subtotal || 1) > adminPolicy.maxOperatorDiscountRate) || (adminDiscount > adminPolicy.requireManagerApprovalAbove);
-  const isOrderFrozen = workingOrder.paymentStatus.includes("uploaded") || workingOrder.paymentStatus.includes("confirmed") || workingOrder.paymentStatus === "paid";
+  const isOrderFrozen = isLockedByOther || workingOrder.paymentStatus.includes("uploaded") || workingOrder.paymentStatus.includes("confirmed") || workingOrder.paymentStatus === "paid";
 
   const supplierById = useMemo(
     () => Object.fromEntries(suppliers.map((supplier) => [supplier.id, supplier])),
@@ -1070,29 +1353,52 @@ export function PetTravelApp() {
         </div>
 
         {/* LOGGED IN ACCOUNT CARD */}
-        <div className="panel p-4 bg-[#FFFDF9] border border-orange-100 rounded-2xl flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold text-sm">
-              {activeUser?.name.charAt(0)}
-            </div>
-            <div>
-              <p className="m-0 text-sm font-bold text-[#331B08]">{activeUser?.name}</p>
-              <p className="muted m-0 text-xs">{activeUser?.company} · {activeUser?.role}</p>
-            </div>
+        {!isLoggedIn ? (
+          <div className="panel p-4 bg-[#FFFDF9] border border-orange-100 rounded-2xl flex flex-col gap-2">
+            <p className="m-0 text-xs font-bold text-[#331B08]/70">Chào mừng khách ghé thăm!</p>
+            <button
+              type="button"
+              className="w-full text-xs font-bold py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl cursor-pointer"
+              onClick={() => setShowLoginModal(true)}
+            >
+              Đăng nhập Đại lý
+            </button>
           </div>
-          <button
-            className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-red-50 text-red-500 hover:text-red-600 transition"
-            title="Đăng xuất"
-            type="button"
-            onClick={handleLogout}
-          >
-            <LogOut size={16} />
-          </button>
-        </div>
+        ) : (
+          <div className="panel p-4 bg-[#FFFDF9] border border-orange-100 rounded-2xl flex items-center justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold text-sm">
+                {activeUser?.name?.charAt(0) || "U"}
+              </div>
+              <div>
+                <p className="m-0 text-sm font-bold text-[#331B08]">{activeUser?.name}</p>
+                <p className="muted m-0 text-xs">{activeUser?.company} · {activeUser?.role}</p>
+              </div>
+            </div>
+            <button
+              className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-red-50 text-red-500 hover:text-red-600 transition"
+              title="Đăng xuất"
+              type="button"
+              onClick={handleLogout}
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
+        )}
 
         {/* NAVIGATION TABS */}
         <nav className="tabs flex flex-col gap-2 mt-2" aria-label="Điều hướng">
-          {mode === "customer" ? (
+          {!isLoggedIn ? (
+            <button
+              className="tab-button w-full justify-start"
+              type="button"
+              data-active={activeTab === "catalog"}
+              onClick={() => setActiveTab("catalog")}
+            >
+              <Search size={18} />
+              Cửa hàng bán sỉ
+            </button>
+          ) : mode === "customer" ? (
             <>
               <button
                 className="tab-button w-full justify-start"
@@ -1125,6 +1431,18 @@ export function PetTravelApp() {
               >
                 <MessageSquare size={18} />
                 Trực phòng đơn hàng
+              </button>
+              <button
+                className="tab-button w-full justify-start"
+                type="button"
+                data-active={activeTab === "profile"}
+                onClick={() => {
+                  setActiveTab("profile");
+                  setProfileFullName(currentUser?.name || "");
+                }}
+              >
+                <UserRound size={18} />
+                Hồ sơ & Đơn sỉ của tôi
               </button>
             </>
           ) : (
@@ -1164,6 +1482,30 @@ export function PetTravelApp() {
               >
                 <Boxes size={18} />
                 Quản lý danh mục
+              </button>
+              <button
+                className="tab-button w-full justify-start"
+                type="button"
+                data-active={activeTab === "admin_users"}
+                onClick={() => {
+                  setActiveTab("admin_users");
+                  fetchUsers();
+                }}
+              >
+                <Users size={18} />
+                Quản lý tài khoản
+              </button>
+              <button
+                className="tab-button w-full justify-start"
+                type="button"
+                data-active={activeTab === "admin_promotions"}
+                onClick={() => {
+                  setActiveTab("admin_promotions");
+                  fetchPromotions();
+                }}
+              >
+                <Percent size={18} />
+                Cấu hình ưu đãi
               </button>
               <button
                 className="tab-button w-full justify-start"
@@ -1219,35 +1561,63 @@ export function PetTravelApp() {
 
       {/* MAIN SCREEN AREA */}
       <section className="main-area">
-        <header className="topbar">
+        <header className="topbar animate-fade-in">
           <div>
-            <p className="muted m-0 text-xs font-bold uppercase tracking-wider">Cửa hàng sỉ Pet Travel / {isAdmin ? "Cổng quản trị" : "Cổng Đại lý"}</p>
-            <h2 className="text-2xl font-bold text-[#331B08] mt-1">Xin chào đối tác sỉ đáng yêu! 👋</h2>
+            <p className="muted m-0 text-[10px] font-mono font-bold uppercase tracking-wider">
+              Cửa hàng sỉ Pet Travel / {!isLoggedIn ? "Khách ghé thăm" : isAdmin ? "Cổng quản trị" : "Cổng Đại lý"}
+            </p>
+            <h2 className="text-xl font-bold text-[#331B08] mt-1">
+              {!isLoggedIn ? "Xin chào đối tác sỉ đáng yêu! 👋" : `Xin chào, ${currentUser?.name || "Đại lý"}! 👋`}
+            </h2>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
               <input
                 type="text"
-                className="text-input pl-10 text-sm max-w-[240px] pr-4 py-2"
+                className="text-input pl-10 text-sm max-w-[200px] pr-4 py-2"
                 placeholder="Tìm sản phẩm, SKU..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
               <Search className="absolute left-3 top-3 text-orange-400" size={16} />
             </div>
-            {!isAdmin && mode === "customer" && (
-              <button
-                className="tab-button text-xs py-2 px-3 bg-orange-100 hover:bg-orange-200 border-orange-200 font-bold rounded-xl flex items-center gap-1.5 cursor-pointer text-orange-800"
-                type="button"
-                onClick={() => setActiveTab("cart")}
-              >
-                <ShoppingCart size={15} />
-                <span>Giỏ hàng: {formatVnd(cartTotalVal)}</span>
-              </button>
+
+            {!isLoggedIn ? (
+              <>
+                <button
+                  className="tab-button text-xs py-2 px-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl flex items-center gap-1 cursor-pointer transition"
+                  type="button"
+                  onClick={() => setShowLoginModal(true)}
+                >
+                  <LockKeyhole size={14} />
+                  Đăng nhập
+                </button>
+                <button
+                  className="tab-button text-xs py-2 px-3 bg-orange-100 hover:bg-orange-200 border-orange-200 text-orange-850 font-bold rounded-xl flex items-center gap-1 cursor-pointer transition"
+                  type="button"
+                  onClick={() => setShowRegisterModal(true)}
+                >
+                  <UserRound size={14} />
+                  Đăng ký đại lý
+                </button>
+              </>
+            ) : (
+              <>
+                {!isAdmin && mode === "customer" && (
+                  <button
+                    className="tab-button text-xs py-2 px-3 bg-orange-100 hover:bg-orange-200 border-orange-200 font-bold rounded-xl flex items-center gap-1.5 cursor-pointer text-orange-800 transition"
+                    type="button"
+                    onClick={() => setActiveTab("cart")}
+                  >
+                    <ShoppingCart size={15} />
+                    <span>Giỏ hàng: {formatVnd(cartTotalVal)}</span>
+                  </button>
+                )}
+                <button className="icon-button" aria-label="Thông báo" type="button">
+                  <Bell size={18} />
+                </button>
+              </>
             )}
-            <button className="icon-button" aria-label="Thông báo" type="button">
-              <Bell size={18} />
-            </button>
           </div>
         </header>
 
@@ -1728,6 +2098,202 @@ export function PetTravelApp() {
           </section>
         )}
 
+        {/* --- CUSTOMER PROFILE & ORDER HISTORY TAB --- */}
+        {activeTab === "profile" && isLoggedIn && !isAdmin && (
+          <div className="flex flex-col gap-6 animate-fade-in w-full">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Account Settings Panel */}
+              <div className="panel flex flex-col gap-4 bg-white border border-orange-100 rounded-3xl p-6">
+                <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2">
+                  <UserRound className="text-orange-500" size={20} />
+                  Thông tin cá nhân & Bảo mật
+                </h3>
+                <p className="muted text-xs">Cập nhật họ tên đối tác, ảnh đại diện và thay đổi mật khẩu đăng nhập cổng sỉ.</p>
+
+                <form onSubmit={handleUpdateProfile} className="flex flex-col gap-4 mt-2">
+                  <div className="flex items-center gap-4 py-2 border-b border-orange-100/50">
+                    <div className="w-16 h-16 rounded-full overflow-hidden bg-orange-50 border-2 border-orange-200 flex items-center justify-center text-xl font-bold text-orange-600 shrink-0">
+                      {profileAvatarUrl ? (
+                        <img src={profileAvatarUrl} alt="Avatar" width={64} height={64} className="object-cover w-full h-full" />
+                      ) : (
+                        currentUser?.name?.charAt(0) || "U"
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1 w-full">
+                      <label className="text-[10px] font-bold text-orange-950/70 uppercase">Đường dẫn ảnh đại diện</label>
+                      <input
+                        type="url"
+                        className="text-input text-xs py-1.5 px-3 w-full"
+                        placeholder="https://..."
+                        value={profileAvatarUrl}
+                        onChange={(e) => setProfileAvatarUrl(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Họ và Tên</label>
+                    <input
+                      type="text"
+                      className="text-input text-sm py-2 px-3"
+                      value={profileFullName}
+                      onChange={(e) => setProfileFullName(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Mật khẩu mới (Bỏ trống nếu không đổi)</label>
+                    <input
+                      type="password"
+                      className="text-input text-sm py-2 px-3"
+                      placeholder="••••••••"
+                      value={profileNewPassword}
+                      onChange={(e) => setProfileNewPassword(e.target.value)}
+                      minLength={6}
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 text-xs text-[#331B08]/60 font-medium">
+                    <div className="flex justify-between">
+                      <span>Email sỉ:</span>
+                      <strong className="text-orange-950 font-bold">{currentUser?.email}</strong>
+                    </div>
+                    <div className="flex justify-between mt-1">
+                      <span>Tổ chức đại lý:</span>
+                      <strong className="text-orange-950 font-bold">{currentUser?.company}</strong>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="primary-button text-xs py-3 w-full justify-center font-bold cursor-pointer"
+                  >
+                    Cập nhật tài khoản
+                  </button>
+                </form>
+              </div>
+
+              {/* Order History and tracking */}
+              <div className="panel lg:col-span-2 flex flex-col gap-4 bg-white border border-orange-100 rounded-3xl p-6">
+                <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2">
+                  <ReceiptText className="text-orange-500" size={20} />
+                  Lịch sử Đơn sỉ & Vận chuyển
+                </h3>
+                <p className="muted text-xs">Theo dõi tiến độ duyệt giá, tình trạng cọc VietQR, hóa đơn VAT đỏ và mã vận đơn thực tế của các đơn hàng sỉ.</p>
+
+                <div className="overflow-x-auto mt-2">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b-2 border-orange-100 text-[10px] font-extrabold uppercase text-[#78350F] tracking-wider">
+                        <th className="py-2.5">Mã đơn</th>
+                        <th>Ngày tạo</th>
+                        <th>Trạng thái duyệt</th>
+                        <th>Thanh toán</th>
+                        <th className="text-right">Tổng đơn</th>
+                        <th className="text-center">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-orange-50/50">
+                      {allOrders.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-8 text-center text-xs text-gray-500 font-medium">
+                            Chưa có đơn sỉ nào được tạo. Quay lại Cửa hàng để bắt đầu lên đơn!
+                          </td>
+                        </tr>
+                      ) : (
+                        allOrders.map((ord) => {
+                          const q = latestQuote(ord);
+                          return (
+                            <tr key={ord.id} className="text-xs hover:bg-orange-50/20">
+                              <td className="py-3 font-extrabold text-[#331B08]">{ord.number}</td>
+                              <td className="text-gray-500 font-medium">
+                                {new Date(ord.updatedAt).toLocaleDateString("vi-VN")}
+                              </td>
+                              <td>
+                                <span className={`status-pill text-[9px] ${
+                                  ord.commercialStatus === "locked" ? "success" :
+                                  ord.commercialStatus === "quoted" ? "info" : "warning"
+                                }`}>
+                                  {ord.commercialStatus === "submitted" ? "Chờ duyệt" :
+                                   ord.commercialStatus === "quoted" ? "Đã báo giá" :
+                                   ord.commercialStatus === "customer_accepted" ? "Chờ cọc" :
+                                   ord.commercialStatus === "locked" ? "Đang giao" : "Hoàn tất"}
+                                </span>
+                              </td>
+                              <td>
+                                <span className={`status-pill text-[9px] ${
+                                  ord.paymentStatus === "paid" ? "success" : "warning"
+                                }`}>
+                                  {ord.paymentStatus === "paid" ? "Đã thanh toán" :
+                                   ord.paymentStatus === "deposit_confirmed" ? "Đã cọc 30%" :
+                                   ord.paymentStatus.includes("uploaded") ? "Chờ xác nhận" : "Chưa cọc"}
+                                </span>
+                              </td>
+                              <td className="text-right font-extrabold text-orange-950">
+                                {formatVnd(q.finalTotal)}
+                              </td>
+                              <td className="text-center">
+                                <button
+                                  type="button"
+                                  className="text-[10px] font-bold py-1 px-3 bg-orange-100 hover:bg-orange-200 text-orange-850 rounded-lg cursor-pointer transition border border-orange-200"
+                                  onClick={() => {
+                                    setSelectedOrderId(ord.id);
+                                    setWorkingOrder(ord);
+                                    setCartItems(ord.items.map(item => ({ ...item })));
+                                    setActiveTab("order");
+                                  }}
+                                >
+                                  Chi tiết & Chat
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Shipping tracking information */}
+                {allOrders.some(o => o.shipment) && (
+                  <div className="mt-4 p-4 bg-orange-50/50 border border-orange-100 rounded-2xl flex flex-col gap-3">
+                    <h4 className="text-xs font-bold text-orange-950 flex items-center gap-1.5">
+                      <Truck size={14} /> Tracking Vận Đơn Mới Nhất
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                      {allOrders
+                        .filter(o => o.shipment)
+                        .slice(0, 2)
+                        .map(o => (
+                          <div key={o.id} className="p-3 bg-white border border-orange-100 rounded-xl flex flex-col gap-1.5">
+                            <div className="flex justify-between font-bold">
+                              <span>Đơn sỉ: {o.number}</span>
+                              <span className="text-orange-600">{o.shipment?.carrier}</span>
+                            </div>
+                            <div className="flex justify-between text-gray-500 text-[11px] font-medium">
+                              <span>Mã vận đơn:</span>
+                              <span className="font-mono font-bold text-orange-900">{o.shipment?.trackingCode}</span>
+                            </div>
+                            <div className="flex justify-between text-gray-500 text-[11px] font-medium">
+                              <span>Ngày giao hàng dự kiến:</span>
+                              <span className="font-bold text-[#331B08]">{o.shipment?.eta}</span>
+                            </div>
+                            {o.shipment?.note && (
+                              <p className="m-0 text-[10px] italic text-gray-600 mt-1 border-t border-dashed border-gray-150 pt-1">
+                                Ghi chú: {o.shipment.note}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* --- D. ADMIN OPERATIONS TAB (ADMIN ONLY) --- */}
         {activeTab === "admin" && isAdmin && (
           workingOrder.id === "" ? (
@@ -1813,6 +2379,35 @@ export function PetTravelApp() {
                   </select>
                 </div>
               </div>
+
+              {/* WARNING BANNER FOR LOCKED ORDER */}
+              {(() => {
+                const isLockedByOther = workingOrder.assignedStaffId && workingOrder.assignedStaffId !== currentUser?.id && currentUser?.role !== "super_admin";
+                if (isLockedByOther) {
+                  return (
+                    <div className="p-4 bg-red-50 border-2 border-red-200 text-red-950 rounded-2xl flex items-center gap-3 animate-fade-in">
+                      <span className="text-2xl">🔒</span>
+                      <div>
+                        <h4 className="font-extrabold text-sm m-0">Đơn hàng này đã bị khóa thao tác!</h4>
+                        <p className="m-0 text-xs mt-1">
+                          Đơn hàng này đã được gán cho nhân viên <strong>{workingOrder.assignedStaffName || "khác"}</strong> phụ trách. 
+                          Bạn chỉ có quyền xem chi tiết và trao đổi nội bộ, không thể thay đổi số lượng, báo giá hay xác nhận giao dịch.
+                        </p>
+                      </div>
+                    </div>
+                  );
+                } else if (workingOrder.assignedStaffId) {
+                  return (
+                    <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-950 rounded-2xl flex items-center gap-2.5 animate-fade-in">
+                      <span className="text-lg">👤</span>
+                      <p className="m-0 text-xs font-bold">
+                        Đơn hàng được gán cho bạn phụ trách xử lý ({workingOrder.assignedStaffName}).
+                      </p>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               <section className="grid-dashboard">
                 <div className="flex flex-col gap-4">
@@ -2729,6 +3324,299 @@ export function PetTravelApp() {
           </section>
         )}
 
+        {/* --- F. ADMIN USER MANAGEMENT TAB --- */}
+        {activeTab === "admin_users" && isAdmin && (
+          <div className="flex flex-col gap-6 animate-fade-in w-full">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* User Creation Form */}
+              <div className="panel flex flex-col gap-4 bg-white border border-orange-100 rounded-3xl p-6">
+                <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2">
+                  <UserRound className="text-orange-500" size={20} />
+                  Tạo tài khoản mới
+                </h3>
+                <p className="muted text-xs">Cấp quyền truy cập mới cho nhân viên vận hành (Admin/Operator) hoặc đối tác đại lý sỉ (Customer).</p>
+
+                <form onSubmit={handleCreateUser} className="flex flex-col gap-4 mt-2">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Họ và Tên</label>
+                    <input
+                      type="text"
+                      className="text-input text-sm py-2 px-3"
+                      value={createFullName}
+                      onChange={(e) => setCreateFullName(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Email đăng nhập</label>
+                    <input
+                      type="email"
+                      className="text-input text-sm py-2 px-3"
+                      value={createEmail}
+                      onChange={(e) => setCreateEmail(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Số điện thoại</label>
+                    <input
+                      type="tel"
+                      className="text-input text-sm py-2 px-3"
+                      value={createPhone}
+                      onChange={(e) => setCreatePhone(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Mật khẩu ban đầu</label>
+                    <input
+                      type="text"
+                      className="text-input text-sm py-2 px-3"
+                      value={createPassword}
+                      onChange={(e) => setCreatePassword(e.target.value)}
+                      required
+                      minLength={6}
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Vai trò & Quyền</label>
+                    <select
+                      className="text-input text-sm py-2 px-3 bg-white border"
+                      value={createRole}
+                      onChange={(e) => setCreateRole(e.target.value)}
+                    >
+                      <option value="customer_owner">Đại lý sỉ (Customer Owner)</option>
+                      <option value="super_admin">Quản trị cấp cao (Super Admin)</option>
+                      <option value="finance_admin">Tài chính (Finance Admin)</option>
+                      <option value="operator">Nhân viên vận hành (Operator)</option>
+                    </select>
+                  </div>
+
+                  {createRole === "customer_owner" && (
+                    <div className="flex flex-col gap-1.5 animate-slide-down">
+                      <label className="text-[10px] font-bold text-orange-950/80 uppercase">Tên Công ty/Cửa hàng</label>
+                      <input
+                        type="text"
+                        className="text-input text-sm py-2 px-3"
+                        placeholder="Ví dụ: Happy Paws Shop"
+                        value={createCompany}
+                        onChange={(e) => setCreateCompany(e.target.value)}
+                        required={createRole === "customer_owner"}
+                      />
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="primary-button text-xs py-3 w-full justify-center font-bold cursor-pointer"
+                  >
+                    Tạo tài khoản
+                  </button>
+                </form>
+              </div>
+
+              {/* User List Panel */}
+              <div className="panel lg:col-span-2 flex flex-col gap-4 bg-white border border-orange-100 rounded-3xl p-6">
+                <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2">
+                  <Users className="text-orange-500" size={20} />
+                  Thành viên hệ thống ({userList.length})
+                </h3>
+                <p className="muted text-xs">Danh sách toàn bộ tài khoản đại lý sỉ, nhân viên kế toán, tài chính và điều phối viên đang hoạt động.</p>
+
+                <div className="overflow-x-auto mt-2">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b-2 border-orange-100 text-[10px] font-extrabold uppercase text-[#78350F] tracking-wider">
+                        <th className="py-2.5">Thành viên</th>
+                        <th>Số điện thoại</th>
+                        <th>Tổ chức sỉ / Vai trò</th>
+                        <th>Phân loại</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-orange-50/50">
+                      {userList.map((u) => (
+                        <tr key={u.id} className="text-xs hover:bg-orange-50/20">
+                          <td className="py-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full overflow-hidden bg-orange-50 flex items-center justify-center font-bold text-orange-750 text-xs shrink-0 border border-orange-200">
+                                {u.avatar_url ? (
+                                  <img src={u.avatar_url} alt="" className="w-full h-full object-cover" />
+                                ) : (
+                                  u.full_name?.charAt(0) || "U"
+                                )}
+                              </div>
+                              <div className="flex flex-col">
+                                <strong className="text-[#331B08]">{u.full_name}</strong>
+                                <span className="text-[10px] text-gray-400">{u.email}</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="font-semibold text-gray-655">{u.phone || "—"}</td>
+                          <td>
+                            <div className="flex flex-col">
+                              <strong className="text-[#78350F]">{u.organizations?.name || "Pet Travel Nội bộ"}</strong>
+                              <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">{u.role}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <span className={`status-pill text-[9px] ${
+                              u.role.includes("admin") ? "success" : "info"
+                            }`}>
+                              {u.role.includes("admin") ? "Nội bộ Admin" : "Đại lý ngoài"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* --- G. ADMIN PROMOTIONS & SYSTEM DEFAULTS TAB --- */}
+        {activeTab === "admin_promotions" && isAdmin && (
+          <div className="flex flex-col gap-6 animate-fade-in w-full">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Settings Form */}
+              <div className="panel flex flex-col gap-4 bg-white border border-orange-100 rounded-3xl p-6">
+                <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2">
+                  <Percent className="text-orange-500" size={20} />
+                  Khuyến mãi & Chỉ số mặc định
+                </h3>
+                <p className="muted text-xs">Cấu hình các chỉ số ưu đãi mặc định cho đại lý khi tạo đơn sỉ tự động và ngưỡng freeship hệ thống.</p>
+
+                <form onSubmit={handleSavePromotions} className="flex flex-col gap-4 mt-2">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Ngưỡng miễn phí vận chuyển sỉ (Freeship Threshold - VND)</label>
+                    <input
+                      type="number"
+                      className="text-input text-sm py-2 px-3"
+                      value={promotionsPolicy.freeShippingThreshold}
+                      onChange={(e) => setPromotionsPolicy({
+                        ...promotionsPolicy,
+                        freeShippingThreshold: Math.max(0, parseInt(e.target.value, 10) || 0)
+                      })}
+                      required
+                    />
+                    <p className="text-[10px] text-gray-400 mt-0.5">Các đơn sỉ có tổng trị giá hàng từ ngưỡng này trở lên sẽ tự động freeship.</p>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-[#78350F] uppercase">Tỷ lệ đặt cọc mặc định (Ví dụ: 0.3 = 30%)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="1"
+                      className="text-input text-sm py-2 px-3 font-semibold"
+                      value={promotionsPolicy.defaultDepositRate}
+                      onChange={(e) => setPromotionsPolicy({
+                        ...promotionsPolicy,
+                        defaultDepositRate: Math.max(0, Math.min(1, parseFloat(e.target.value) || 0))
+                      })}
+                      required
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-[#78350F] uppercase">Chiết khấu tối đa của nhân viên (Ví dụ: 0.08 = 8%)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="1"
+                      className="text-input text-sm py-2 px-3 font-semibold"
+                      value={promotionsPolicy.maxOperatorDiscountRate}
+                      onChange={(e) => setPromotionsPolicy({
+                        ...promotionsPolicy,
+                        maxOperatorDiscountRate: Math.max(0, Math.min(1, parseFloat(e.target.value) || 0))
+                      })}
+                      required
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-[#78350F] uppercase">Hạn mức chiết khấu cần Quản lý duyệt (VND)</label>
+                    <input
+                      type="number"
+                      className="text-input text-sm py-2 px-3"
+                      value={promotionsPolicy.requireManagerApprovalAbove}
+                      onChange={(e) => setPromotionsPolicy({
+                        ...promotionsPolicy,
+                        requireManagerApprovalAbove: Math.max(0, parseInt(e.target.value, 10) || 0)
+                      })}
+                      required
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Ngưỡng tặng quà sỉ mặc định (VND)</label>
+                    <input
+                      type="number"
+                      className="text-input text-sm py-2 px-3"
+                      value={promotionsPolicy.giftThreshold || 0}
+                      onChange={(e) => setPromotionsPolicy({
+                        ...promotionsPolicy,
+                        giftThreshold: Math.max(0, parseInt(e.target.value, 10) || 0)
+                      })}
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Tên Quà Tặng kèm theo</label>
+                    <input
+                      type="text"
+                      className="text-input text-sm py-2 px-3"
+                      placeholder="Không quà tặng"
+                      value={promotionsPolicy.giftName || ""}
+                      onChange={(e) => setPromotionsPolicy({
+                        ...promotionsPolicy,
+                        giftName: e.target.value
+                      })}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="primary-button text-xs py-3 w-full justify-center font-bold cursor-pointer"
+                  >
+                    Lưu thiết lập ưu đãi
+                  </button>
+                </form>
+              </div>
+
+              {/* Status and Active Rules overview */}
+              <div className="flex flex-col gap-4">
+                <div className="panel bg-[#FFFDF9] border border-orange-100 rounded-3xl p-6">
+                  <h4 className="text-xs font-bold text-orange-950 uppercase flex items-center gap-1.5">
+                    💡 Hướng dẫn Quy tắc Khuyến mại
+                  </h4>
+                  <ul className="text-xs text-[#331B08]/85 pl-4 flex flex-col gap-3 mt-3 list-disc">
+                    <li>
+                      Miễn phí vận chuyển cho các đơn sỉ từ <strong>{formatVnd(promotionsPolicy.freeShippingThreshold)}</strong> trở lên.
+                    </li>
+                    <li>
+                      Đại lý thanh toán trước <strong>{promotionsPolicy.defaultDepositRate * 100}%</strong> giá trị đơn sỉ làm tiền cọc đóng gói, <strong>{(1 - promotionsPolicy.defaultDepositRate) * 100}%</strong> COD còn lại khi nhận hàng.
+                    </li>
+                    <li>
+                      Nếu đơn sỉ có trị giá từ <strong>{formatVnd(promotionsPolicy.giftThreshold || 0)}</strong>, hệ thống tự động tặng kèm quà: <strong>{promotionsPolicy.giftName || "Chưa thiết lập"}</strong>.
+                    </li>
+                    <li>
+                      Nhân viên vận hành được tự động chiết khấu tối đa <strong>{promotionsPolicy.maxOperatorDiscountRate * 100}%</strong> hoặc giảm trực tiếp đến <strong>{formatVnd(promotionsPolicy.requireManagerApprovalAbove)}</strong> cho đại lý mà không cần Quản lý duyệt.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
       </section>
 
       {/* --- CUTE PRODUCT DETAIL MODAL --- */}
@@ -2866,6 +3754,13 @@ export function PetTravelApp() {
 
                     {/* Quantity and Add buttons */}
                     {(() => {
+                      if (!isLoggedIn) {
+                        return (
+                          <div className="mt-3 p-4 bg-orange-50 border border-orange-100 rounded-xl text-[#331B08]/80 text-xs text-center font-medium">
+                            🔒 Vui lòng đăng nhập để thêm sản phẩm vào giỏ hàng sỉ.
+                          </div>
+                        );
+                      }
                       const activeV = selectedProduct.variants.find(v => v.sku === selectedVariantSku);
                       if (!activeV) return null;
                       return (
@@ -3446,6 +4341,222 @@ export function PetTravelApp() {
                   Xác nhận & Thanh toán sỉ
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* --- CUTE CREDENTIALS LOGIN MODAL --- */}
+      {showLoginModal && (
+        <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowLoginModal(false)}>
+          <div 
+            className="panel max-w-sm w-full flex flex-col gap-4 p-6 relative overflow-hidden bg-[#FFFDF9] animate-scale-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button 
+              type="button" 
+              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 font-bold hover:bg-orange-200 transition active:scale-90"
+              onClick={() => setShowLoginModal(false)}
+            >
+              ✕
+            </button>
+
+            <div className="text-center">
+              <span className="text-3xl">🐾</span>
+              <h3 className="text-lg font-bold text-[#331B08] mt-2">Đăng nhập Đại lý sỉ</h3>
+              <p className="muted text-xs">Vui lòng điền thông tin đăng nhập hoặc chọn tài khoản demo để thử nghiệm nhanh.</p>
+            </div>
+
+            <form onSubmit={handleCredentialsLogin} className="flex flex-col gap-3 mt-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-bold text-orange-950/80">Địa chỉ Email sỉ</label>
+                <input
+                  type="email"
+                  className="text-input text-sm py-2 px-3"
+                  placeholder="admin@pettravel.com hoặc minh@paw.com..."
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-bold text-orange-950/80">Mật khẩu</label>
+                <input
+                  type="password"
+                  className="text-input text-sm py-2 px-3"
+                  placeholder="••••••••"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="primary-button text-sm py-3 justify-center font-bold bg-orange-500 hover:bg-orange-600 text-white cursor-pointer mt-2"
+                disabled={isLoading}
+              >
+                {isLoading ? "Đang đăng nhập..." : "Đăng nhập Cổng sỉ"}
+              </button>
+            </form>
+
+            <div className="border-t border-dashed border-orange-200 my-2 pt-3">
+              <p className="text-[10px] font-bold text-[#78350F] uppercase text-center">Đăng nhập nhanh (Tài khoản Demo)</p>
+              <div className="grid grid-cols-3 gap-2 mt-2">
+                <button
+                  type="button"
+                  className="py-1 px-2 bg-orange-100 hover:bg-orange-200 text-[#78350F] rounded-lg text-[10px] font-bold cursor-pointer"
+                  onClick={() => {
+                    setLoginEmail("admin@pettravel.com");
+                    setLoginPassword("admin123");
+                  }}
+                >
+                  Admin
+                </button>
+                <button
+                  type="button"
+                  className="py-1 px-2 bg-orange-100 hover:bg-orange-200 text-[#78350F] rounded-lg text-[10px] font-bold cursor-pointer"
+                  onClick={() => {
+                    setLoginEmail("minh@paw.com");
+                    setLoginPassword("minh123");
+                  }}
+                >
+                  Minh (Đại lý)
+                </button>
+                <button
+                  type="button"
+                  className="py-1 px-2 bg-orange-100 hover:bg-orange-200 text-[#78350F] rounded-lg text-[10px] font-bold cursor-pointer"
+                  onClick={() => {
+                    setLoginEmail("lan@petland.com");
+                    setLoginPassword("lan123");
+                  }}
+                >
+                  Lan (Đại lý)
+                </button>
+              </div>
+            </div>
+
+            <div className="text-center text-xs mt-1">
+              <span className="muted">Chưa có tài khoản đại lý? </span>
+              <button
+                type="button"
+                className="text-orange-600 font-bold hover:underline cursor-pointer"
+                onClick={() => {
+                  setShowLoginModal(false);
+                  setShowRegisterModal(true);
+                }}
+              >
+                Đăng ký ngay
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- CUTE REGISTER MODAL --- */}
+      {showRegisterModal && (
+        <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowRegisterModal(false)}>
+          <div 
+            className="panel max-w-sm w-full flex flex-col gap-4 p-6 relative overflow-hidden bg-[#FFFDF9] animate-scale-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button 
+              type="button" 
+              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 font-bold hover:bg-orange-200 transition active:scale-90"
+              onClick={() => setShowRegisterModal(false)}
+            >
+              ✕
+            </button>
+
+            <div className="text-center">
+              <span className="text-3xl">🤝</span>
+              <h3 className="text-lg font-bold text-[#331B08] mt-2">Đăng ký Đại lý sỉ</h3>
+              <p className="muted text-xs">Hãy tham gia chuỗi cung ứng sỉ Pet Travel để hưởng chiết khấu ưu đãi và công nợ 70%.</p>
+            </div>
+
+            <form onSubmit={handleRegister} className="flex flex-col gap-3 mt-1">
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Họ và Tên đại diện</label>
+                <input
+                  type="text"
+                  className="text-input text-xs py-1.5 px-3"
+                  placeholder="Ví dụ: Nguyễn Văn A..."
+                  value={regFullName}
+                  onChange={(e) => setRegFullName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Email liên hệ</label>
+                <input
+                  type="email"
+                  className="text-input text-xs py-1.5 px-3"
+                  placeholder="name@company.com..."
+                  value={regEmail}
+                  onChange={(e) => setRegEmail(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Số điện thoại</label>
+                <input
+                  type="tel"
+                  className="text-input text-xs py-1.5 px-3"
+                  placeholder="Ví dụ: 0912345678..."
+                  value={regPhone}
+                  onChange={(e) => setRegPhone(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Tên Công ty/Cửa hàng sỉ</label>
+                <input
+                  type="text"
+                  className="text-input text-xs py-1.5 px-3"
+                  placeholder="Ví dụ: Happy Paws Shop..."
+                  value={regCompany}
+                  onChange={(e) => setRegCompany(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Mật khẩu đăng nhập</label>
+                <input
+                  type="password"
+                  className="text-input text-xs py-1.5 px-3"
+                  placeholder="Tối thiểu 6 ký tự..."
+                  value={regPassword}
+                  onChange={(e) => setRegPassword(e.target.value)}
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="primary-button text-xs py-3 justify-center font-bold bg-orange-500 hover:bg-orange-600 text-white cursor-pointer mt-2"
+                disabled={isLoading}
+              >
+                {isLoading ? "Đang xử lý..." : "Đăng ký làm Đại lý"}
+              </button>
+            </form>
+
+            <div className="text-center text-xs mt-1">
+              <span className="muted">Đã có tài khoản? </span>
+              <button
+                type="button"
+                className="text-orange-600 font-bold hover:underline cursor-pointer"
+                onClick={() => {
+                  setShowRegisterModal(false);
+                  setShowLoginModal(true);
+                }}
+              >
+                Đăng nhập ngay
+              </button>
             </div>
           </div>
         </div>

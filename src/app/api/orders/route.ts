@@ -149,13 +149,33 @@ export async function PUT(request: Request) {
 
     // If customer updates, sanitize input to prevent tampering with admin fields
     let orderToSave = updatedOrder;
-    if (!user.isAdmin) {
+    if (user.isAdmin) {
+      // 1. Staff lock check
+      if (existing.assignedStaffId && existing.assignedStaffId !== user.id) {
+        if (user.role !== "super_admin") {
+          return NextResponse.json(
+            { error: `Đơn hàng này đang được xử lý bởi nhân viên khác (${existing.assignedStaffName || "Nhân viên vận hành"}). Bạn không có quyền chỉnh sửa.` },
+            { status: 403 }
+          );
+        }
+      }
+      // 2. Auto-assign staff if not already assigned
+      if (!existing.assignedStaffId) {
+        orderToSave = {
+          ...updatedOrder,
+          assignedStaffId: user.id,
+          assignedStaffName: user.name
+        };
+      }
+    } else {
       orderToSave = {
         ...updatedOrder,
         customerId: existing.customerId,
         fulfillmentGroups: existing.fulfillmentGroups,
         quoteVersions: existing.quoteVersions,
-        paymentRequests: existing.paymentRequests
+        paymentRequests: existing.paymentRequests,
+        assignedStaffId: existing.assignedStaffId,
+        assignedStaffName: existing.assignedStaffName
       };
     }
 

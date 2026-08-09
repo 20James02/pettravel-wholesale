@@ -3,6 +3,11 @@ import "server-only";
 import { cookies } from "next/headers";
 import type { UserAccount } from "@/lib/domain";
 import { createSupabaseServiceClient } from "./supabase";
+import crypto from "crypto";
+
+export function hashPassword(password: string): string {
+  return crypto.createHash("sha256").update(password).digest("hex");
+}
 
 const SESSION_COOKIE = "pt_session";
 

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createSupabaseServiceClient } from "./supabase";
+import crypto from "crypto";
 import type {
   Product,
   ProductVariant,
@@ -28,6 +29,8 @@ export const DEMO_MAPPINGS = {
   }
 };
 
+import { hashPassword } from "./auth";
+
 /**
  * Automatically upsert demo organizations & users to Supabase
  * to ensure that foreign keys are valid when demo accounts place orders.
@@ -47,6 +50,8 @@ export async function bootstrapDemoUsers(supabase = createSupabaseServiceClient(
         id: DEMO_MAPPINGS.users.admin,
         email: "admin@pettravel.vn",
         full_name: "Admin Pet Travel",
+        phone: "0912345678",
+        password_hash: hashPassword("admin123"),
         organization_id: DEMO_MAPPINGS.orgs.internal,
         status: "active"
       },
@@ -54,6 +59,8 @@ export async function bootstrapDemoUsers(supabase = createSupabaseServiceClient(
         id: DEMO_MAPPINGS.users.minh,
         email: "minh@happypaws.vn",
         full_name: "Nguyễn Minh",
+        phone: "0987654321",
+        password_hash: hashPassword("minh123"),
         organization_id: DEMO_MAPPINGS.orgs.happy_paws,
         status: "active"
       },
@@ -61,6 +68,8 @@ export async function bootstrapDemoUsers(supabase = createSupabaseServiceClient(
         id: DEMO_MAPPINGS.users.lan,
         email: "lan@petland.vn",
         full_name: "Trần Ngọc Lan",
+        phone: "0901234567",
+        password_hash: hashPassword("lan123"),
         organization_id: DEMO_MAPPINGS.orgs.petland,
         status: "active"
       }
@@ -345,6 +354,8 @@ export async function getOrders(user: UserAccount): Promise<CustomerOrder[]> {
     recipient_name,
     recipient_phone,
     recipient_address,
+    assigned_staff_id,
+    assigned_staff:app_users!assigned_staff_id(full_name),
     app_users (
       id,
       full_name,
@@ -498,6 +509,8 @@ export async function getOrders(user: UserAccount): Promise<CustomerOrder[]> {
       recipientName: o.recipient_name ?? "",
       recipientPhone: o.recipient_phone ?? "",
       recipientAddress: o.recipient_address ?? "",
+      assignedStaffId: o.assigned_staff_id ?? undefined,
+      assignedStaffName: o.assigned_staff?.full_name ?? undefined,
       items,
       quoteVersions,
       paymentRequests,
@@ -532,6 +545,7 @@ export async function saveOrder(order: CustomerOrder, creatorId: string): Promis
     recipient_name: order.recipientName || null,
     recipient_phone: order.recipientPhone || null,
     recipient_address: order.recipientAddress || null,
+    assigned_staff_id: order.assignedStaffId || null,
     updated_at: new Date().toISOString()
   });
 
@@ -691,4 +705,149 @@ export async function getRolePermissions(): Promise<Record<string, string[]>> {
     customer_owner: ["catalog.read", "order.read"],
     customer_staff: ["catalog.read", "order.read"]
   };
+}
+
+export interface AppUserRow {
+  id: string;
+  email: string;
+  fullName: string;
+  phone: string;
+  avatarUrl: string;
+  role: string;
+  company: string;
+  createdAt: string;
+}
+
+export async function getAppUsers(): Promise<AppUserRow[]> {
+  const supabase = createSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from("app_users")
+    .select(`
+      id,
+      email,
+      full_name,
+      phone,
+      avatar_url,
+      created_at,
+      organizations (
+        name
+      )
+    `)
+    .order("created_at", { ascending: false });
+
+  if (error || !data) return [];
+
+  return data.map((u: any) => {
+    const isAdmin = u.email === "admin@pettravel.vn";
+    return {
+      id: u.id,
+      email: u.email,
+      fullName: u.full_name,
+      phone: u.phone ?? "",
+      avatarUrl: u.avatar_url ?? "",
+      role: isAdmin ? "super_admin" : "customer_owner",
+      company: u.organizations?.name ?? "",
+      createdAt: u.created_at
+    };
+  });
+}
+
+export async function createAppUser(input: {
+  email: string;
+  fullName: string;
+  phone: string;
+  passwordRaw: string;
+  role: string;
+  company?: string;
+}): Promise<void> {
+  const supabase = createSupabaseServiceClient();
+
+  // 1. Check email uniqueness
+  const { data: existingEmail } = await supabase
+    .from("app_users")
+    .select("id")
+    .eq("email", input.email.trim())
+    .maybeSingle();
+
+  if (existingEmail) {
+    throw new Error("Email đã được đăng ký!");
+  }
+
+  // 2. Check phone uniqueness if provided
+  if (input.phone) {
+    const { data: existingPhone } = await supabase
+      .from("app_users")
+      .select("id")
+      .eq("phone", input.phone.trim())
+      .maybeSingle();
+
+    if (existingPhone) {
+      throw new Error("Số điện thoại đã được đăng ký!");
+    }
+  }
+
+  // 3. Handle organization creation
+  let orgId: string | null = null;
+  if (input.company && input.company.trim()) {
+    const companyTrimmed = input.company.trim();
+    const { data: existingOrg } = await supabase
+      .from("organizations")
+      .select("id")
+      .eq("name", companyTrimmed)
+      .maybeSingle();
+
+    if (existingOrg) {
+      orgId = existingOrg.id;
+    } else {
+      const newOrgId = crypto.randomUUID();
+      const { error: orgErr } = await supabase
+        .from("organizations")
+        .insert({ id: newOrgId, name: companyTrimmed });
+      if (orgErr) throw new Error(orgErr.message);
+      orgId = newOrgId;
+    }
+  } else {
+    orgId = DEMO_MAPPINGS.orgs.internal;
+  }
+
+  // 4. Insert user
+  const newUserId = crypto.randomUUID();
+  const { error: userErr } = await supabase.from("app_users").insert({
+    id: newUserId,
+    email: input.email.trim(),
+    full_name: input.fullName.trim(),
+    phone: input.phone.trim(),
+    password_hash: hashPassword(input.passwordRaw),
+    organization_id: orgId,
+    status: "active"
+  });
+
+  if (userErr) throw new Error(userErr.message);
+}
+
+export async function updateUserProfile(
+  userId: string,
+  input: { fullName?: string; avatarUrl?: string; newPasswordRaw?: string }
+): Promise<void> {
+  const supabase = createSupabaseServiceClient();
+  const updateData: Record<string, any> = {};
+
+  if (input.fullName !== undefined) {
+    updateData.full_name = input.fullName.trim();
+  }
+  if (input.avatarUrl !== undefined) {
+    updateData.avatar_url = input.avatarUrl.trim();
+  }
+  if (input.newPasswordRaw) {
+    updateData.password_hash = hashPassword(input.newPasswordRaw);
+  }
+
+  if (Object.keys(updateData).length === 0) return;
+
+  const { error } = await supabase
+    .from("app_users")
+    .update(updateData)
+    .eq("id", userId);
+
+  if (error) throw new Error(error.message);
 }

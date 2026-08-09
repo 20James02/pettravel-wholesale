@@ -176,6 +176,8 @@ export interface CustomerOrder {
   customerName: string;
   customerCompany: string;
   customerId: string;
+  assignedStaffId?: string;
+  assignedStaffName?: string;
   commercialStatus: CommercialStatus;
   paymentStatus: PaymentStatus;
   fulfillmentStatus: FulfillmentStatus;
