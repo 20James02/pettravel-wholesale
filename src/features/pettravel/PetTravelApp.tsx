@@ -2118,9 +2118,14 @@ export function PetTravelApp() {
                     </div>
 
                     {!isLoggedIn ? (
-                      <div className="product-body text-center p-2 flex flex-col justify-between h-full">
-                        <h3 className="m-0 text-xs font-bold text-[#331B08] line-clamp-2 leading-tight">{product.name}</h3>
-                        <span className="text-[9px] text-orange-600 font-bold block mt-1">🐾 Đăng nhập</span>
+                      <div className="product-body p-2 flex flex-col justify-between h-full gap-1">
+                        <div>
+                          <p className="muted m-0 text-[8px] font-mono font-bold leading-none">{product.code}</p>
+                          <h3 className="m-0 text-xs font-bold text-[#331B08] mt-1 line-clamp-2 leading-snug">{product.name}</h3>
+                        </div>
+                        <div className="flex items-center justify-between border-t border-dashed border-orange-100 pt-1.5 mt-auto">
+                          <span className="text-[9px] muted font-bold uppercase">{product.category}</span>
+                        </div>
                       </div>
                     ) : (
                       <div className="product-body p-2 flex flex-col justify-between h-full gap-1">
