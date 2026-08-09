@@ -84,6 +84,7 @@ export async function bootstrapDemoUsers(supabase = createSupabaseServiceClient(
  */
 export async function seedInitialDataIfNeeded() {
   const supabase = createSupabaseServiceClient();
+  await ensureDbInitialized(supabase);
   try {
     // Check if suppliers are empty
     const { count: supCount } = await supabase.from("suppliers").select("id", { count: "exact", head: true });
@@ -851,3 +852,53 @@ export async function updateUserProfile(
 
   if (error) throw new Error(error.message);
 }
+
+let isDbInitialized = false;
+
+export async function ensureDbInitialized(supabase = createSupabaseServiceClient()) {
+  if (isDbInitialized) return;
+  isDbInitialized = true;
+
+  try {
+    const migrationSql = `
+      -- 1. Thêm trường phone, password_hash, và avatar_url vào bảng app_users
+      ALTER TABLE app_users ADD COLUMN IF NOT EXISTS phone text;
+      ALTER TABLE app_users ADD COLUMN IF NOT EXISTS password_hash text;
+      ALTER TABLE app_users ADD COLUMN IF NOT EXISTS avatar_url text;
+
+      -- Tạo ràng buộc UNIQUE cho số điện thoại
+      DO $$
+      BEGIN
+          IF NOT EXISTS (
+              SELECT 1 FROM pg_constraint WHERE conname = 'app_users_phone_key'
+          ) THEN
+              ALTER TABLE app_users ADD CONSTRAINT app_users_phone_key UNIQUE (phone);
+          END IF;
+      END
+      $$;
+
+      -- 2. Thêm trường assigned_staff_id để khóa đơn hàng
+      ALTER TABLE customer_orders ADD COLUMN IF NOT EXISTS assigned_staff_id uuid REFERENCES app_users(id) ON DELETE SET NULL;
+    `;
+
+    // Execute SQL queries via exec_sql RPC
+    const { error: migrationErr } = await supabase.rpc("exec_sql", { sql_query: migrationSql });
+    if (migrationErr) {
+      console.warn("Auto-migration skipped or running manually:", migrationErr.message);
+    } else {
+      // Reload schema cache so PostgREST immediately recognizes the new fields
+      await supabase.rpc("exec_sql", { sql_query: "NOTIFY pgrst, 'reload schema';" });
+      console.log("Database schema successfully auto-updated and PostgREST cache reloaded!");
+    }
+  } catch (err) {
+    console.warn("Auto-migration execution check skipped:", err);
+  }
+
+  // Auto-run bootstrap of demo organizations and accounts
+  try {
+    await bootstrapDemoUsers(supabase);
+  } catch (err) {
+    console.warn("Seeding demo users skipped:", err);
+  }
+}
+

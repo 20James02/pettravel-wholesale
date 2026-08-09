@@ -1,3 +1,14 @@
+-- Create RPC function to allow backend to run auto-migrations and reload cache
+CREATE OR REPLACE FUNCTION exec_sql(sql_query text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    EXECUTE sql_query;
+END;
+$$;
+
 -- 1. Add phone, password_hash, and avatar_url to app_users
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS phone text;
 ALTER TABLE app_users ADD COLUMN IF NOT EXISTS password_hash text;
