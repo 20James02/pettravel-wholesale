@@ -206,7 +206,7 @@ export function PetTravelApp() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedVariantSku, setSelectedVariantSku] = useState<string>("");
   const [modalQty, setModalQty] = useState<number>(1);
-  const [activeGalleryIndex, setActiveGalleryIndex] = useState<number>(0);
+  const [selectedMainImage, setSelectedMainImage] = useState<string>("");
 
   // Chat Popup states
   const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
@@ -4979,114 +4979,140 @@ export function PetTravelApp() {
       </section>
 
       {/* --- CUTE PRODUCT DETAIL MODAL --- */}
-      {selectedProduct && (
-        <div className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6" onClick={() => setSelectedProduct(null)}>
-          <div 
-            className="panel max-w-3xl w-full flex flex-col md:flex-row gap-6 p-6 relative bg-[#FFFDF9] animate-scale-in my-4 sm:my-8"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Close button */}
-            <button 
-              type="button" 
-              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 font-bold hover:bg-orange-200 transition active:scale-90"
-              onClick={() => setSelectedProduct(null)}
+      {selectedProduct && (() => {
+        const productImages = selectedProduct.images && selectedProduct.images.length > 0
+          ? selectedProduct.images
+          : [selectedProduct.imageUrl || "/product-food.svg"];
+
+        const variantImages = selectedProduct.variants
+          .map((v) => v.imageUrl)
+          .filter((url): url is string => Boolean(url && url.trim().length > 0));
+
+        const productGallery = Array.from(new Set([...productImages, ...variantImages]));
+        const currentMainImage = selectedMainImage && productGallery.includes(selectedMainImage)
+          ? selectedMainImage
+          : productGallery[0] || selectedProduct.imageUrl || "/product-food.svg";
+
+        return (
+          <div className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6" onClick={() => {
+            setSelectedProduct(null);
+            setSelectedMainImage("");
+          }}>
+            <div 
+              className="panel max-w-3xl w-full flex flex-col md:flex-row gap-6 p-6 relative bg-[#FFFDF9] animate-scale-in my-4 sm:my-8"
+              onClick={(e) => e.stopPropagation()}
             >
-              ✕
-            </button>
+              {/* Close button */}
+              <button 
+                type="button" 
+                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 font-bold hover:bg-orange-200 transition active:scale-90"
+                onClick={() => {
+                  setSelectedProduct(null);
+                  setSelectedMainImage("");
+                }}
+              >
+                ✕
+              </button>
 
-            {/* Left side: Image gallery */}
-            <div className="flex flex-col gap-3 md:w-1/2">
-              <div className="relative aspect-square w-full rounded-2xl overflow-hidden border-2 border-[#FED7AA] bg-white flex items-center justify-center">
-                <img 
-                  src={
-                    activeGalleryIndex === 0
-                      ? selectedProduct.imageUrl
-                      : activeGalleryIndex === 1
-                      ? "/product-bowl.svg"
-                      : activeGalleryIndex === 2
-                      ? "/product-wipes.svg"
-                      : "/product-bag.svg"
-                  } 
-                  alt={selectedProduct.name} 
-                  className="w-full h-full object-contain p-4" 
-                />
-              </div>
-              <div className="flex gap-2 justify-center">
-                {[selectedProduct.imageUrl, "/product-bowl.svg", "/product-wipes.svg", "/product-bag.svg"].map((img, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    className={`w-12 h-12 rounded-xl overflow-hidden border-2 bg-white p-1 transition ${activeGalleryIndex === idx ? 'border-orange-500 scale-105' : 'border-orange-100 opacity-60'}`}
-                    onClick={() => setActiveGalleryIndex(idx)}
-                  >
-                    <div className="relative w-full h-full">
-                      <img src={img} alt="thumbnail" className="w-full h-full object-contain" />
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Right side: Product details */}
-            <div className="flex flex-col justify-between md:w-1/2">
-              <div className="flex flex-col gap-3">
-                <div>
-                  <span className="bg-orange-100 text-orange-700 text-xs px-2.5 py-0.5 rounded-full font-bold uppercase">
-                    {selectedProduct.category}
-                  </span>
-                  <h2 className="text-xl font-bold text-[#331B08] mt-2 leading-tight">{selectedProduct.name}</h2>
-                  <p className="muted text-xs font-mono font-bold mt-1">Mã sản phẩm: {selectedProduct.code}</p>
+              {/* Left side: Image gallery */}
+              <div className="flex flex-col gap-3 md:w-1/2">
+                <div className="relative aspect-square w-full rounded-2xl overflow-hidden border-2 border-[#FED7AA] bg-white flex items-center justify-center">
+                  <img 
+                    src={currentMainImage} 
+                    alt={selectedProduct.name} 
+                    className="w-full h-full object-contain p-4" 
+                    onError={(e) => {
+                      e.currentTarget.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="%23f97316" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
+                    }}
+                  />
                 </div>
-
-                <div className="tag-list">
-                  {selectedProduct.tags.map((tag) => (
-                    <span className="tag text-xs" key={tag}>{tag}</span>
+                <div className="flex flex-wrap gap-2 justify-center">
+                  {productGallery.map((img, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className={`w-12 h-12 rounded-xl overflow-hidden border-2 bg-white p-1 transition cursor-pointer ${currentMainImage === img ? 'border-orange-500 scale-105 ring-2 ring-orange-200' : 'border-orange-100 opacity-70 hover:opacity-100'}`}
+                      onClick={() => setSelectedMainImage(img)}
+                    >
+                      <div className="relative w-full h-full">
+                        <img 
+                          src={img} 
+                          alt={`thumb-${idx}`} 
+                          className="w-full h-full object-contain" 
+                          onError={(e) => {
+                            e.currentTarget.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="%23f97316" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
+                          }}
+                        />
+                      </div>
+                    </button>
                   ))}
                 </div>
+              </div>
 
-                <p className="text-xs text-[#78350F] leading-relaxed">
-                  Sản phẩm sỉ chất lượng cao cung cấp chính thức bởi hệ sinh thái phân phối Pet Travel. Đảm bảo các tiêu chuẩn an toàn cho thú cưng, đóng gói bền đẹp và hỗ trợ giao nhận toàn quốc nhanh chóng.
-                </p>
-
-                <div className="border-t border-dashed border-orange-100 my-1"></div>
-
-                {/* Pricing and cart controls */}
-                {!isLoggedIn ? (
-                  <div className="p-4 border-2 border-dashed border-amber-200 bg-amber-50/20 rounded-2xl text-center">
-                    <LockKeyhole size={24} className="mx-auto text-amber-500 mb-2" />
-                    <strong className="text-xs text-[#78350F] block">Đại lý vui lòng đăng nhập để xem giá sỉ</strong>
-                    <button 
-                      type="button" 
-                      className="tab-button text-xs py-1.5 px-4 mt-3 bg-orange-500 text-white border-orange-600 hover:bg-orange-600"
-                      onClick={() => {
-                        setSelectedProduct(null);
-                        setMode("guest");
-                      }}
-                    >
-                      Đăng nhập Cổng đại lý
-                    </button>
+              {/* Right side: Product details */}
+              <div className="flex flex-col justify-between md:w-1/2">
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <span className="bg-orange-100 text-orange-700 text-xs px-2.5 py-0.5 rounded-full font-bold uppercase">
+                      {selectedProduct.category}
+                    </span>
+                    <h2 className="text-xl font-bold text-[#331B08] mt-2 leading-tight">{selectedProduct.name}</h2>
+                    <p className="muted text-xs font-mono font-bold mt-1">Mã sản phẩm: {selectedProduct.code}</p>
                   </div>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    {/* Variants selector */}
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-bold text-orange-950/80">Chọn phân loại sản phẩm:</label>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        {selectedProduct.variants.map((v) => (
-                          <button
-                            key={v.id}
-                            type="button"
-                            className={`tab-button min-h-[36px] text-xs ${selectedVariantSku === v.sku ? 'bg-orange-500 text-white border-orange-600' : ''}`}
-                            onClick={() => {
-                              setSelectedVariantSku(v.sku);
-                              setModalQty(v.minOrderQty);
-                            }}
-                          >
-                            {v.label}
-                          </button>
-                        ))}
-                      </div>
+
+                  <div className="tag-list">
+                    {selectedProduct.tags.map((tag) => (
+                      <span className="tag text-xs" key={tag}>{tag}</span>
+                    ))}
+                  </div>
+
+                  <p className="text-xs text-[#78350F] leading-relaxed">
+                    Sản phẩm sỉ chất lượng cao cung cấp chính thức bởi hệ sinh thái phân phối Pet Travel. Đảm bảo các tiêu chuẩn an toàn cho thú cưng, đóng gói bền đẹp và hỗ trợ giao nhận toàn quốc nhanh chóng.
+                  </p>
+
+                  <div className="border-t border-dashed border-orange-100 my-1"></div>
+
+                  {/* Pricing and cart controls */}
+                  {!isLoggedIn ? (
+                    <div className="p-4 border-2 border-dashed border-amber-200 bg-amber-50/20 rounded-2xl text-center">
+                      <LockKeyhole size={24} className="mx-auto text-amber-500 mb-2" />
+                      <strong className="text-xs text-[#78350F] block">Đại lý vui lòng đăng nhập để xem giá sỉ</strong>
+                      <button 
+                        type="button" 
+                        className="tab-button text-xs py-1.5 px-4 mt-3 bg-orange-500 text-white border-orange-600 hover:bg-orange-600"
+                        onClick={() => {
+                          setSelectedProduct(null);
+                          setSelectedMainImage("");
+                          setMode("guest");
+                        }}
+                      >
+                        Đăng nhập Cổng đại lý
+                      </button>
                     </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {/* Variants selector */}
+                      <div className="flex flex-col gap-1">
+                        <label className="text-xs font-bold text-orange-950/80">Chọn phân loại sản phẩm:</label>
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          {selectedProduct.variants.map((v) => (
+                            <button
+                              key={v.id}
+                              type="button"
+                              className={`tab-button min-h-[36px] text-xs ${selectedVariantSku === v.sku ? 'bg-orange-500 text-white border-orange-600' : ''}`}
+                              onClick={() => {
+                                setSelectedVariantSku(v.sku);
+                                setModalQty(v.minOrderQty);
+                                if (v.imageUrl) {
+                                  setSelectedMainImage(v.imageUrl);
+                                }
+                              }}
+                            >
+                              {v.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
 
                     {/* Active variant details */}
                     {(() => {
@@ -5160,7 +5186,8 @@ export function PetTravelApp() {
             </div>
           </div>
         </div>
-      )}
+      );
+    })()}
 
       {/* --- FLOATING CHAT WIDGET --- */}
       {isLoggedIn && (
