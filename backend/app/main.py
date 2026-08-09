@@ -10,6 +10,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
+@app.middleware("http")
+async def vercel_path_rewrite(request: Request, call_next):
+    path = request.scope.get("path", "")
+    if path.startswith("/api/index.py"):
+        request.scope["path"] = path.replace("/api/index.py", "", 1) or "/"
+    elif path == "/api":
+        request.scope["path"] = "/"
+    return await call_next(request)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,18 +28,13 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
-app.include_router(api_router, prefix="/v1")
 
 @app.get("/")
-@app.get("/api")
-@app.get("/api/index.py")
-def read_root(request: Request):
+def read_root():
     return {
         "status": "healthy",
         "service": "pettravel-wholesale-backend",
-        "message": "Welcome to Pet Travel B2B Wholesale API portal!",
-        "path": request.scope.get("path"),
-        "headers": dict(request.headers)
+        "message": "Welcome to Pet Travel B2B Wholesale API portal!"
     }
 
 if __name__ == "__main__":
