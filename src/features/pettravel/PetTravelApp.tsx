@@ -3363,8 +3363,8 @@ export function PetTravelApp() {
 
             {/* Popup Form Modal for adding category */}
             {showCategoryForm && (
-              <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowCategoryForm(false)}>
-                <div className="panel max-w-sm w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in" onClick={(e) => e.stopPropagation()}>
+              <div className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6" onClick={() => setShowCategoryForm(false)}>
+                <div className="panel max-w-sm w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in my-4 sm:my-8" onClick={(e) => e.stopPropagation()}>
                   <div className="flex justify-between items-center border-b pb-2 border-orange-100">
                     <h3 className="text-base font-bold text-orange-950 m-0">Thêm danh mục sỉ mới</h3>
                     <button
@@ -3422,13 +3422,12 @@ export function PetTravelApp() {
             </div>
 
             {/* Form modal/panel */}
-            {/* Form modal/panel */}
             {showSupplierForm && (
-              <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => {
+              <div className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6" onClick={() => {
                 setShowSupplierForm(false);
                 setEditingSupplier(null);
               }}>
-                <div className="panel max-w-2xl w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in" onClick={(e) => e.stopPropagation()}>
+                <div className="panel max-w-2xl w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in my-4 sm:my-8" onClick={(e) => e.stopPropagation()}>
                   <div className="flex justify-between items-center border-b pb-2 border-orange-100">
                     <h3 className="text-base font-bold text-orange-950 m-0">
                       {editingSupplier ? `Cập nhật nhà cung cấp: ${editingSupplier.name}` : "Thêm nhà cung cấp sỉ mới"}
@@ -3838,10 +3837,10 @@ export function PetTravelApp() {
 
             {/* Popup Form Modal for creating document */}
             {showOperationsForm && (
-              <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowOperationsForm(false)}>
+              <div className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6" onClick={() => setShowOperationsForm(false)}>
                 <form
                   onSubmit={handleCreateOperationsDocument}
-                  className="panel max-w-lg w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in max-h-[90vh] overflow-y-auto"
+                  className="panel max-w-lg w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in my-4 sm:my-8"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex justify-between items-center border-b pb-2 border-orange-100">
@@ -4648,8 +4647,8 @@ export function PetTravelApp() {
 
             {/* Popup Form Modal for creating user */}
             {showUserForm && (
-              <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowUserForm(false)}>
-                <div className="panel max-w-md w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6" onClick={() => setShowUserForm(false)}>
+                <div className="panel max-w-md w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in my-4 sm:my-8" onClick={(e) => e.stopPropagation()}>
                   <div className="flex justify-between items-center border-b pb-2 border-orange-100">
                     <h3 className="text-base font-bold text-orange-950 m-0">Tạo tài khoản thành viên mới</h3>
                     <button
@@ -4793,8 +4792,8 @@ export function PetTravelApp() {
 
             {/* Popup Form Modal for Promotions config */}
             {showPromotionsForm && (
-              <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowPromotionsForm(false)}>
-                <div className="panel max-w-lg w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6" onClick={() => setShowPromotionsForm(false)}>
+                <div className="panel max-w-lg w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in my-4 sm:my-8" onClick={(e) => e.stopPropagation()}>
                   <div className="flex justify-between items-center border-b pb-2 border-orange-100">
                     <h3 className="text-base font-bold text-orange-950 m-0">Cấu hình Khuyến mãi & Chỉ số mặc định</h3>
                     <button
@@ -4913,9 +4912,9 @@ export function PetTravelApp() {
 
       {/* --- CUTE PRODUCT DETAIL MODAL --- */}
       {selectedProduct && (
-        <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setSelectedProduct(null)}>
+        <div className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6" onClick={() => setSelectedProduct(null)}>
           <div 
-            className="panel max-w-3xl w-full flex flex-col md:flex-row gap-6 p-6 relative overflow-hidden bg-[#FFFDF9] animate-scale-in"
+            className="panel max-w-3xl w-full flex flex-col md:flex-row gap-6 p-6 relative bg-[#FFFDF9] animate-scale-in my-4 sm:my-8"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Close button */}
@@ -5242,9 +5241,9 @@ export function PetTravelApp() {
 
       {/* --- ADD / EDIT PRODUCT FORM MODAL --- */}
       {showProductForm && (
-        <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowProductForm(false)}>
+        <div className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6" onClick={() => setShowProductForm(false)}>
           <div 
-            className="panel max-w-2xl w-full flex flex-col gap-4 p-6 relative overflow-hidden bg-[#FFFDF9] animate-scale-in max-h-[95vh] overflow-y-auto"
+            className="panel max-w-2xl w-full flex flex-col gap-4 p-6 relative bg-[#FFFDF9] animate-scale-in my-4 sm:my-8"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Close button */}
@@ -5458,7 +5457,14 @@ export function PetTravelApp() {
                         <label className="text-[10px] font-bold text-orange-900/70 uppercase">Ảnh</label>
                         <div className="relative w-11 h-11 border border-orange-200 rounded-lg overflow-hidden bg-[#FFFBEB] flex items-center justify-center cursor-pointer group/img">
                           {v.imageUrl ? (
-                            <img src={v.imageUrl} alt="Variant" className="w-full h-full object-cover" />
+                            <img 
+                              src={v.imageUrl} 
+                              alt="Variant" 
+                              className="w-full h-full object-cover" 
+                              onError={(e) => {
+                                e.currentTarget.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="%23f97316" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
+                              }}
+                            />
                           ) : (
                             <span className="text-[8px] text-orange-800/60 font-bold text-center px-1">Chọn ảnh</span>
                           )}
@@ -5640,10 +5646,11 @@ export function PetTravelApp() {
                         await fetchProducts();
                         setShowProductForm(false);
                       } else {
-                        alert("Lỗi khi lưu sản phẩm.");
+                        const errData = await res.json();
+                        alert(errData.error || "Lỗi khi lưu sản phẩm.");
                       }
-                    } catch {
-                      alert("Lỗi kết nối máy chủ.");
+                    } catch (err: any) {
+                      alert(`Lỗi kết nối máy chủ: ${err.message || "Không thể thực hiện yêu cầu."}`);
                     }
                   }}
                 >
@@ -5657,9 +5664,9 @@ export function PetTravelApp() {
 
       {/* --- E. CUSTOMER CHECKOUT INFO MODAL --- */}
       {showCheckoutModal && (
-        <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowCheckoutModal(false)}>
+        <div className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6" onClick={() => setShowCheckoutModal(false)}>
           <div 
-            className="panel max-w-md w-full flex flex-col gap-4 p-6 relative overflow-hidden bg-[#FFFDF9] animate-scale-in"
+            className="panel max-w-md w-full flex flex-col gap-4 p-6 relative bg-[#FFFDF9] animate-scale-in my-4 sm:my-8"
             onClick={(e) => e.stopPropagation()}
           >
             <button 
@@ -5732,9 +5739,9 @@ export function PetTravelApp() {
       )}
       {/* --- CUTE CREDENTIALS LOGIN MODAL --- */}
       {showLoginModal && (
-        <div className="fixed inset-0 z-1000 flex items-center justify-center p-4 bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in" onClick={() => setShowLoginModal(false)}>
+        <div className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6" onClick={() => setShowLoginModal(false)}>
           <div 
-            className="panel max-w-sm w-full flex flex-col gap-4 p-6 relative overflow-hidden bg-[#FFFDF9] animate-scale-in"
+            className="panel max-w-sm w-full flex flex-col gap-4 p-6 relative bg-[#FFFDF9] animate-scale-in my-4 sm:my-8"
             onClick={(e) => e.stopPropagation()}
           >
             <button 

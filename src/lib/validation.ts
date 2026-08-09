@@ -133,7 +133,8 @@ export const productVariantSchema = z.object({
   wholesalePrice: vndAmountSchema("Giá sỉ", 10_000_000_000),
   minOrderQty: positiveIntegerSchema("Số lượng tối thiểu", 100_000),
   stock: nonNegativeIntegerSchema("Tồn kho", 1_000_000),
-  supplierId: idSchema
+  supplierId: idSchema,
+  imageUrl: z.string().trim().optional().or(z.literal(""))
 });
 
 export const productSchema = z.object({

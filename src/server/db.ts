@@ -500,15 +500,43 @@ export async function saveProduct(product: Product): Promise<void> {
 
   // 2. Upsert variants and offers
   for (const v of product.variants) {
-    const { error: varErr } = await supabase.from("product_variants").upsert({
-      id: v.id,
-      product_id: product.id,
-      sku: v.sku,
-      label: v.label,
-      image_url: v.imageUrl || null,
-      active: true
-    });
-    if (varErr) throw new Error(varErr.message);
+    try {
+      const { error: varErr } = await supabase.from("product_variants").upsert({
+        id: v.id,
+        product_id: product.id,
+        sku: v.sku,
+        label: v.label,
+        image_url: v.imageUrl || null,
+        active: true
+      });
+      if (varErr) throw varErr;
+    } catch (err: any) {
+      const isMissingColError = err.message && (
+        err.message.includes("image_url") || 
+        err.message.includes("does not exist") || 
+        err.message.includes("column")
+      );
+      if (isMissingColError) {
+        console.log("Self-healing DB: Missing variant image_url column on database. Running force sync migration...");
+        try {
+          await ensureDbInitialized(supabase, true);
+          // Retry upsert
+          const { error: retryErr } = await supabase.from("product_variants").upsert({
+            id: v.id,
+            product_id: product.id,
+            sku: v.sku,
+            label: v.label,
+            image_url: v.imageUrl || null,
+            active: true
+          });
+          if (retryErr) throw retryErr;
+        } catch (migErr: any) {
+          throw new Error(`Lỗi nâng cấp database tự động: ${migErr.message}. Lỗi gốc: ${err.message}`);
+        }
+      } else {
+        throw new Error(err.message || String(err));
+      }
+    }
 
     const { error: offerErr } = await supabase.from("supplier_offers").upsert({
       supplier_id: v.supplierId || "sup_pettravel",
@@ -1119,12 +1147,11 @@ export async function updateUserProfile(
 
 let isDbInitialized = false;
 
-export async function ensureDbInitialized(supabase = createSupabaseServiceClient()) {
-  if (process.env.NODE_ENV === "production" || process.env.ALLOW_RUNTIME_MIGRATIONS !== "true") {
+export async function ensureDbInitialized(supabase = createSupabaseServiceClient(), forceRun = false) {
+  if (!forceRun && isDbInitialized) return;
+  if (!forceRun && (process.env.NODE_ENV === "production" || process.env.ALLOW_RUNTIME_MIGRATIONS !== "true")) {
     return;
   }
-
-  if (isDbInitialized) return;
   isDbInitialized = true;
 
   const migrationSql = `
