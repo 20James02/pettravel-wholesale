@@ -6,25 +6,37 @@ import { createSupabaseServiceClient } from "./supabase";
 import crypto from "crypto";
 
 export function hashPassword(password: string): string {
-  return crypto.createHash("sha256").update(password).digest("hex");
+  // PBKDF2-SHA512 with iterations and pepper for enterprise security
+  const pepper = process.env.PASSWORD_PEPPER || "pettravel_secret_pepper_2026";
+  return crypto.pbkdf2Sync(password, pepper, 1000, 64, "sha512").toString("hex");
 }
 
 const SESSION_COOKIE = "pt_session";
 
 /**
- * Encode a simple session token (demo only — replace with JWT/Supabase Auth later).
- * Format: base64(userId)
+ * Encode a session token using HMAC-SHA256 signature to prevent tampering.
+ * Format: userId.signature
  */
 export function encodeSession(userId: string): string {
-  return Buffer.from(userId, "utf-8").toString("base64url");
+  const secret = process.env.JWT_SECRET || "pettravel_secret_session_key_2026";
+  const signature = crypto.createHmac("sha256", secret).update(userId).digest("base64url");
+  return `${userId}.${signature}`;
 }
 
 /**
- * Decode a session token back to userId.
+ * Decode and verify the session token's signature.
  */
 function decodeSession(token: string): string | null {
   try {
-    return Buffer.from(token, "base64url").toString("utf-8");
+    const parts = token.split(".");
+    if (parts.length !== 2) return null;
+    const [userId, signature] = parts;
+    const secret = process.env.JWT_SECRET || "pettravel_secret_session_key_2026";
+    const expectedSignature = crypto.createHmac("sha256", secret).update(userId).digest("base64url");
+    if (signature === expectedSignature) {
+      return userId;
+    }
+    return null;
   } catch {
     return null;
   }
