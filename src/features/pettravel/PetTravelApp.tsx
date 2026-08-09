@@ -1214,6 +1214,45 @@ export function PetTravelApp() {
     await syncOrder(updatedOrder);
   }
 
+  async function handleStockReservationAction(
+    action: "reserve_order" | "release_order" | "expire_order" | "consume_order" | "cancel_order"
+  ) {
+    if (!workingOrder?.id) return;
+
+    const expiresAt = action === "reserve_order"
+      ? new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString()
+      : undefined;
+    const reasonMap: Record<typeof action, string> = {
+      reserve_order: "Giữ hàng 72 giờ sau khi đơn được chốt.",
+      release_order: "Nhả giữ hàng thủ công bởi Admin.",
+      expire_order: "Đánh dấu giữ hàng hết hạn.",
+      consume_order: "Chốt giữ hàng sau khi xuất kho/giao hàng.",
+      cancel_order: "Hủy giữ hàng theo trạng thái đơn."
+    };
+
+    try {
+      const res = await fetch("/api/admin/operations/reservations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          orderId: workingOrder.id,
+          expiresAt,
+          reason: reasonMap[action]
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Không thể xử lý giữ hàng.");
+        return;
+      }
+      await Promise.all([fetchOperationsOverview(), fetchReportsOverview()]);
+      alert(`Đã xử lý giữ hàng: ${data.result?.status || "ok"} (${data.result?.lineCount ?? 0} dòng).`);
+    } catch {
+      alert("Không thể kết nối máy chủ khi xử lý giữ hàng.");
+    }
+  }
+
   // Shopping Cart handlers
   function addToCart(variantSku: string, productCode: string, productName: string, variantLabel: string, price: number, supplierId: string, qty: number = 1) {
     setCartItems((prev) => {
@@ -2859,6 +2898,37 @@ export function PetTravelApp() {
                       >
                         <Truck size={15} /> Bàn giao GHN (Mã vận đơn)
                       </button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          className="tab-button text-[10px] py-2 justify-center border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 cursor-pointer font-bold rounded-xl"
+                          disabled={!["customer_accepted", "locked"].includes(workingOrder.commercialStatus)}
+                          onClick={() => handleStockReservationAction("reserve_order")}
+                        >
+                          <LockKeyhole size={13} /> Giữ hàng 72h
+                        </button>
+                        <button
+                          type="button"
+                          className="tab-button text-[10px] py-2 justify-center border-orange-200 bg-orange-50 text-orange-800 hover:bg-orange-100 cursor-pointer font-bold rounded-xl"
+                          onClick={() => handleStockReservationAction("release_order")}
+                        >
+                          Nhả giữ hàng
+                        </button>
+                        <button
+                          type="button"
+                          className="tab-button text-[10px] py-2 justify-center border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 cursor-pointer font-bold rounded-xl"
+                          onClick={() => handleStockReservationAction("expire_order")}
+                        >
+                          Hết hạn giữ
+                        </button>
+                        <button
+                          type="button"
+                          className="tab-button text-[10px] py-2 justify-center border-green-200 bg-green-50 text-green-800 hover:bg-green-100 cursor-pointer font-bold rounded-xl"
+                          onClick={() => handleStockReservationAction("consume_order")}
+                        >
+                          Chốt đã xuất
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </aside>

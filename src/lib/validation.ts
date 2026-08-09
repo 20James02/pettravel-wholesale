@@ -204,6 +204,24 @@ export const operationsDocumentSchema = z.object({
   }
 });
 
+export const stockReservationCommandSchema = z.object({
+  action: z.enum(["reserve_order", "release_order", "expire_order", "consume_order", "cancel_order"]),
+  orderId: idSchema,
+  expiresAt: z.string().datetime("Thời hạn giữ hàng không hợp lệ.").optional(),
+  reason: z.string().trim().max(300, "Lý do xử lý giữ hàng không được vượt quá 300 ký tự.").optional().or(z.literal(""))
+}).superRefine((value, ctx) => {
+  if (value.action === "reserve_order" && value.expiresAt) {
+    const expiresAt = new Date(value.expiresAt).getTime();
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Thời hạn giữ hàng phải nằm trong tương lai.",
+        path: ["expiresAt"]
+      });
+    }
+  }
+});
+
 export const getValidationErrorMessage = (error: unknown, fallback = "Dữ liệu nhập không hợp lệ."): string => {
   if (error instanceof z.ZodError) {
     return error.issues[0]?.message ?? fallback;
