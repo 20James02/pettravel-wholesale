@@ -164,6 +164,31 @@ async def ensure_db_initialized(db: AsyncSession):
         
     _db_initialized = True
 
+@router.get("/debug-db")
+async def debug_db(db: AsyncSession = Depends(get_db)):
+    import traceback
+    from sqlalchemy import text
+    from app.core.db import engine
+    
+    info = {}
+    try:
+        from app.core.config import settings
+        db_url = settings.async_database_url
+        if "@" in db_url:
+            masked_url = db_url.split("@")[0].split(":")[0] + "://***:***@" + db_url.split("@")[1]
+        else:
+            masked_url = db_url
+        info["database_url_configured"] = masked_url
+        
+        result = await db.execute(text("SELECT 1"))
+        val = result.scalar()
+        info["connection_test"] = f"Success: {val}"
+    except Exception as e:
+        info["error"] = str(e)
+        info["traceback"] = traceback.format_exc()
+        
+    return info
+
 @router.get("/", response_model=List[Dict[str, Any]])
 async def get_products(role: str = "guest", db: AsyncSession = Depends(get_db)):
     """
