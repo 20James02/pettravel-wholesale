@@ -117,7 +117,8 @@ async def delete_product(code: str, db: AsyncSession = Depends(get_db)):
     """
     Xóa một sản phẩm dựa trên code.
     """
-    res = await db.execute(select(Product).filter(Product.code == code))
+    clean_code = code[2:] if code.startswith("p_") else code
+    res = await db.execute(select(Product).filter((Product.code == code) | (Product.code == clean_code)))
     product = res.scalars().first()
     if not product:
         raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm.")
