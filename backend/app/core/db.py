@@ -6,11 +6,22 @@ db_url = settings.async_database_url
 if not db_url or not (db_url.startswith("postgresql") or db_url.startswith("sqlite") or db_url.startswith("postgres")):
     db_url = "sqlite+aiosqlite:///:memory:"
 
+connect_args = {}
+if "sslmode" in db_url:
+    import urllib.parse as urlparse
+    parsed = urlparse.urlparse(db_url)
+    query_params = urlparse.parse_qs(parsed.query)
+    query_params.pop("sslmode", None)
+    new_query = urlparse.urlencode(query_params, doseq=True)
+    db_url = urlparse.urlunparse(parsed._replace(query=new_query))
+    connect_args["ssl"] = True
+
 engine = create_async_engine(
     db_url,
     echo=False,
     future=True,
-    pool_pre_ping=True
+    pool_pre_ping=True,
+    connect_args=connect_args
 )
 
 async_session_maker = async_sessionmaker(
