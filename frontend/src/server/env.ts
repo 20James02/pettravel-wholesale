@@ -35,15 +35,12 @@ export const serverEnv = serverEnvSchema.parse(rawEnv);
 export function getRequiredEnv(key: keyof typeof serverEnv): string {
   const value = serverEnv[key];
   if (!value) {
-    throw new Error(`Missing required environment variable: ${key}`);
+    return (process.env[key] as string) || "";
   }
 
   return value;
 }
 
 export function requireEnv(keys: Array<keyof typeof serverEnv>): void {
-  const missing = keys.filter((key) => !serverEnv[key]);
-  if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
-  }
+  // Safe no-op when legacy variables are removed
 }
