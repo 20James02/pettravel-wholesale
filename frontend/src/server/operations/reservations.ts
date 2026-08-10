@@ -1,7 +1,6 @@
 import "server-only";
 
 import type { UserAccount } from "@/lib/domain";
-import { createSupabaseServiceClient } from "@/server/supabase";
 
 export type StockReservationAction =
   | "reserve_order"
@@ -25,45 +24,42 @@ export interface StockReservationCommandResult {
   documentId?: string;
 }
 
-function normalizeRpcResult(value: unknown): StockReservationCommandResult {
-  const result = (value ?? {}) as Record<string, unknown>;
-  return {
-    status: String(result.status ?? "unknown"),
-    reservedQty: result.reservedQty === undefined ? undefined : Number(result.reservedQty),
-    releasedQty: result.releasedQty === undefined ? undefined : Number(result.releasedQty),
-    lineCount: Number(result.lineCount ?? 0),
-    documentId: result.documentId === undefined || result.documentId === null ? undefined : String(result.documentId)
-  };
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+async function backendFetch(path: string, options: RequestInit = {}) {
+  const url = `${BACKEND_URL}${path}`;
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    }
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Backend error: ${response.status} - ${text}`);
+  }
+  return response.json();
 }
 
 export async function runStockReservationCommand(
   input: StockReservationCommand,
   user: UserAccount
 ): Promise<StockReservationCommandResult> {
-  const supabase = createSupabaseServiceClient();
-
-  if (input.action === "reserve_order") {
-    const { data, error } = await supabase.rpc("pt_reserve_order_stock", {
-      p_order_id: input.orderId,
-      p_actor_id: user.id,
-      p_expires_at: input.expiresAt ?? null
-    });
-
-    if (error) {
-      throw new Error(error.message);
-    }
-    return normalizeRpcResult(data);
-  }
-
-  const { data, error } = await supabase.rpc("pt_transition_order_stock_reservations", {
-    p_order_id: input.orderId,
-    p_actor_id: user.id,
-    p_action: input.action,
-    p_reason: input.reason || input.action
+  const res = await backendFetch(`/api/v1/operations/reservation`, {
+    method: "POST",
+    body: JSON.stringify({
+      ...input,
+      actorId: user.id
+    })
   });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-  return normalizeRpcResult(data);
+  
+  const result = res.result || {};
+  return {
+    status: String(result.status || res.status || "unknown"),
+    reservedQty: result.reservedQty === undefined ? undefined : Number(result.reservedQty),
+    releasedQty: result.releasedQty === undefined ? undefined : Number(result.releasedQty),
+    lineCount: Number(result.lineCount || 0),
+    documentId: result.documentId === undefined || result.documentId === null ? undefined : String(result.documentId)
+  };
 }

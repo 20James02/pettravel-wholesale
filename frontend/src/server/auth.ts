@@ -3,7 +3,6 @@ import "server-only";
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import type { PermissionKey, RoleKey, UserAccount } from "@/lib/domain";
-import { createSupabaseServiceClient } from "./supabase";
 
 const SESSION_COOKIE = "pt_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
@@ -204,7 +203,6 @@ export function requireSameOrigin(request: Request): void {
     });
   }
 }
-
 export async function getSessionUser(): Promise<UserAccount | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
@@ -213,42 +211,19 @@ export async function getSessionUser(): Promise<UserAccount | null> {
   const userId = decodeSession(token);
   if (!userId) return null;
 
+  const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   try {
-    const supabase = createSupabaseServiceClient();
-    const { data, error } = await supabase
-      .from("app_users")
-      .select(
-        `
-        id,
-        full_name,
-        email,
-        organization_id,
-        organizations (
-          name
-        ),
-        user_roles (
-          roles (
-            key
-          )
-        )
-      `
-      )
-      .eq("id", userId)
-      .eq("status", "active")
-      .single();
-
-    if (error || !data) return null;
-
-    const row = data as SessionUserRow;
-    const org = relationOne(row.organizations);
-    const role = roleFromSessionRow(row);
+    const res = await fetch(`${BACKEND_URL}/api/v1/users/by-id/${userId}`);
+    if (!res.ok) return null;
+    const row = await res.json();
+    const role = row.role as RoleKey;
     const isAdmin = INTERNAL_ROLE_KEYS.has(role);
 
     return {
       id: row.id,
-      name: row.full_name,
-      company: org?.name ?? "",
-      organizationId: row.organization_id ?? undefined,
+      name: row.name,
+      company: row.company,
+      organizationId: undefined,
       email: row.email,
       role,
       isAdmin
@@ -257,7 +232,6 @@ export async function getSessionUser(): Promise<UserAccount | null> {
     return null;
   }
 }
-
 export async function requireAuth(): Promise<UserAccount> {
   const user = await getSessionUser();
   if (!user) {

@@ -78,3 +78,20 @@ async def update_user_profile(payload: Dict[str, Any], db: AsyncSession = Depend
         
     await db.commit()
     return {"status": "success", "message": "Cập nhật hồ sơ thành công."}
+
+@router.get("/by-id/{user_id}", response_model=Dict[str, Any])
+async def get_user_by_id(user_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).filter(User.id == user_id))
+    u = result.scalars().first()
+    if not u:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.")
+    return {
+        "id": u.id,
+        "name": u.name,
+        "email": u.email,
+        "phone": u.phone or "",
+        "role": u.role,
+        "company": u.company or "",
+        "createdAt": u.created_at.isoformat() if u.created_at else None
+    }
+

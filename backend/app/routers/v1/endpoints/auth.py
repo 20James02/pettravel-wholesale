@@ -8,11 +8,16 @@ from app.core.security import verify_password, get_password_hash, create_access_
 from app.core.config import settings
 from app.models.wholesale import User
 from app.schemas.wholesale import UserCreate, UserResponse, UserBase
+from pydantic import BaseModel
 import uuid
 
 router = APIRouter()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
+
+class LoginJsonInput(BaseModel):
+    email: str
+    password: str
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
@@ -53,3 +58,31 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
         subject=user.id, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+@router.post("/login-json")
+async def login_json(payload: LoginJsonInput, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).filter(User.email == payload.email))
+    user = result.scalars().first()
+    if not user or not verify_password(payload.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sai email hoặc mật khẩu đăng nhập."
+        )
+    
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        subject=user.id, expires_delta=access_token_expires
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "phone": user.phone or "",
+            "role": user.role,
+            "company": user.company or ""
+        }
+    }
+

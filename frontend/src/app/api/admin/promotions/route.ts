@@ -1,9 +1,26 @@
 import { NextResponse } from "next/server";
 import { requireAdmin, requirePermission, requireSameOrigin } from "@/server/auth";
-import { createSupabaseServiceClient } from "@/server/supabase";
 import { getValidationErrorMessage, promotionsPolicySchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
+
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+async function backendFetch(path: string, options: RequestInit = {}) {
+  const url = `${BACKEND_URL}${path}`;
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    }
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Backend error: ${response.status} - ${text}`);
+  }
+  return response.json();
+}
 
 export async function GET() {
   try {
@@ -13,14 +30,10 @@ export async function GET() {
     return NextResponse.json({ error: "Lỗi xác thực." }, { status: 403 });
   }
 
-  const supabase = createSupabaseServiceClient();
-  const { data, error } = await supabase
-    .from("app_settings")
-    .select("value")
-    .eq("key", "admin_policy")
-    .maybeSingle();
-
-  if (error || !data) {
+  try {
+    const data = await backendFetch(`/api/v1/categories/policy`);
+    return NextResponse.json({ policy: data });
+  } catch (error) {
     return NextResponse.json({
       policy: {
         freeShippingThreshold: 5000000,
@@ -32,8 +45,6 @@ export async function GET() {
       }
     });
   }
-
-  return NextResponse.json({ policy: data.value });
 }
 
 export async function PUT(request: Request) {
@@ -47,18 +58,14 @@ export async function PUT(request: Request) {
 
   try {
     const payload = promotionsPolicySchema.parse(await request.json());
-    const supabase = createSupabaseServiceClient();
-
-    const { error } = await supabase.from("app_settings").upsert({
-      key: "admin_policy",
-      value: payload
+    await backendFetch(`/api/v1/categories/policy`, {
+      method: "POST",
+      body: JSON.stringify(payload)
     });
-
-    if (error) throw new Error(error.message);
-
     return NextResponse.json({ success: true, policy: payload });
   } catch (error) {
     const msg = getValidationErrorMessage(error, "Dữ liệu cấu hình không hợp lệ.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
+

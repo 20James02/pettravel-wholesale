@@ -1,8 +1,6 @@
 import "server-only";
 
-import { createSupabaseServiceClient } from "./supabase";
 import crypto from "crypto";
-import { Client } from "pg";
 import type {
   Product,
   ProductVariant,

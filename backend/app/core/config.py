@@ -12,6 +12,14 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/pettravel"
     
+    # Cloudflare R2
+    R2_ACCOUNT_ID: str = ""
+    R2_ACCESS_KEY_ID: str = ""
+    R2_SECRET_ACCESS_KEY: str = ""
+    R2_BUCKET: str = "pettravel-wholesale"
+    R2_PUBLIC_BASE_URL: str = "https://pub-example.r2.dev"
+
+    
     @property
     def async_database_url(self) -> str:
         url = self.DATABASE_URL

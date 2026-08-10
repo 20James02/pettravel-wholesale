@@ -1,7 +1,6 @@
 import "server-only";
 
 import type { UserAccount } from "@/lib/domain";
-import { createSupabaseServiceClient } from "@/server/supabase";
 
 export type AccountingOrderPostingMode = "post_all" | "post_confirmed_payments" | "recognize_sale";
 

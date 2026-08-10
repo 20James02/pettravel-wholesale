@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getOrders } from "@/server/db";
-import { createR2UploadUrl } from "@/server/r2";
 import { hasPermission, requireAuth, requireSameOrigin } from "@/server/auth";
 import { getValidationErrorMessage } from "@/lib/validation";
 
@@ -36,10 +35,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Khong co quyen upload vao don hang nay." }, { status: 403 });
     }
 
-    const result = await createR2UploadUrl(payload);
-    const publicBaseUrl = process.env.R2_PUBLIC_BASE_URL || "https://pub-example.r2.dev";
-    const publicUrl = `${publicBaseUrl}/${result.key}`;
-    return NextResponse.json({ ...result, publicUrl });
+    const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const res = await fetch(`${BACKEND_URL}/api/v1/uploads/presign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return NextResponse.json({ error: `Backend error: ${res.status} - ${text}` }, { status: res.status });
+    }
+
+    const data = await res.json();
+    return NextResponse.json(data);
   } catch (error) {
     const message = getValidationErrorMessage(error, "Không thể tạo đường dẫn upload.");
     return NextResponse.json({ error: message }, { status: 400 });

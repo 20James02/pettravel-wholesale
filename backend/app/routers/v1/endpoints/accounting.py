@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import func
 from typing import Dict, Any, List
 from app.core.db import get_db
-from app.models.wholesale import JournalEntry, JournalLine
+from app.models.wholesale import JournalEntry, JournalLine, AccountingPeriod
 from app.services.accounting import post_order_sales_and_cost, post_order_deposit_receipt
 
 router = APIRouter()
@@ -103,3 +104,67 @@ async def manual_order_posting(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         raise HTTPException(status_code=500, detail="Lỗi hệ thống khi ghi sổ kế toán.")
+
+@router.get("/overview", response_model=Dict[str, Any])
+async def get_accounting_overview(
+    user_id: str = None,
+    org_id: str = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Truy xuất tổng hợp hoạt động kế toán.
+    """
+    # 1. Đếm chu kỳ kế toán
+    period_total_query = select(func.count()).select_from(AccountingPeriod)
+    if org_id:
+        period_total_query = period_total_query.filter(AccountingPeriod.organization_id == org_id)
+    
+    period_open_query = select(func.count()).select_from(AccountingPeriod).filter(AccountingPeriod.status == "open")
+    if org_id:
+        period_open_query = period_open_query.filter(AccountingPeriod.organization_id == org_id)
+        
+    period_closed_query = select(func.count()).select_from(AccountingPeriod).filter(AccountingPeriod.status == "closed")
+    if org_id:
+        period_closed_query = period_closed_query.filter(AccountingPeriod.organization_id == org_id)
+        
+    # 2. Đếm bút toán
+    draft_query = select(func.count()).select_from(JournalEntry).filter(JournalEntry.status == "draft")
+    posted_query = select(func.count()).select_from(JournalEntry).filter(JournalEntry.status == "posted")
+    void_query = select(func.count()).select_from(JournalEntry).filter(JournalEntry.status == "void")
+    
+    # 3. Lấy 10 bút toán gần nhất
+    recent_query = select(JournalEntry).order_by(JournalEntry.created_at.desc()).limit(10)
+    
+    r_period_total = await db.execute(period_total_query)
+    r_period_open = await db.execute(period_open_query)
+    r_period_closed = await db.execute(period_closed_query)
+    
+    r_draft = await db.execute(draft_query)
+    r_posted = await db.execute(posted_query)
+    r_void = await db.execute(void_query)
+    
+    r_recent = await db.execute(recent_query)
+    recent_entries = r_recent.scalars().all()
+    
+    return {
+        "periodsTotal": r_period_total.scalar() or 0,
+        "openPeriods": r_period_open.scalar() or 0,
+        "closedPeriods": r_period_closed.scalar() or 0,
+        "draftEntries": r_draft.scalar() or 0,
+        "postedEntries": r_posted.scalar() or 0,
+        "voidEntries": r_void.scalar() or 0,
+        "recentEntries": [
+            {
+                "id": e.id,
+                "entryNo": e.entry_no,
+                "description": e.description,
+                "status": e.status,
+                "sourceType": e.source_type,
+                "sourceId": e.source_id,
+                "createdAt": e.created_at.isoformat(),
+                "postedAt": e.posted_at.isoformat() if e.posted_at else None
+            }
+            for e in recent_entries
+        ]
+    }
+
