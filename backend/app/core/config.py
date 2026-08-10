@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/pettravel"
     
+    @property
+    def jwt_secret(self) -> str:
+        import os
+        return os.getenv("JWT_SECRET") or os.getenv("SECRET_KEY") or self.SECRET_KEY
+
     # Cloudflare R2
     R2_ACCOUNT_ID: str = ""
     R2_ACCESS_KEY_ID: str = ""
@@ -19,10 +24,15 @@ class Settings(BaseSettings):
     R2_BUCKET: str = "pettravel-wholesale"
     R2_PUBLIC_BASE_URL: str = "https://pub-example.r2.dev"
 
-    
     @property
     def async_database_url(self) -> str:
-        url = self.DATABASE_URL
+        import os
+        url = (
+            os.getenv("DATABASE_URL")
+            or os.getenv("POSTGRES_URL")
+            or os.getenv("SUPABASE_DB_URL")
+            or self.DATABASE_URL
+        )
         if url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         elif url.startswith("postgres://"):
