@@ -50,6 +50,37 @@ def read_root():
         "message": "Welcome to Pet Travel B2B Wholesale API portal!"
     }
 
+@app.get("/debug-db")
+async def debug_db():
+    import traceback
+    from sqlalchemy import text
+    from app.core.db import engine
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    
+    info = {}
+    try:
+        from app.core.config import settings
+        db_url = settings.async_database_url
+        if "@" in db_url:
+            masked_url = db_url.split("@")[0].split(":")[0] + "://***:***@" + db_url.split("@")[1]
+        else:
+            masked_url = db_url
+        info["database_url_configured"] = masked_url
+        
+        async_session = sessionmaker(
+            engine, class_=AsyncSession, expire_on_commit=False
+        )
+        async with async_session() as db:
+            result = await db.execute(text("SELECT 1"))
+            val = result.scalar()
+            info["connection_test"] = f"Success: {val}"
+    except Exception as e:
+        info["error"] = str(e)
+        info["traceback"] = traceback.format_exc()
+        
+    return info
+
 @app.get("/debug")
 def debug_path(request: Request):
     return {
