@@ -174,11 +174,17 @@ async def debug_db(db: AsyncSession = Depends(get_db)):
     try:
         from app.core.config import settings
         db_url = settings.async_database_url
-        if "@" in db_url:
-            masked_url = db_url.split("@")[0].split(":")[0] + "://***:***@" + db_url.split("@")[1]
+        # Extract hostname and port safely even if there are multiple @ symbols
+        host_part = db_url.split("@")[-1]
+        host_and_port = host_part.split("/")[0]
+        if ":" in host_and_port:
+            hostname = host_and_port.split(":")[0]
+            port = host_and_port.split(":")[1]
         else:
-            masked_url = db_url
-        info["database_url_configured"] = masked_url
+            hostname = host_and_port
+            port = "5432"
+        info["parsed_hostname"] = hostname
+        info["parsed_port"] = port
         
         result = await db.execute(text("SELECT 1"))
         val = result.scalar()
