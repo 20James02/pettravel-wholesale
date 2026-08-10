@@ -7,13 +7,10 @@ if not db_url or not (db_url.startswith("postgresql") or db_url.startswith("sqli
     db_url = "sqlite+aiosqlite:///:memory:"
 
 connect_args = {}
-if "sslmode" in db_url:
-    import urllib.parse as urlparse
-    parsed = urlparse.urlparse(db_url)
-    query_params = urlparse.parse_qs(parsed.query)
-    query_params.pop("sslmode", None)
-    new_query = urlparse.urlencode(query_params, doseq=True)
-    db_url = urlparse.urlunparse(parsed._replace(query=new_query))
+if "?" in db_url:
+    db_url = db_url.split("?")[0]
+
+if "localhost" not in db_url and "127.0.0.1" not in db_url and "sqlite" not in db_url:
     connect_args["ssl"] = True
 
 engine = create_async_engine(
