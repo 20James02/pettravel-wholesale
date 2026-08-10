@@ -521,7 +521,15 @@ export function PetTravelApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: emailSchema.parse(loginEmail), password: preflight.data })
       });
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        alert(`Lỗi máy chủ (${res.status}): Không nhận được phản hồi hợp lệ từ hệ thống.`);
+        setIsLoading(false);
+        return;
+      }
       if (!res.ok) {
         alert(data.error || "Sai tên đăng nhập hoặc mật khẩu.");
         setIsLoading(false);

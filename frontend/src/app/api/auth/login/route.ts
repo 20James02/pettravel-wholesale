@@ -25,24 +25,45 @@ export async function POST(request: Request) {
     const { email, password } = loginSchema.parse(await request.json());
 
     const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    const res = await fetch(`${BACKEND_URL}/api/v1/auth/login-json`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password })
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      try {
-        const errObj = JSON.parse(text);
-        return NextResponse.json({ error: errObj.detail || "Sai email hoặc mật khẩu." }, { status: res.status });
-      } catch {
-        return NextResponse.json({ error: "Tài khoản không tồn tại hoặc thông tin đăng nhập sai." }, { status: 401 });
-      }
+    let res: Response;
+    try {
+      res = await fetch(`${BACKEND_URL}/api/v1/auth/login-json`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password })
+      });
+    } catch {
+      return NextResponse.json(
+        { error: `Không thể kết nối đến máy chủ Backend (${BACKEND_URL}). Vui lòng kiểm tra biến môi trường.` },
+        { status: 502 }
+      );
     }
 
-    const data = await res.json();
+    const text = await res.text();
+    let data: any = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      return NextResponse.json(
+        { error: `Phản hồi từ Backend không đúng định dạng JSON (Mã lỗi HTTP: ${res.status}).` },
+        { status: res.status || 500 }
+      );
+    }
+
+    if (!res.ok) {
+      return NextResponse.json(
+        { error: data.detail || data.error || "Sai email hoặc mật khẩu." },
+        { status: res.status || 401 }
+      );
+    }
+
     const user = data.user;
+    if (!user || !user.id) {
+      return NextResponse.json(
+        { error: "Dữ liệu người dùng từ Backend không hợp lệ." },
+        { status: 500 }
+      );
+    }
     const role = user.role as RoleKey;
     const isAdmin = INTERNAL_ROLE_KEYS.has(role);
 
