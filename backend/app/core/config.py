@@ -33,8 +33,8 @@ class Settings(BaseSettings):
     def async_database_url(self) -> str:
         import os
         url = (
-            os.getenv("DATABASE_URL")
-            or os.getenv("POSTGRES_URL")
+            os.getenv("POSTGRES_URL")
+            or os.getenv("DATABASE_URL")
             or os.getenv("SUPABASE_DB_URL")
             or self.DATABASE_URL
         )
