@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     R2_BUCKET: str = "pettravel-wholesale"
     R2_PUBLIC_BASE_URL: str = "https://pub-example.r2.dev"
 
+    # VietQR Payment
+    PAYMENT_QR_BANK_NAME: str = "Pet Travel"
+    PAYMENT_QR_ACCOUNT_NO: str = ""
+    PAYMENT_QR_ACCOUNT_NAME: str = "PET TRAVEL WHOLESALE"
+
     @property
     def async_database_url(self) -> str:
         import os
