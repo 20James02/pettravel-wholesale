@@ -516,7 +516,7 @@ export function PetTravelApp() {
         setIsLoading(false);
         return;
       }
-      const res = await fetch("/api/auth/me", {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: emailSchema.parse(loginEmail), password: preflight.data })
