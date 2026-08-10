@@ -226,3 +226,10 @@ class JournalLine(Base):
     partner_org_id = Column(String, nullable=True)
     
     entry = relationship("JournalEntry", back_populates="lines")
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+    
+    key = Column(String, primary_key=True, index=True)
+    value = Column(JSON, nullable=False)
+

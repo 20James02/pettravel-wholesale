@@ -32,23 +32,27 @@ function normalizePostingResult(value: unknown, fallbackMode: AccountingOrderPos
     createdAllocations: Number(result.createdAllocations ?? 0)
   };
 }
-
 export async function postOrderAccounting(
   input: AccountingOrderPostingInput,
   user: UserAccount
 ): Promise<AccountingOrderPostingResult> {
-  const supabase = createSupabaseServiceClient();
-  const { data, error } = await supabase.rpc("pt_post_order_accounting", {
-    p_order_id: input.orderId,
-    p_actor_id: user.id,
-    p_mode: input.mode,
-    p_vat_rate_bps: input.vatRateBps,
-    p_require_consumed_stock: input.requireConsumedStock
+  const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const res = await fetch(`${BACKEND_URL}/api/v1/accounting/order-posting`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      orderId: input.orderId,
+      mode: input.mode,
+      vatRateBps: input.vatRateBps,
+      requireConsumedStock: input.requireConsumedStock
+    })
   });
-
-  if (error) {
-    throw new Error(error.message);
+  
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Backend error: ${res.status} - ${text}`);
   }
-
-  return normalizePostingResult(data, input.mode);
+  
+  const data = await res.json();
+  return normalizePostingResult(data.result, input.mode);
 }
