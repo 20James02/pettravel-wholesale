@@ -88,7 +88,18 @@ def validate_database_url(errors: list[str]) -> None:
 def main() -> int:
     errors: list[str] = []
 
-    require_value(errors, "ENVIRONMENT")
+    effective_environment = value("ENVIRONMENT") or value("VERCEL_ENV") or "production"
+    print(
+        "ENVIRONMENT_SAFE_SUMMARY="
+        + json.dumps(
+            {
+                "configured": bool(value("ENVIRONMENT")),
+                "effective": effective_environment,
+                "vercel_env_configured": bool(value("VERCEL_ENV")),
+            },
+            sort_keys=True,
+        )
+    )
     require_https_url(errors, "FRONTEND_URL")
     validate_database_url(errors)
     require_value(errors, "JWT_SECRET", 32)
