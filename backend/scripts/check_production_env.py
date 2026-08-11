@@ -85,6 +85,23 @@ def validate_database_url(errors: list[str]) -> None:
     )
 
 
+def validate_password_crypto(errors: list[str]) -> None:
+    try:
+        from app.core.security import get_password_hash, verify_password
+
+        probe_password = "runtime-password-check-123"
+        password_hash = get_password_hash(probe_password)
+        ok = verify_password(probe_password, password_hash)
+    except Exception as exc:
+        print(f"AUTH_CRYPTO_CHECK_ERROR={type(exc).__name__}", file=sys.stderr)
+        errors.append("passlib bcrypt password hashing is not working")
+        return
+
+    print(f"AUTH_CRYPTO_CHECK configured={ok}")
+    if not ok:
+        errors.append("passlib bcrypt password verification failed")
+
+
 def main() -> int:
     errors: list[str] = []
 
@@ -104,6 +121,7 @@ def main() -> int:
     validate_database_url(errors)
     require_value(errors, "JWT_SECRET", 32)
     require_value(errors, "BACKEND_INTERNAL_SECRET", 32)
+    validate_password_crypto(errors)
 
     for key in ("ALLOW_DEMO_DATA", "ALLOW_RUNTIME_MIGRATIONS"):
         disabled = not bool_value(key)
