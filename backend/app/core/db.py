@@ -4,6 +4,8 @@ from app.core.config import settings
 
 db_url = settings.async_database_url
 if not db_url or not (db_url.startswith("postgresql") or db_url.startswith("sqlite") or db_url.startswith("postgres")):
+    if settings.is_production:
+        raise RuntimeError("Invalid production database URL.")
     db_url = "sqlite+aiosqlite:///:memory:"
 
 connect_args = {}

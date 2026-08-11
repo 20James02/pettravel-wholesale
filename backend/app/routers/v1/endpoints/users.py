@@ -71,10 +71,9 @@ async def update_user_profile(payload: Dict[str, Any], db: AsyncSession = Depend
         
     db_user.name = payload.get("fullName", db_user.name)
     db_user.phone = payload.get("phone", db_user.phone)
-    if "role" in payload:
-        db_user.role = payload["role"]
-    if "company" in payload:
-        db_user.company = payload["company"]
+    password = payload.get("password")
+    if password:
+        db_user.hashed_password = get_password_hash(password)
         
     await db.commit()
     return {"status": "success", "message": "Cập nhật hồ sơ thành công."}
@@ -94,4 +93,3 @@ async def get_user_by_id(user_id: str, db: AsyncSession = Depends(get_db)):
         "company": u.company or "",
         "createdAt": u.created_at.isoformat() if u.created_at else None
     }
-

@@ -4,6 +4,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from typing import List, Dict, Any
 from app.core.db import get_db
+from app.core.config import settings
 from app.models.wholesale import Product, ProductVariant
 
 router = APIRouter()
@@ -14,10 +15,15 @@ async def ensure_db_initialized(db: AsyncSession):
     global _db_initialized
     if _db_initialized:
         return
+
+    if settings.is_production and not settings.ALLOW_DEMO_DATA:
+        _db_initialized = True
+        return
         
     from app.models.wholesale import Base, User, Product as DBProduct, ProductVariant as DBProductVariant, Supplier, AppSetting
     from app.core.security import get_password_hash
     from app.core.db import engine
+    import os
     
     # 1. Create tables
     async with engine.begin() as conn:
@@ -28,11 +34,22 @@ async def ensure_db_initialized(db: AsyncSession):
         user_res = await db.execute(select(User).filter(User.email == "27jd07@gmail.com"))
         admin_user = user_res.scalars().first()
         if not admin_user:
+            admin_password = os.getenv("DEMO_ADMIN_PASSWORD")
+            if not admin_password:
+                if settings.is_production:
+                    raise RuntimeError("DEMO_ADMIN_PASSWORD is required when ALLOW_DEMO_DATA is enabled in production.")
+                admin_password = "dev-only-admin-password-change-me"
+            customer_password = os.getenv("DEMO_CUSTOMER_PASSWORD")
+            if not customer_password:
+                if settings.is_production:
+                    raise RuntimeError("DEMO_CUSTOMER_PASSWORD is required when ALLOW_DEMO_DATA is enabled in production.")
+                customer_password = "dev-only-customer-password-change-me"
+
             # Admin User
             admin = User(
                 id="u_admin_27jd07",
                 email="27jd07@gmail.com",
-                hashed_password=get_password_hash("HvT@27072002"),
+                hashed_password=get_password_hash(admin_password),
                 name="Quản trị viên (Admin)",
                 phone="0987654321",
                 role="super_admin",
@@ -44,7 +61,7 @@ async def ensure_db_initialized(db: AsyncSession):
             demo_minh = User(
                 id="u_demo_minh",
                 email="minh@pettravel.vn",
-                hashed_password=get_password_hash("123456789abc"),
+                hashed_password=get_password_hash(customer_password),
                 name="Đại lý sỉ (Minh)",
                 phone="0911223344",
                 role="customer_owner",

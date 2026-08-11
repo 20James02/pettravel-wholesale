@@ -47,5 +47,6 @@ export function getRequiredEnv(key: keyof typeof serverEnv): string {
 }
 
 export function requireEnv(keys: Array<keyof typeof serverEnv>): void {
+  void keys;
   // Safe no-op when legacy variables are removed
 }

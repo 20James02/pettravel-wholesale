@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     JWT_SECRET: str = ""
     SUPABASE_JWT_SECRET: str = ""
     BACKEND_INTERNAL_SECRET: str = ""
+    ALLOW_DEMO_DATA: bool = False
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     
     # Database
@@ -19,7 +20,7 @@ class Settings(BaseSettings):
     @property
     def jwt_secret(self) -> str:
         import os
-        return (
+        secret = (
             os.getenv("JWT_SECRET")
             or os.getenv("SUPABASE_JWT_SECRET")
             or os.getenv("SECRET_KEY")
@@ -27,6 +28,9 @@ class Settings(BaseSettings):
             or self.SUPABASE_JWT_SECRET
             or self.SECRET_KEY
         )
+        if self.is_production and secret == "supersecretkeychangeinproduction":
+            raise RuntimeError("JWT_SECRET, SUPABASE_JWT_SECRET, or SECRET_KEY must be configured in production.")
+        return secret
 
     @property
     def is_production(self) -> bool:
@@ -60,6 +64,8 @@ class Settings(BaseSettings):
             or os.getenv("SUPABASE_DB_URL")
             or self.DATABASE_URL
         )
+        if self.is_production and url == "postgresql+asyncpg://postgres:postgres@localhost:5432/pettravel":
+            raise RuntimeError("A production PostgreSQL database URL must be configured.")
         if url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         elif url.startswith("postgres://"):

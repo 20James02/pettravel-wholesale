@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
+import { getBackendUrl } from "@/server/backend-client";
 
 export async function GET() {
-  const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const backendUrl = getBackendUrl();
   
   try {
     const res = await fetch(backendUrl, {
