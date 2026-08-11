@@ -8,8 +8,8 @@ import type {
   AdminReportsOverview,
   CustomerOrder,
   JournalEntryDetail,
-  OperationsDocumentType,
   OperationsOverview,
+  OrderItem,
   PermissionKey,
   Product,
   RoleKey,
@@ -289,7 +289,7 @@ export function PetTravelApp() {
         if (!selectedOrderId) {
           setSelectedOrderId(firstOrder.id);
           setWorkingOrder(firstOrder);
-          setCartItems(firstOrder.items?.map((item: any) => ({ ...item })) ?? []);
+          setCartItems(firstOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
         }
       }
     } catch { /* silent */ }
@@ -423,6 +423,7 @@ export function PetTravelApp() {
 
   // Fetch standard public catalog data on start
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchProducts();
     fetchCategories();
   }, [fetchProducts, fetchCategories]);
@@ -430,6 +431,7 @@ export function PetTravelApp() {
   // Fetch admin-level config data when logged in as admin
   useEffect(() => {
     if (isLoggedIn && isAdmin) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       fetchAdminData();
       fetchOrders();
       fetchUsers();
@@ -522,7 +524,7 @@ export function PetTravelApp() {
         body: JSON.stringify({ email: emailSchema.parse(loginEmail), password: preflight.data })
       });
       const text = await res.text();
-      let data: any = {};
+      let data: { error?: string; user?: ApiUser } = {};
       try {
         data = text ? JSON.parse(text) : {};
       } catch {
@@ -535,13 +537,19 @@ export function PetTravelApp() {
         setIsLoading(false);
         return;
       }
+      if (!data.user) {
+        alert("Du lieu nguoi dung tu may chu khong hop le.");
+        setIsLoading(false);
+        return;
+      }
       setCurrentUser(data.user);
       setMode(data.user.isAdmin ? "admin" : "customer");
       setActiveTab("catalog");
       setShowLoginModal(false);
       setLoginEmail("");
       setLoginPassword("");
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error("Lá»—i káº¿t ná»‘i mÃ¡y chá»§.");
       alert(`Lỗi đăng nhập: ${err.message || "Lỗi kết nối máy chủ."}`);
     } finally {
       setIsLoading(false);
@@ -591,7 +599,8 @@ export function PetTravelApp() {
         });
       }
       setProfileNewPassword("");
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error("KhÃ´ng thá»ƒ cáº­p nháº­t há»“ sÆ¡.");
       alert(`Lỗi cập nhật: ${err.message}`);
     }
   }
@@ -756,7 +765,7 @@ export function PetTravelApp() {
     };
 
     try {
-      const res = await fetch("/api/admin/operations/reservation", {
+      const res = await fetch("/api/admin/operations/reservations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

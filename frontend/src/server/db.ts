@@ -15,6 +15,7 @@ import type {
   QuoteAdjustment,
   OrderComment
 } from "@/lib/domain";
+import { backendFetchJson } from "@/server/backend-client";
 
 type NumericValue = number | string | null;
 
@@ -177,23 +178,7 @@ export const DEMO_MAPPINGS = {
 };
 // ── BACKEND REST CLIENT ──────────────────────────────────────
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-async function backendFetch(path: string, options: RequestInit = {}) {
-  const url = `${BACKEND_URL}${path}`;
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    }
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Backend error: ${response.status} - ${text}`);
-  }
-  return response.json();
-}
+const backendFetch = backendFetchJson;
 
 // ── PRODUCTS & VARIANTS ──────────────────────────────────────
 

@@ -6,6 +6,21 @@ import type { Product } from "@/lib/domain";
 
 export const runtime = "nodejs";
 
+function sanitizeProductsForResponse(products: Product[], role: "guest" | "customer" | "admin") {
+  if (role === "admin") return products;
+
+  return products.map((product) => ({
+    ...product,
+    variants:
+      role === "guest"
+        ? []
+        : product.variants.map((variant) => ({
+            ...variant,
+            supplierId: "sup_pettravel"
+          }))
+  }));
+}
+
 export async function GET() {
   const user = await getSessionUser();
 
@@ -16,7 +31,7 @@ export async function GET() {
     role = "customer";
   }
 
-  const data = await getProducts(role);
+  const data = sanitizeProductsForResponse(await getProducts(role), role);
   return NextResponse.json({ products: data, role });
 }
 

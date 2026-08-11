@@ -115,7 +115,7 @@ const adminOrderSchema = z.object({
 async function buildCustomerItems(
   rawItems: Array<z.infer<typeof customerOrderItemSchema>>
 ): Promise<OrderItem[]> {
-  const catalog = await getProducts("customer");
+  const catalog = await getProducts("admin");
 
   return rawItems.map((item, index) => {
     const product = catalog.find((candidate) =>
@@ -143,6 +143,16 @@ async function buildCustomerItems(
 function sanitizeOrderForCustomer(order: CustomerOrder): CustomerOrder {
   return {
     ...order,
+    items: order.items.map((item) => ({
+      ...item,
+      supplierId: "sup_pettravel"
+    })),
+    fulfillmentGroups: order.fulfillmentGroups.map((group) => ({
+      ...group,
+      supplierId: "sup_pettravel",
+      supplierName: "Pet Travel",
+      internalNote: ""
+    })),
     comments: order.comments.filter((c) => c.audience !== "internal")
   };
 }

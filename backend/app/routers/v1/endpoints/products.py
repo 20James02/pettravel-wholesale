@@ -178,17 +178,21 @@ async def get_products(role: str = "guest", db: AsyncSession = Depends(get_db)):
     output = []
     for p in products:
         variants_data = []
-        for v in p.variants:
-            variants_data.append({
-                "id": f"v_{v.sku}",
-                "sku": v.sku,
-                "label": v.label,
-                "wholesalePrice": v.wholesale_price,
-                "minOrderQty": v.min_order_qty,
-                "stock": v.stock,
-                "supplierId": v.supplier_id,
-                "imageUrl": v.image_url or "/product-food.svg"
-            })
+        if role != "guest":
+            for v in p.variants:
+                variant_data = {
+                    "id": f"v_{v.sku}",
+                    "sku": v.sku,
+                    "label": v.label,
+                    "wholesalePrice": v.wholesale_price,
+                    "minOrderQty": v.min_order_qty,
+                    "stock": v.stock,
+                    "supplierId": v.supplier_id,
+                    "imageUrl": v.image_url or "/product-food.svg"
+                }
+                if role != "admin":
+                    variant_data["supplierId"] = "sup_pettravel"
+                variants_data.append(variant_data)
         
         output.append({
             "id": f"p_{p.code}",

@@ -152,7 +152,8 @@ export function AdminInventory({
         const errData = await res.json();
         alert(errData.error || "Lỗi khi lưu sản phẩm.");
       }
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error("KhÃ´ng thá»ƒ thá»±c hiá»‡n yÃªu cáº§u.");
       alert(`Lỗi kết nối máy chủ: ${err.message || "Không thể thực hiện yêu cầu."}`);
     }
   };
@@ -175,7 +176,8 @@ export function AdminInventory({
         const err = await res.json();
         alert(err.error || "Lỗi khi thêm danh mục.");
       }
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error("KhÃ´ng thá»ƒ thá»±c hiá»‡n yÃªu cáº§u.");
       alert(`Lỗi kết nối: ${err.message}`);
     }
   };
@@ -199,7 +201,8 @@ export function AdminInventory({
         const err = await res.json();
         alert(err.error || "Lỗi khi sửa danh mục.");
       }
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error("KhÃ´ng thá»ƒ thá»±c hiá»‡n yÃªu cáº§u.");
       alert(`Lỗi kết nối: ${err.message}`);
     }
   };
@@ -215,7 +218,8 @@ export function AdminInventory({
         const err = await res.json();
         alert(err.error || "Lỗi khi xóa danh mục.");
       }
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error("KhÃ´ng thá»ƒ thá»±c hiá»‡n yÃªu cáº§u.");
       alert(`Lỗi kết nối: ${err.message}`);
     }
   };
@@ -256,7 +260,8 @@ export function AdminInventory({
         const err = await res.json();
         alert(err.error || "Lỗi khi lưu nhà cung cấp.");
       }
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error("KhÃ´ng thá»ƒ thá»±c hiá»‡n yÃªu cáº§u.");
       alert(`Lỗi kết nối: ${err.message}`);
     }
   };
@@ -272,7 +277,8 @@ export function AdminInventory({
         const err = await res.json();
         alert(err.error || "Lỗi khi xóa nhà cung cấp.");
       }
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error("KhÃ´ng thá»ƒ thá»±c hiá»‡n yÃªu cáº§u.");
       alert(`Lỗi kết nối: ${err.message}`);
     }
   };
@@ -307,7 +313,8 @@ export function AdminInventory({
         const data = await res.json();
         setOperationsError(data.error || "Lỗi khi xử lý chứng từ vận hành.");
       }
-    } catch (err: any) {
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error("KhÃ´ng thá»ƒ thá»±c hiá»‡n yÃªu cáº§u.");
       setOperationsError(`Lỗi kết nối server: ${err.message}`);
     }
   };

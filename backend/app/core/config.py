@@ -4,9 +4,13 @@ from typing import List
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Pet Travel Wholesale B2B API"
     API_V1_STR: str = "/api/v1"
+    ENVIRONMENT: str = "development"
     
     # Security
     SECRET_KEY: str = "supersecretkeychangeinproduction"
+    JWT_SECRET: str = ""
+    SUPABASE_JWT_SECRET: str = ""
+    BACKEND_INTERNAL_SECRET: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     
     # Database
@@ -15,7 +19,25 @@ class Settings(BaseSettings):
     @property
     def jwt_secret(self) -> str:
         import os
-        return os.getenv("JWT_SECRET") or os.getenv("SECRET_KEY") or self.SECRET_KEY
+        return (
+            os.getenv("JWT_SECRET")
+            or os.getenv("SUPABASE_JWT_SECRET")
+            or os.getenv("SECRET_KEY")
+            or self.JWT_SECRET
+            or self.SUPABASE_JWT_SECRET
+            or self.SECRET_KEY
+        )
+
+    @property
+    def is_production(self) -> bool:
+        import os
+        environment = (
+            os.getenv("ENVIRONMENT")
+            or os.getenv("VERCEL_ENV")
+            or os.getenv("NODE_ENV")
+            or self.ENVIRONMENT
+        )
+        return environment.lower() in {"production", "prod"}
 
     # Cloudflare R2
     R2_ACCOUNT_ID: str = ""

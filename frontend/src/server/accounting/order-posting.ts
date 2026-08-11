@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { UserAccount } from "@/lib/domain";
+import { getBackendHeaders, getBackendUrl } from "@/server/backend-client";
 
 export type AccountingOrderPostingMode = "post_all" | "post_confirmed_payments" | "recognize_sale";
 
@@ -35,10 +36,11 @@ export async function postOrderAccounting(
   input: AccountingOrderPostingInput,
   user: UserAccount
 ): Promise<AccountingOrderPostingResult> {
-  const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-  const res = await fetch(`${BACKEND_URL}/api/v1/accounting/order-posting`, {
+  void user;
+
+  const res = await fetch(`${getBackendUrl()}/api/v1/accounting/order-posting`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getBackendHeaders(),
     body: JSON.stringify({
       orderId: input.orderId,
       mode: input.mode,

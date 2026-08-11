@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { RoleKey } from "@/lib/domain";
 import { encodeSession, requireSameOrigin } from "@/server/auth";
+import { getBackendUrl } from "@/server/backend-client";
 import { emailSchema, getValidationErrorMessage, loginPasswordSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -19,12 +20,24 @@ const INTERNAL_ROLE_KEYS: ReadonlySet<RoleKey> = new Set([
   "warehouse"
 ]);
 
+interface BackendLoginResponse {
+  detail?: string;
+  error?: string;
+  user?: {
+    id: string;
+    name: string;
+    company?: string;
+    email: string;
+    role: string;
+  };
+}
+
 export async function POST(request: Request) {
   try {
     requireSameOrigin(request);
     const { email, password } = loginSchema.parse(await request.json());
 
-    const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const BACKEND_URL = getBackendUrl();
     let res: Response;
     try {
       res = await fetch(`${BACKEND_URL}/api/v1/auth/login-json`, {
@@ -40,7 +53,7 @@ export async function POST(request: Request) {
     }
 
     const text = await res.text();
-    let data: any = {};
+    let data: BackendLoginResponse = {};
     try {
       data = text ? JSON.parse(text) : {};
     } catch {

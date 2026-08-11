@@ -6,6 +6,7 @@ import type {
   OperationsOverview,
   UserAccount
 } from "@/lib/domain";
+import { backendFetchJson as backendFetch } from "@/server/backend-client";
 
 export interface CreateOperationsDocumentInput {
   type: OperationsDocumentType;
@@ -25,24 +26,6 @@ export interface CreateOperationsDocumentInput {
   shouldPost?: boolean;
 }
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-async function backendFetch(path: string, options: RequestInit = {}) {
-  const url = `${BACKEND_URL}${path}`;
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    }
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Backend error: ${response.status} - ${text}`);
-  }
-  return response.json();
-}
-
 export async function getOperationsOverview(user: UserAccount): Promise<OperationsOverview> {
   return backendFetch(`/api/v1/operations/overview?org_id=${user.organizationId || ""}`);
 }
@@ -60,4 +43,3 @@ export async function createOperationsDocument(
     })
   });
 }
-

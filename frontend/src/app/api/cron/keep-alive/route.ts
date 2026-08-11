@@ -26,9 +26,10 @@ export async function GET() {
       backendResponse: data
     });
     
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Failed to connect to backend";
     return NextResponse.json(
-      { status: "error", message: err.message || "Failed to connect to backend" },
+      { status: "error", message },
       { status: 500 }
     );
   }

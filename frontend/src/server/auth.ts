@@ -3,6 +3,7 @@ import "server-only";
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import type { PermissionKey, RoleKey, UserAccount } from "@/lib/domain";
+import { getBackendHeaders, getBackendUrl } from "@/server/backend-client";
 
 const SESSION_COOKIE = "pt_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
@@ -211,9 +212,10 @@ export async function getSessionUser(): Promise<UserAccount | null> {
   const userId = decodeSession(token);
   if (!userId) return null;
 
-  const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   try {
-    const res = await fetch(`${BACKEND_URL}/api/v1/users/by-id/${userId}`);
+    const res = await fetch(`${getBackendUrl()}/api/v1/users/by-id/${userId}`, {
+      headers: getBackendHeaders()
+    });
     if (!res.ok) return null;
     const row = await res.json();
     const role = row.role as RoleKey;

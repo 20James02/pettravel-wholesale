@@ -25,7 +25,10 @@ Sao chep `.env.example` thanh `.env.local`, dien cac bien:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_JWT_SECRET`
 - `DATABASE_URL`
+- `BACKEND_URL`
+- `BACKEND_INTERNAL_SECRET`
 - `R2_ACCOUNT_ID`
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
@@ -58,9 +61,10 @@ Khong commit `.env.local` hoac secret that.
 1. Import repo len Vercel.
 2. Them env cho `Production`, `Preview`, `Development`.
 3. Bat buoc them `JWT_SECRET` va `PASSWORD_PEPPER`, moi bien toi thieu 32 ky tu random. Neu thieu, dang nhap production se fail-secure.
-4. Build command: `npm run build`.
-5. Sau khi thay doi env, redeploy de bien moi co tac dung.
-6. Kiem tra `/api/health`, trang chu, upload presign va order room tren preview truoc khi promote production.
+4. Nen them `BACKEND_INTERNAL_SECRET` cung mot gia tri o ca frontend project va backend project de Next server goi FastAPI. Neu chua co, code co the dung `SUPABASE_JWT_SECRET` lam alias tam thoi, nhung secret rieng van an toan hon.
+5. Build command: `npm run build`.
+6. Sau khi thay doi env, redeploy de bien moi co tac dung.
+7. Kiem tra `/api/health`, trang chu, upload presign va order room tren preview truoc khi promote production.
 
 Tao secret nhanh tren may local:
 

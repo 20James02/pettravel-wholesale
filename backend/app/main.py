@@ -1,7 +1,9 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.routers.router import api_router
 from app.core.config import settings
+from app.core.internal_auth import is_public_api_path, require_internal_request
 import uvicorn
 
 app = FastAPI(
@@ -25,16 +27,23 @@ async def vercel_path_rewrite(request: Request, call_next):
         request.scope["path"] = path[4:]  # strip "/api" prefix, keep "/"
     elif path == "/api":
         request.scope["path"] = "/"
+
+    final_path = request.scope.get("path", "")
+    if final_path.startswith(settings.API_V1_STR) and not is_public_api_path(final_path):
+        try:
+            require_internal_request(request)
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
     
     response = await call_next(request)
-    # Temporary debug headers
-    response.headers["X-Debug-Original-Path"] = path
-    response.headers["X-Debug-Final-Path"] = request.scope.get("path", "")
+    if not settings.is_production:
+        response.headers["X-Debug-Original-Path"] = path
+        response.headers["X-Debug-Final-Path"] = request.scope.get("path", "")
     return response
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -52,6 +61,8 @@ def read_root():
 
 @app.get("/debug")
 def debug_path(request: Request):
+    if settings.is_production:
+        return {"detail": "Not found"}
     return {
         "scope_path": request.scope.get("path"),
         "scope_raw_path": request.scope.get("raw_path", b"").decode("utf-8", errors="replace"),

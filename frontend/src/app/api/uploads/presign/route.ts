@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getOrders } from "@/server/db";
 import { hasPermission, requireAuth, requireSameOrigin } from "@/server/auth";
+import { getBackendHeaders, getBackendUrl } from "@/server/backend-client";
 import { getValidationErrorMessage } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -35,10 +36,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Khong co quyen upload vao don hang nay." }, { status: 403 });
     }
 
-    const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    const res = await fetch(`${BACKEND_URL}/api/v1/uploads/presign`, {
+    const res = await fetch(`${getBackendUrl()}/api/v1/uploads/presign`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: getBackendHeaders(),
       body: JSON.stringify(payload)
     });
 
