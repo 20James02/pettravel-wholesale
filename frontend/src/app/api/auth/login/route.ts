@@ -47,7 +47,7 @@ export async function POST(request: Request) {
       });
     } catch {
       return NextResponse.json(
-        { error: `Không thể kết nối đến máy chủ Backend (${BACKEND_URL}). Vui lòng kiểm tra biến môi trường.` },
+        { error: "Không thể kết nối đến máy chủ. Vui lòng thử lại sau." },
         { status: 502 }
       );
     }

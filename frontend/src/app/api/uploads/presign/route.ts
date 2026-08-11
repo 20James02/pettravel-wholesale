@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getOrders } from "@/server/db";
 import { hasPermission, requireAuth, requireSameOrigin } from "@/server/auth";
-import { getBackendHeaders, getBackendUrl } from "@/server/backend-client";
+import { backendFetchJson } from "@/server/backend-client";
 import { getValidationErrorMessage } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -36,18 +36,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Khong co quyen upload vao don hang nay." }, { status: 403 });
     }
 
-    const res = await fetch(`${getBackendUrl()}/api/v1/uploads/presign`, {
+    const data = await backendFetchJson("/api/v1/uploads/presign", {
       method: "POST",
-      headers: getBackendHeaders(),
       body: JSON.stringify(payload)
     });
-
-    if (!res.ok) {
-      const text = await res.text();
-      return NextResponse.json({ error: `Backend error: ${res.status} - ${text}` }, { status: res.status });
-    }
-
-    const data = await res.json();
     return NextResponse.json(data);
   } catch (error) {
     const message = getValidationErrorMessage(error, "Không thể tạo đường dẫn upload.");

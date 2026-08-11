@@ -16,12 +16,7 @@ def is_public_api_path(path: str) -> bool:
 
 
 def get_internal_secret() -> str:
-    return (
-        settings.BACKEND_INTERNAL_SECRET
-        or settings.SUPABASE_JWT_SECRET
-        or settings.JWT_SECRET
-        or ""
-    ).strip()
+    return settings.BACKEND_INTERNAL_SECRET.strip()
 
 
 def require_internal_request(request: Request) -> None:

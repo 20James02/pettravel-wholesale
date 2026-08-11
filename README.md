@@ -20,25 +20,44 @@ Mo `http://localhost:3000`. App hien co 3 che do demo: `Guest`, `User`, `Admin`.
 
 ## Bien moi truong
 
-Sao chep `.env.example` thanh `.env.local`, dien cac bien:
+Du an deploy thanh 2 Vercel project rieng:
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `SUPABASE_JWT_SECRET`
-- `DATABASE_URL`
+- `frontend`: Next.js App Router, root directory `frontend`
+- `backend`: FastAPI Python runtime, root directory `backend`
+
+Contract chi tiet nam o `docs/vercel-production-env.md`.
+
+Frontend project can:
+
+- `NEXT_PUBLIC_APP_URL`
 - `BACKEND_URL`
+- `BACKEND_INTERNAL_SECRET`
+- `JWT_SECRET`
+- `CRON_SECRET`
+- `PAYMENT_QR_ACCOUNT_NO`
+- `PAYMENT_QR_ACCOUNT_NAME`
+- `ALLOW_DEMO_DATA=false`
+- `ALLOW_RUNTIME_MIGRATIONS=false`
+- Tam thoi khi bootstrap owner: `ADMIN_BOOTSTRAP_EMAIL`, `ADMIN_BOOTSTRAP_TOKEN`
+
+Backend project can:
+
+- `ENVIRONMENT=production`
+- `FRONTEND_URL`
+- `DATABASE_URL`
+- `DB_SSL_MODE=require`
+- `DB_SSL_ROOT_CERT` chi khi dung `verify-ca` hoac `verify-full`
+- `JWT_SECRET`
 - `BACKEND_INTERNAL_SECRET`
 - `R2_ACCOUNT_ID`
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
 - `R2_BUCKET`
 - `R2_PUBLIC_BASE_URL`
-- `ADMIN_EMAILS`
-- `JWT_SECRET`
-- `PASSWORD_PEPPER`
+- `ALLOW_DEMO_DATA=false`
+- `ALLOW_RUNTIME_MIGRATIONS=false`
 
-Khong commit `.env.local` hoac secret that.
+`BACKEND_INTERNAL_SECRET` phai trung nhau o ca frontend va backend. Khong commit `.env.local`, `.env.backend`, `.env.production` hoac secret that.
 
 ## Supabase
 
@@ -49,6 +68,27 @@ Khong commit `.env.local` hoac secret that.
 5. Server dung `SUPABASE_SERVICE_ROLE_KEY` chi trong route/server action, khong dua xuong client.
 6. Khong bat `ALLOW_DEMO_DATA` hoac `ALLOW_RUNTIME_MIGRATIONS` tren production.
 
+### Kiem tra ket noi database
+
+Backend co script healthcheck an toan, khong in user/password/token:
+
+```powershell
+cd backend
+python .\scripts\check_db_connection.py --env-file .env.backend
+```
+
+Lenh tren chi chay `select 1`. De xac minh schema ung dung co the doc/ghi bang `app_settings`, dung them:
+
+```powershell
+python .\scripts\check_db_connection.py --env-file .env.backend --write-health
+```
+
+Ket qua hop le can co `DB_SELECT_OK=true`; voi `--write-health` can them `DB_WRITE_HEALTH_OK=true`. Neu production dung Supabase/Vercel, `DATABASE_URL` phai la connection string Postgres that, khong phai placeholder hay bien tham chieu ngan.
+
+Neu `DB_DNS_SAFE` bao `gaierror/getaddrinfo failed` voi host dang la `db.<project-ref>.supabase.co`, hay kiem tra trong Supabase Dashboard > Connect va can nhac dung Supavisor pooler string. Direct database host cua Supabase thuong di qua IPv6; nhieu moi truong serverless/CI chi ho tro IPv4, nen pooler IPv4 la lua chon phu hop hon cho app runtime.
+
+Ket noi PostgreSQL tu xa mac dinh dung `DB_SSL_MODE=require`, bat buoc ma hoa TLS nhung khong xac minh CA. De bat xac minh day du, tai CA certificate trong Supabase Dashboard > Database Settings > SSL Configuration, sau do dat `DB_SSL_MODE=verify-full` va `DB_SSL_ROOT_CERT` thanh duong dan den certificate. Khong dat `DB_SSL_MODE=disable` cho database tu xa.
+
 ## Cloudflare R2
 
 1. Tao bucket `pettravel-wholesale`.
@@ -58,13 +98,13 @@ Khong commit `.env.local` hoac secret that.
 
 ## Vercel
 
-1. Import repo len Vercel.
-2. Them env cho `Production`, `Preview`, `Development`.
-3. Bat buoc them `JWT_SECRET` va `PASSWORD_PEPPER`, moi bien toi thieu 32 ky tu random. Neu thieu, dang nhap production se fail-secure.
-4. Nen them `BACKEND_INTERNAL_SECRET` cung mot gia tri o ca frontend project va backend project de Next server goi FastAPI. Neu chua co, code co the dung `SUPABASE_JWT_SECRET` lam alias tam thoi, nhung secret rieng van an toan hon.
-5. Build command: `npm run build`.
+1. Tao 2 Vercel project tu cung repo.
+2. Frontend project: root directory `frontend`, install `npm ci`, build `npm run build`.
+3. Backend project: root directory `backend`, Python runtime, build command `python scripts/check_production_env.py`.
+4. Them dung bien trong `docs/vercel-production-env.md` cho `Production` va `Preview`.
+5. Bat "Automatically expose System Environment Variables" neu muon xem `VERCEL_GIT_COMMIT_SHA` tren health endpoint; khong dua secret vao `NEXT_PUBLIC_*`.
 6. Sau khi thay doi env, redeploy de bien moi co tac dung.
-7. Kiem tra `/api/health`, trang chu, upload presign va order room tren preview truoc khi promote production.
+7. Kiem tra `/api/health`, `/api/health/db`, backend `/`, backend `/api/v1/health/db`, login, upload presign va order room tren preview truoc khi promote production.
 
 Tao secret nhanh tren may local:
 
@@ -72,14 +112,14 @@ Tao secret nhanh tren may local:
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
-Chay lenh 2 lan, dung gia tri khac nhau cho `JWT_SECRET` va `PASSWORD_PEPPER`.
+Chay lenh nhieu lan va dung gia tri khac nhau cho `JWT_SECRET`, `BACKEND_INTERNAL_SECRET`, `CRON_SECRET`, `ADMIN_BOOTSTRAP_TOKEN`.
 
 ## Checklist thu cong truoc deploy that
 
 1. Supabase SQL Editor: chay `supabase/schema.sql` tren project moi hoac tao migration rieng neu database da co bang.
 2. Supabase Table Editor: dam bao `roles`, `permissions`, `role_permissions` da co du lieu seed.
-3. Vercel env: them du cac bien trong `.env.example`; rieng `JWT_SECRET`, `PASSWORD_PEPPER`, `SUPABASE_SERVICE_ROLE_KEY`, `R2_SECRET_ACCESS_KEY` chi dat o Server/Encrypted env, khong dua vao client.
-4. Admin bootstrap: dat cung mot email owner trong `ADMIN_EMAILS` va `ADMIN_BOOTSTRAP_EMAIL`, dat `ADMIN_BOOTSTRAP_TOKEN` random toi thieu 32 ky tu, redeploy, sau do goi endpoint bootstrap mot lan:
+3. Vercel env: them du cac bien trong `docs/vercel-production-env.md`; rieng `JWT_SECRET`, `BACKEND_INTERNAL_SECRET`, `CRON_SECRET`, `DATABASE_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` phai de dang secret/encrypted, khong dua vao client.
+4. Admin bootstrap: dat `ADMIN_BOOTSTRAP_EMAIL`, dat `ADMIN_BOOTSTRAP_TOKEN` random toi thieu 32 ky tu o frontend project, redeploy, sau do goi endpoint bootstrap mot lan:
 
 ```powershell
 $body = @{

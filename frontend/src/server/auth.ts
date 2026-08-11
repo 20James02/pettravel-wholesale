@@ -7,9 +7,6 @@ import { getBackendHeaders, getBackendUrl } from "@/server/backend-client";
 
 const SESSION_COOKIE = "pt_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
-const PASSWORD_ITERATIONS = 210_000;
-const PASSWORD_KEY_LENGTH = 64;
-const PASSWORD_DIGEST = "sha512";
 const INTERNAL_ROLE_KEYS: ReadonlySet<RoleKey> = new Set([
   "super_admin",
   "admin_manager",
@@ -58,18 +55,7 @@ const ROLE_PERMISSIONS: Record<RoleKey, PermissionKey[]> = {
   customer_staff: ["catalog.read", "order.read"]
 };
 
-interface SessionUserRow {
-  id: string;
-  full_name: string;
-  email: string;
-  organization_id?: string | null;
-  organizations?: { name?: string | null } | Array<{ name?: string | null }> | null;
-  user_roles?: Array<{
-    roles?: { key?: RoleKey | null } | Array<{ key?: RoleKey | null }> | null;
-  }> | null;
-}
-
-function getRequiredSecret(name: "JWT_SECRET" | "PASSWORD_PEPPER"): string {
+function getRequiredSecret(name: "JWT_SECRET"): string {
   const value = process.env[name];
   if (value && value.length >= 32) return value;
 
@@ -85,35 +71,6 @@ function timingSafeEqualString(a: string, b: string): boolean {
   const right = Buffer.from(b);
   if (left.length !== right.length) return false;
   return crypto.timingSafeEqual(left, right);
-}
-
-export function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16).toString("base64url");
-  const pepper = getRequiredSecret("PASSWORD_PEPPER");
-  const hash = crypto
-    .pbkdf2Sync(`${password}${pepper}`, salt, PASSWORD_ITERATIONS, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST)
-    .toString("base64url");
-
-  return `pbkdf2-${PASSWORD_DIGEST}$${PASSWORD_ITERATIONS}$${salt}$${hash}`;
-}
-
-export function verifyPassword(password: string, storedHash: string | null | undefined): boolean {
-  if (!storedHash) return false;
-
-  const [algorithm, iterationsRaw, salt, expectedHash] = storedHash.split("$");
-  if (algorithm !== `pbkdf2-${PASSWORD_DIGEST}` || !iterationsRaw || !salt || !expectedHash) {
-    return false;
-  }
-
-  const iterations = Number(iterationsRaw);
-  if (!Number.isInteger(iterations) || iterations < PASSWORD_ITERATIONS) return false;
-
-  const pepper = getRequiredSecret("PASSWORD_PEPPER");
-  const actualHash = crypto
-    .pbkdf2Sync(`${password}${pepper}`, salt, iterations, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST)
-    .toString("base64url");
-
-  return timingSafeEqualString(actualHash, expectedHash);
 }
 
 export function encodeSession(userId: string): string {
@@ -156,36 +113,6 @@ function decodeSession(token: string): string | null {
   } catch {
     return null;
   }
-}
-
-export function isConfiguredAdminEmail(email: string): boolean {
-  const configuredAdmins = (process.env.ADMIN_EMAILS ?? "")
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-
-  if (configuredAdmins.length === 0 && process.env.NODE_ENV !== "production") {
-    configuredAdmins.push("admin@pettravel.vn");
-  }
-
-  return configuredAdmins.includes(email.toLowerCase());
-}
-
-function relationOne<T>(value: T | T[] | null | undefined): T | null {
-  if (Array.isArray(value)) return value[0] ?? null;
-  return value ?? null;
-}
-
-function roleFromSessionRow(row: SessionUserRow): RoleKey {
-  if (isConfiguredAdminEmail(row.email)) {
-    return "super_admin";
-  }
-
-  const roleKey = row.user_roles
-    ?.map((userRole) => relationOne(userRole.roles)?.key)
-    .find((key): key is RoleKey => Boolean(key));
-
-  return roleKey ?? "customer_owner";
 }
 
 export function requireSameOrigin(request: Request): void {

@@ -47,9 +47,9 @@ export async function GET(request: Request) {
       checkedAt: new Date().toISOString()
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Database healthcheck failed.";
+    console.error("Database healthcheck failed", error);
     return NextResponse.json(
-      { ok: false, error: message, checkedAt: new Date().toISOString() },
+      { ok: false, error: "Database healthcheck failed.", checkedAt: new Date().toISOString() },
       { status: 500 }
     );
   }

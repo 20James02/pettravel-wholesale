@@ -163,19 +163,6 @@ interface AppUserDbRow {
   }> | null;
 }
 
-// Static UUID mappings for demo users & organizations to bootstrap database.
-export const DEMO_MAPPINGS = {
-  orgs: {
-    happy_paws: "00000000-0000-0000-0000-000000000101",
-    petland: "00000000-0000-0000-0000-000000000102",
-    internal: "00000000-0000-0000-0000-000000000103"
-  },
-  users: {
-    admin: "00000000-0000-0000-0000-000000000001",
-    minh: "00000000-0000-0000-0000-000000000002",
-    lan: "00000000-0000-0000-0000-000000000003"
-  }
-};
 // ── BACKEND REST CLIENT ──────────────────────────────────────
 
 const backendFetch = backendFetchJson;
@@ -353,6 +340,3 @@ export async function updateUserProfile(
     })
   });
 }
-
-export async function seedInitialDataIfNeeded() {}
-export async function ensureDbInitialized() {}

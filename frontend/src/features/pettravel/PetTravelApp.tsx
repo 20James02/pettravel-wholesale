@@ -1655,7 +1655,7 @@ export function PetTravelApp() {
             <div className="text-center">
               <span className="text-3xl">🐾</span>
               <h3 className="text-lg font-bold text-[#331B08] mt-2 font-['Varela_Round']">Đăng nhập Đại lý sỉ</h3>
-              <p className="muted text-xs font-semibold">Vui lòng điền thông tin đăng nhập hoặc chọn tài khoản demo để thử nghiệm nhanh.</p>
+              <p className="muted text-xs font-semibold">Vui lòng nhập tài khoản đại lý đã được Pet Travel cấp.</p>
             </div>
 
             <form onSubmit={handleCredentialsLogin} className="flex flex-col gap-3 mt-2 text-xs">
@@ -1664,7 +1664,7 @@ export function PetTravelApp() {
                 <input
                   type="email"
                   className="text-input text-sm py-2 px-3"
-                  placeholder="admin@pettravel.vn hoặc minh@happypaws.vn..."
+                  placeholder="ten@doanhnghiep.vn"
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
                   required
@@ -1692,41 +1692,6 @@ export function PetTravelApp() {
               </button>
             </form>
 
-            <div className="border-t border-dashed border-orange-200 my-2 pt-3">
-              <p className="text-[10px] font-bold text-[#78350F] uppercase text-center">Đăng nhập nhanh (Tài khoản Demo)</p>
-              <div className="grid grid-cols-3 gap-2 mt-2">
-                <button
-                  type="button"
-                  className="py-1.5 px-2 bg-orange-100 hover:bg-orange-200 text-[#78350F] rounded-xl text-[10px] font-bold cursor-pointer transition border border-orange-200 text-center"
-                  onClick={() => {
-                    setLoginEmail("minh@happypaws.vn");
-                    setLoginPassword("Hannimin@happypaws2026");
-                  }}
-                >
-                  Đại lý sỉ (Minh)
-                </button>
-                <button
-                  type="button"
-                  className="py-1.5 px-2 bg-orange-100 hover:bg-orange-200 text-[#78350F] rounded-xl text-[10px] font-bold cursor-pointer transition border border-orange-200 text-center"
-                  onClick={() => {
-                    setLoginEmail("ly@petworld.vn");
-                    setLoginPassword("Hanniworld@petworld2026");
-                  }}
-                >
-                  Đại lý sỉ (Ly)
-                </button>
-                <button
-                  type="button"
-                  className="py-1.5 px-2 bg-orange-100 hover:bg-orange-200 text-[#78350F] rounded-xl text-[10px] font-bold cursor-pointer transition border border-orange-200 text-center"
-                  onClick={() => {
-                    setLoginEmail("admin@pettravel.vn");
-                    setLoginPassword("Hannipettravel@admin2026");
-                  }}
-                >
-                  Quản trị (Admin)
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       )}

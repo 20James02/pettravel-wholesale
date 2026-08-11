@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { UserAccount } from "@/lib/domain";
-import { getBackendHeaders, getBackendUrl } from "@/server/backend-client";
+import { backendFetchJson } from "@/server/backend-client";
 
 export type AccountingOrderPostingMode = "post_all" | "post_confirmed_payments" | "recognize_sale";
 
@@ -38,9 +38,8 @@ export async function postOrderAccounting(
 ): Promise<AccountingOrderPostingResult> {
   void user;
 
-  const res = await fetch(`${getBackendUrl()}/api/v1/accounting/order-posting`, {
+  const data = await backendFetchJson("/api/v1/accounting/order-posting", {
     method: "POST",
-    headers: getBackendHeaders(),
     body: JSON.stringify({
       orderId: input.orderId,
       mode: input.mode,
@@ -49,11 +48,5 @@ export async function postOrderAccounting(
     })
   });
   
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Backend error: ${res.status} - ${text}`);
-  }
-  
-  const data = await res.json();
   return normalizePostingResult(data.result, input.mode);
 }
