@@ -6,7 +6,11 @@ from app.core.config import settings
 from app.core.internal_auth import is_public_api_path, require_internal_request
 import uvicorn
 
-settings.validate_production_configuration()
+PRODUCTION_CONFIG_ERROR: str | None = None
+try:
+    settings.validate_production_configuration()
+except RuntimeError as exc:
+    PRODUCTION_CONFIG_ERROR = str(exc)
 
 app = FastAPI(
     title="Pet Travel Wholesale B2B API",
@@ -31,6 +35,15 @@ async def vercel_path_rewrite(request: Request, call_next):
         request.scope["path"] = "/"
 
     final_path = request.scope.get("path", "")
+    if PRODUCTION_CONFIG_ERROR and final_path not in {"/", "/debug"}:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "Production configuration is invalid.",
+                "error": PRODUCTION_CONFIG_ERROR,
+            },
+        )
+
     if final_path.startswith(settings.API_V1_STR) and not is_public_api_path(final_path):
         try:
             require_internal_request(request)
@@ -56,8 +69,9 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 @app.get("/")
 def read_root():
     return {
-        "status": "healthy",
+        "status": "configuration_error" if PRODUCTION_CONFIG_ERROR else "healthy",
         "service": "pettravel-wholesale-backend",
+        "configurationOk": PRODUCTION_CONFIG_ERROR is None,
         "message": "Welcome to Pet Travel B2B Wholesale API portal!"
     }
 
