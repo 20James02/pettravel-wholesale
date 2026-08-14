@@ -6,7 +6,14 @@ from sqlalchemy.engine import URL, make_url
 
 LOCAL_DATABASE_HOSTS = {None, "localhost", "127.0.0.1", "::1"}
 REMOTE_SSL_MODES = {"require", "verify-ca", "verify-full"}
-SSL_QUERY_KEYS = {"ssl", "sslmode", "sslrootcert"}
+NON_ASYNCPG_QUERY_KEYS = {
+    "connection_limit",
+    "pgbouncer",
+    "ssl",
+    "sslmode",
+    "sslrootcert",
+    "supa",
+}
 
 
 def build_database_connect_config(
@@ -22,7 +29,7 @@ def build_database_connect_config(
 
     query_ssl_mode = url.query.get("sslmode") or url.query.get("ssl")
     query_root_cert = url.query.get("sslrootcert")
-    clean_url = url.difference_update_query(SSL_QUERY_KEYS)
+    clean_url = url.difference_update_query(NON_ASYNCPG_QUERY_KEYS)
 
     if url.host in LOCAL_DATABASE_HOSTS:
         return clean_url, {"timeout": 10}

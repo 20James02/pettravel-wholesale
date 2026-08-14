@@ -62,9 +62,11 @@ def require_https_url(errors: list[str], key: str) -> str:
 
 
 def validate_database_url(errors: list[str]) -> None:
-    database_url = require_value(errors, "DATABASE_URL")
+    database_key = "POSTGRES_URL" if value("POSTGRES_URL") else "DATABASE_URL"
+    database_url = require_value(errors, database_key)
     if not database_url:
         return
+    print(f"DB_SOURCE_SAFE_SUMMARY={{\"key\": \"{database_key}\"}}")
 
     normalized_url = database_url
     if normalized_url.startswith("postgres://"):

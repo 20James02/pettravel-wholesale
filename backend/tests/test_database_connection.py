@@ -23,6 +23,16 @@ def test_sslmode_query_is_moved_to_asyncpg_ssl_argument():
     assert connect_args == {"ssl": "require", "timeout": 10}
 
 
+def test_pooler_client_only_query_flags_are_not_sent_to_asyncpg():
+    url, connect_args = build_database_connect_config(
+        "postgresql+asyncpg://user:pass@pooler.example.com:6543/app"
+        "?sslmode=require&pgbouncer=true&connection_limit=1&supa=metadata"
+    )
+
+    assert not url.query
+    assert connect_args == {"ssl": "require", "timeout": 10}
+
+
 def test_local_postgres_does_not_force_ssl():
     url, connect_args = build_database_connect_config(
         "postgresql+asyncpg://user:pass@localhost:5432/app"

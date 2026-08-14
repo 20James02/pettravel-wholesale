@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/pettravel"
+    POSTGRES_URL: str = ""
     DB_SSL_MODE: str = ""
     DB_SSL_ROOT_CERT: str = ""
     
@@ -52,7 +53,11 @@ class Settings(BaseSettings):
 
     @property
     def async_database_url(self) -> str:
-        url = self.DATABASE_URL.strip()
+        url = (
+            self.POSTGRES_URL.strip()
+            if self.is_production and self.POSTGRES_URL.strip()
+            else self.DATABASE_URL.strip()
+        )
         if self.is_production and url == "postgresql+asyncpg://postgres:postgres@localhost:5432/pettravel":
             raise RuntimeError("A production PostgreSQL database URL must be configured.")
         if url.startswith("postgresql://"):
