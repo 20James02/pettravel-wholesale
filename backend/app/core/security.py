@@ -1,6 +1,9 @@
+import base64
 from datetime import datetime, timedelta, timezone
+import hashlib
+import hmac
+import json
 from typing import Any, Union
-import jwt
 from passlib.exc import PasswordValueError, UnknownHashError
 from passlib.context import CryptContext
 from app.core.config import settings
@@ -8,6 +11,11 @@ from app.core.config import settings
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 ALGORITHM = "HS256"
+
+
+def _base64url_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
@@ -27,6 +35,19 @@ def create_access_token(
         expire = datetime.now(timezone.utc) + timedelta(
             minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
         )
-    to_encode = {"exp": expire, "sub": str(subject)}
-    encoded_jwt = jwt.encode(to_encode, settings.jwt_secret, algorithm=ALGORITHM)
-    return encoded_jwt
+    header = _base64url_encode(
+        json.dumps({"alg": ALGORITHM, "typ": "JWT"}, separators=(",", ":")).encode("utf-8")
+    )
+    payload = _base64url_encode(
+        json.dumps(
+            {"exp": int(expire.timestamp()), "sub": str(subject)},
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    signing_input = f"{header}.{payload}"
+    signature = hmac.new(
+        settings.jwt_secret.encode("utf-8"),
+        signing_input.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    return f"{signing_input}.{_base64url_encode(signature)}"

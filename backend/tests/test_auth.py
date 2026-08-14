@@ -1,6 +1,9 @@
+import base64
 from datetime import timedelta
+import hashlib
+import hmac
+import json
 
-import jwt
 import pytest
 from sqlalchemy import text
 from fastapi import HTTPException
@@ -12,10 +15,21 @@ from app.routers.v1.endpoints.auth import LoginJsonInput, login_json
 
 def test_access_token_round_trip_uses_hs256():
     token = create_access_token("u_token_probe", expires_delta=timedelta(minutes=5))
+    header_part, payload_part, signature_part = token.split(".")
+    header = json.loads(base64.urlsafe_b64decode(header_part + "=="))
+    payload = json.loads(base64.urlsafe_b64decode(payload_part + "=="))
+    expected_signature = hmac.new(
+        settings.jwt_secret.encode("utf-8"),
+        f"{header_part}.{payload_part}".encode("ascii"),
+        hashlib.sha256,
+    ).digest()
 
-    payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-
+    assert header == {"alg": "HS256", "typ": "JWT"}
     assert payload["sub"] == "u_token_probe"
+    assert hmac.compare_digest(
+        base64.urlsafe_b64decode(signature_part + "=="),
+        expected_signature,
+    )
 
 
 @pytest.mark.asyncio
