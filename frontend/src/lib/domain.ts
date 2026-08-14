@@ -67,6 +67,7 @@ export interface UserAccount {
   email: string;
   role: RoleKey;
   isAdmin: boolean;
+  permissions: PermissionKey[];
 }
 
 export interface Supplier {
@@ -121,6 +122,7 @@ export interface QuoteAdjustment {
   label: string;
   amount: number;
   requiresApproval: boolean;
+  approvedBy?: string;
 }
 
 export interface QuoteVersion {
@@ -151,6 +153,9 @@ export interface PaymentProof {
   id: string;
   paymentRequestId: string;
   fileName: string;
+  storageKey?: string;
+  contentType?: string;
+  fileSizeBytes?: number;
   uploadedAt: string;
   status: "pending_admin_confirmation" | "accepted" | "rejected";
 }

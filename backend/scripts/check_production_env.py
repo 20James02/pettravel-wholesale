@@ -6,6 +6,15 @@ from urllib.parse import urlparse
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 REMOTE_SSL_MODES = {"require", "verify-ca", "verify-full"}
+PLACEHOLDER_MARKERS = (
+    "example",
+    "changeme",
+    "unavailable",
+    "encrypted",
+    "redacted",
+    "hidden",
+    "sensitive",
+)
 
 
 def value(key: str) -> str:
@@ -16,11 +25,21 @@ def bool_value(key: str) -> bool:
     return value(key).lower() in {"1", "true", "yes", "on"}
 
 
+def is_placeholder(configured: str) -> bool:
+    normalized = configured.strip().strip("\"'<>[]{}").lower()
+    return any(marker in normalized for marker in PLACEHOLDER_MARKERS)
+
+
 def require_value(errors: list[str], key: str, min_length: int = 1) -> str:
     configured = value(key)
     if len(configured) < min_length:
         errors.append(f"{key} is missing or too short")
-    print(f"ENV_CHECK key={key} configured={len(configured) >= min_length}")
+    elif is_placeholder(configured):
+        errors.append(f"{key} must not be a placeholder or redacted value")
+    print(
+        f"ENV_CHECK key={key} "
+        f"configured={len(configured) >= min_length and not is_placeholder(configured)}"
+    )
     return configured
 
 
@@ -129,17 +148,14 @@ def main() -> int:
         if not disabled:
             errors.append(f"{key} must be false")
 
-    r2_values = {
-        "R2_ACCOUNT_ID": require_value(errors, "R2_ACCOUNT_ID"),
-        "R2_ACCESS_KEY_ID": require_value(errors, "R2_ACCESS_KEY_ID"),
-        "R2_SECRET_ACCESS_KEY": require_value(errors, "R2_SECRET_ACCESS_KEY"),
-        "R2_BUCKET": require_value(errors, "R2_BUCKET"),
-        "R2_PUBLIC_BASE_URL": require_value(errors, "R2_PUBLIC_BASE_URL"),
-    }
-    for key, configured in r2_values.items():
-        if "example" in configured.lower():
-            errors.append(f"{key} must not be a placeholder")
-
+    for key in (
+        "R2_ACCOUNT_ID",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+        "R2_BUCKET",
+        "R2_PUBLIC_BASE_URL",
+    ):
+        require_value(errors, key)
     if errors:
         for error in errors:
             print(f"ENV_PREFLIGHT_ERROR={error}", file=sys.stderr)

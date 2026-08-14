@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from typing import List, Optional
 from datetime import datetime
 
@@ -14,12 +14,11 @@ class UserCreate(UserBase):
     password: str = Field(..., min_length=12)
 
 class UserResponse(UserBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     is_active: bool
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 # --- SUPPLIER SCHEMAS ---
 class SupplierBase(BaseModel):
@@ -32,11 +31,10 @@ class SupplierCreate(SupplierBase):
     pass
 
 class SupplierResponse(SupplierBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 # --- PRODUCT VARIANT SCHEMAS ---
 class VariantBase(BaseModel):
@@ -52,10 +50,9 @@ class VariantCreate(VariantBase):
     pass
 
 class VariantResponse(VariantBase):
-    product_code: str
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        from_attributes = True
+    product_code: str
 
 # --- PRODUCT SCHEMAS ---
 class ProductBase(BaseModel):
@@ -64,21 +61,20 @@ class ProductBase(BaseModel):
     category: str
     brand: Optional[str] = None
     image_url: Optional[str] = None
-    images: List[str] = []
+    images: List[str] = Field(default_factory=list)
     dimensions: Optional[str] = None
     weight: float = 0.0
     description: Optional[str] = None
     tags: Optional[str] = None
 
 class ProductCreate(ProductBase):
-    variants: List[VariantCreate] = []
+    variants: List[VariantCreate] = Field(default_factory=list)
 
 class ProductResponse(ProductBase):
-    created_at: datetime
-    variants: List[VariantResponse] = []
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        from_attributes = True
+    created_at: datetime
+    variants: List[VariantResponse] = Field(default_factory=list)
 
 # --- ORDER ITEM SCHEMAS ---
 class OrderItemCreate(BaseModel):
@@ -91,6 +87,8 @@ class OrderItemCreate(BaseModel):
     supplierId: Optional[str] = None
 
 class OrderItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     order_id: str
     product_code: str
@@ -100,9 +98,6 @@ class OrderItemResponse(BaseModel):
     quantity: int
     unit_price_snapshot: int
     supplier_id: str
-
-    class Config:
-        from_attributes = True
 
 # --- ORDER SCHEMAS ---
 class OrderCreate(BaseModel):
@@ -114,6 +109,8 @@ class OrderCreate(BaseModel):
     customerId: Optional[str] = None
 
 class OrderResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     number: str
     customer_name: str
@@ -128,11 +125,10 @@ class OrderResponse(BaseModel):
     recipient_address: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 # --- QUOTE SCHEMAS ---
 class QuoteVersionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     order_id: str
     version: int
@@ -145,11 +141,10 @@ class QuoteVersionResponse(BaseModel):
     expires_at: datetime
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 # --- RESERVATION SCHEMAS ---
 class StockReservationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     order_id: str
     variant_sku: str
@@ -159,11 +154,10 @@ class StockReservationResponse(BaseModel):
     expires_at: datetime
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 # --- JOURNAL SCHEMAS ---
 class JournalLineResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     line_no: int
     account_code: str
@@ -175,10 +169,9 @@ class JournalLineResponse(BaseModel):
     supplier_id: Optional[str] = None
     partner_org_id: Optional[str] = None
 
-    class Config:
-        from_attributes = True
-
 class JournalEntryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     entry_no: str
     description: str
@@ -187,7 +180,4 @@ class JournalEntryResponse(BaseModel):
     source_id: str
     created_at: datetime
     posted_at: Optional[datetime] = None
-    lines: List[JournalLineResponse] = []
-
-    class Config:
-        from_attributes = True
+    lines: List[JournalLineResponse] = Field(default_factory=list)

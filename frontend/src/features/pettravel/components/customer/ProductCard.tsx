@@ -1,3 +1,4 @@
+import Image from "next/image";
 import type { Product } from "@/lib/domain";
 
 interface ProductCardProps {
@@ -15,7 +16,7 @@ export function ProductCard({ product, isLoggedIn, onClick }: ProductCardProps) 
       onClick={onClick}
     >
       <div className="relative aspect-square w-full bg-[#FFFBEB] border-b border-orange-100 shrink-0">
-        <img src={product.imageUrl} alt={product.name} className="w-full h-full object-cover" />
+        <Image src={product.imageUrl} alt={product.name} fill sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw" className="object-cover" />
         <span className="absolute top-2 left-2 bg-[#FFFDF9] border border-orange-100 text-[9px] px-2 py-0.5 rounded-full font-bold text-orange-950 shadow-sm z-10">
           {product.category}
         </span>

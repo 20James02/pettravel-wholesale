@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import Image from "next/image";
 import Lenis from "lenis";
 import type {
   AccountingOverview,
@@ -10,6 +11,7 @@ import type {
   JournalEntryDetail,
   OperationsOverview,
   OrderItem,
+  PaymentRequest,
   PermissionKey,
   Product,
   RoleKey,
@@ -20,7 +22,6 @@ import { formatVnd } from "@/lib/money";
 import {
   fullNameSchema,
   emailSchema,
-  phoneSchema,
   passwordSchema,
   loginPasswordSchema,
   optionalUrlSchema,
@@ -79,10 +80,6 @@ interface ProfileUpdatePayload {
 
 interface OrderMutationResponse {
   order: CustomerOrder;
-}
-
-function getErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export function PetTravelApp() {
@@ -198,7 +195,6 @@ export function PetTravelApp() {
   }, [workingOrder, currentUser]);
 
   const requiresManagerApproval = useMemo(() => {
-    const defaultDep = workingOrder.quoteVersions.length > 0 ? workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1].subtotal * adminPolicy.defaultDepositRate : 0;
     const isDiscountOver = adminDiscount > (workingOrder.quoteVersions.length > 0 ? workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1].subtotal * adminPolicy.maxOperatorDiscountRate : 0);
     const isTotalOver = adminDiscount > adminPolicy.requireManagerApprovalAbove;
     return isDiscountOver || isTotalOver;
@@ -295,6 +291,17 @@ export function PetTravelApp() {
     } catch { /* silent */ }
   }, [selectedOrderId]);
 
+  useEffect(() => {
+    if (!currentUser) return;
+    const events = new EventSource("/api/orders/events");
+    const refreshOrders = () => void fetchOrders();
+    events.addEventListener("orders.snapshot", refreshOrders);
+    return () => {
+      events.removeEventListener("orders.snapshot", refreshOrders);
+      events.close();
+    };
+  }, [currentUser, fetchOrders]);
+
   const fetchCategories = useCallback(async () => {
     try {
       const res = await fetch("/api/categories");
@@ -372,7 +379,7 @@ export function PetTravelApp() {
   const fetchAccountingJournalEntries = useCallback(async () => {
     setIsAccountingJournalLoading(true);
     try {
-      const res = await fetch("/api/accounting/journal-entries");
+      const res = await fetch("/api/admin/accounting/journal-entries");
       if (res.ok) {
         const data = await res.json();
         setAccountingJournalEntries(data.entries ?? []);
@@ -496,8 +503,9 @@ export function PetTravelApp() {
         body: JSON.stringify(updatedOrder)
       });
       if (res.ok) {
-        setWorkingOrder(updatedOrder);
-        setAllOrders((prev) => prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o)));
+        const data = (await res.json()) as { order: CustomerOrder };
+        setWorkingOrder(data.order);
+        setAllOrders((prev) => prev.map((o) => (o.id === data.order.id ? data.order : o)));
       } else {
         alert("Không thể lưu trạng thái đơn hàng vào cơ sở dữ liệu.");
       }
@@ -961,21 +969,23 @@ export function PetTravelApp() {
     const isDeposit = workingOrder.paymentIntent === "deposit_cod";
     const reqAmount = isDeposit ? activeQuote.depositAmount : activeQuote.finalTotal;
 
-    const timeSuffix = new Date().toISOString().replace(/[^0-9]/g, "").slice(8, 14);
-    const reference = `PTW-${workingOrder.number}-Q${activeQuote.version}-${isDeposit ? "DEP" : "FULL"}-${timeSuffix}`.toUpperCase();
-
-    const qrPayload = `PETTRAVEL_WHOLESALE_PAYMENT|account=190356782390|name=PET TRAVEL WHOLESALE|amount=${reqAmount}|reference=${reference}`;
-
-    const newRequest = {
-      id: `pay_req_${Date.now()}`,
-      quoteVersion: activeQuote.version,
-      amount: reqAmount,
-      purpose: (isDeposit ? "deposit" : "full") as "deposit" | "full",
-      reference,
-      qrPayload,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      status: "active" as const
-    };
+    const paymentResponse = await fetch("/api/orders/payment-request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        orderId: workingOrder.id,
+        orderNumber: workingOrder.number,
+        quoteVersion: activeQuote.version,
+        amount: reqAmount,
+        purpose: isDeposit ? "deposit" : "full"
+      })
+    });
+    if (!paymentResponse.ok) {
+      const error = await paymentResponse.json().catch(() => ({}));
+      alert(error.error || "Không thể tạo yêu cầu thanh toán.");
+      return;
+    }
+    const newRequest = (await paymentResponse.json()) as PaymentRequest;
 
     const updatedRequests = workingOrder.paymentRequests.map((req) =>
       req.status === "active" ? { ...req, status: "superseded" as const } : req
@@ -987,18 +997,9 @@ export function PetTravelApp() {
       recipientPhone: recipientValidation.data.recipientPhone,
       recipientAddress: recipientValidation.data.recipientAddress,
       commercialStatus: "locked",
-      paymentStatus: isDeposit ? "deposit_uploaded" : "full_uploaded",
+      paymentStatus: isDeposit ? "deposit_requested" : "full_requested",
       paymentRequests: [...updatedRequests, newRequest],
-      paymentProofs: [
-        {
-          id: `proof_${Date.now()}`,
-          paymentRequestId: newRequest.id,
-          fileName: "bien-lai-chuyen-khoan-dai-ly.jpg",
-          uploadedAt: new Date().toISOString(),
-          status: "pending_admin_confirmation" as const
-        },
-        ...workingOrder.paymentProofs
-      ],
+      paymentProofs: workingOrder.paymentProofs,
       comments: [
         {
           id: `c_chk_${Date.now()}`,
@@ -1016,21 +1017,73 @@ export function PetTravelApp() {
     setShowCheckoutModal(false);
   }
 
-  // Simulate proof upload (stub)
-  async function simulateProofUpload() {
+  async function uploadPaymentProof(file: File) {
     if (!workingOrder?.id) return;
-    const isDeposit = workingOrder.paymentStatus.includes("unrequested") || workingOrder.paymentStatus === "unrequested";
-    const nextStatus = isDeposit ? "deposit_uploaded" : "full_uploaded";
+    const request = [...workingOrder.paymentRequests].reverse().find((item) => item.status === "active");
+    if (!request) {
+      alert("Không tìm thấy yêu cầu thanh toán đang hoạt động.");
+      return;
+    }
+
+    const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
+    if (!allowedTypes.has(file.type) || file.size <= 0 || file.size > 10 * 1024 * 1024) {
+      alert("Chỉ chấp nhận JPG, PNG, WebP hoặc PDF không quá 10MB.");
+      return;
+    }
+
+    const presignResponse = await fetch("/api/uploads/presign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        orderId: workingOrder.id,
+        fileName: file.name,
+        contentType: file.type,
+        fileSizeBytes: file.size,
+        purpose: "payment-proof"
+      })
+    });
+    if (!presignResponse.ok) {
+      alert("Không thể chuẩn bị vùng lưu minh chứng.");
+      return;
+    }
+    const upload = (await presignResponse.json()) as { key: string; uploadUrl: string };
+    const uploadResponse = await fetch(upload.uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": file.type },
+      body: file
+    });
+    if (!uploadResponse.ok) {
+      alert("Tải minh chứng lên thất bại. Vui lòng thử lại.");
+      return;
+    }
+
+    const nextStatus = request.purpose === "deposit" ? "deposit_uploaded" : "full_uploaded";
 
     const updatedOrder: CustomerOrder = {
       ...workingOrder,
       paymentStatus: nextStatus,
+      paymentRequests: workingOrder.paymentRequests.map((item) =>
+        item.id === request.id ? { ...item, status: "uploaded" as const } : item
+      ),
+      paymentProofs: [
+        {
+          id: `proof_${crypto.randomUUID()}`,
+          paymentRequestId: request.id,
+          fileName: file.name,
+          storageKey: upload.key,
+          contentType: file.type,
+          fileSizeBytes: file.size,
+          uploadedAt: new Date().toISOString(),
+          status: "pending_admin_confirmation" as const
+        },
+        ...workingOrder.paymentProofs
+      ],
       comments: [
         {
-          id: `c_sim_${Date.now()}`,
+          id: `c_proof_${Date.now()}`,
           author: workingOrder.customerName,
           audience: "customer_visible",
-          message: `Đại lý đã gửi tải lên chứng từ biên lai giao dịch thành công.`,
+          message: "Đại lý đã tải minh chứng chuyển khoản. Kế toán đang chờ đối soát.",
           createdAt: new Date().toISOString()
         },
         ...workingOrder.comments
@@ -1039,7 +1092,7 @@ export function PetTravelApp() {
     };
 
     await syncOrder(updatedOrder);
-    alert("Đã mô phỏng tải biên lai chuyển khoản sỉ thành công!");
+    alert("Đã tải minh chứng chuyển khoản. Kế toán sẽ đối soát trước khi xác nhận.");
   }
 
   // Chat message creation
@@ -1062,15 +1115,6 @@ export function PetTravelApp() {
 
     await syncOrder(updatedOrder);
   }
-
-  // Filter products for Catalog view
-  const filteredProducts = useMemo(() => {
-    return allProducts.filter((p) => {
-      const matchCat = categoryFilter === "Tất cả" || p.category === categoryFilter;
-      const matchSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.code.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchCat && matchSearch;
-    });
-  }, [allProducts, categoryFilter, searchQuery]);
 
   return (
     <main className="app-shell">
@@ -1166,7 +1210,6 @@ export function PetTravelApp() {
             isLoggedIn={isLoggedIn}
             mode={mode}
             workingOrder={workingOrder}
-            currentUser={currentUser}
             onPayNowClick={() => {
               setRecipientName(currentUser?.name || "");
               setRecipientPhone("");
@@ -1174,7 +1217,7 @@ export function PetTravelApp() {
               setShowCheckoutModal(true);
             }}
             onBuyMore={handleBuyMore}
-            onUploadProof={simulateProofUpload}
+            onUploadProof={uploadPaymentProof}
           />
         )}
 
@@ -1190,9 +1233,9 @@ export function PetTravelApp() {
 
                 <form onSubmit={handleUpdateProfile} className="flex flex-col gap-4 mt-2">
                   <div className="flex items-center gap-4 py-2 border-b border-orange-100/50">
-                    <div className="w-16 h-16 rounded-full overflow-hidden bg-orange-50 border-2 border-orange-200 flex items-center justify-center text-xl font-bold text-orange-600 shrink-0">
+                    <div className="relative w-16 h-16 rounded-full overflow-hidden bg-orange-50 border-2 border-orange-200 flex items-center justify-center text-xl font-bold text-orange-600 shrink-0">
                       {profileAvatarUrl ? (
-                        <img src={profileAvatarUrl} alt="Avatar" className="object-cover w-full h-full" />
+                        <Image src={profileAvatarUrl} alt="Avatar" fill sizes="64px" className="object-cover" />
                       ) : (
                         currentUser?.name?.charAt(0) || "U"
                       )}
@@ -1392,6 +1435,7 @@ export function PetTravelApp() {
             allCategories={allCategories}
             operationsOverview={operationsOverview}
             isOperationsLoading={isOperationsLoading}
+            overviewError={operationsError}
             fetchProducts={fetchProducts}
             fetchSuppliers={fetchAdminData}
             fetchCategories={fetchCategories}
@@ -1490,7 +1534,7 @@ export function PetTravelApp() {
 
               <div className="md:w-1/2 flex flex-col gap-3">
                 <div className="relative aspect-square w-full rounded-2xl overflow-hidden border border-orange-100 bg-[#FFFBEB] flex items-center justify-center p-4">
-                  <img src={currentMainImage} alt={selectedProduct.name} className="w-full h-full object-contain" />
+                  <Image src={currentMainImage} alt={selectedProduct.name} fill sizes="(min-width: 768px) 50vw, 100vw" className="object-contain p-4" />
                 </div>
                 {productGallery.length > 1 && (
                   <div className="flex gap-2 overflow-x-auto pb-1">
@@ -1498,12 +1542,12 @@ export function PetTravelApp() {
                       <button
                         key={i}
                         type="button"
-                        className={`w-12 h-12 rounded-xl overflow-hidden border bg-white p-1 shrink-0 cursor-pointer ${
+                        className={`relative w-12 h-12 rounded-xl overflow-hidden border bg-white p-1 shrink-0 cursor-pointer ${
                           currentMainImage === imgUrl ? "border-orange-500 ring-2 ring-orange-200" : "border-orange-100"
                         }`}
                         onClick={() => setSelectedMainImage(imgUrl)}
                       >
-                        <img src={imgUrl} alt="" className="w-full h-full object-contain" />
+                        <Image src={imgUrl} alt="" fill sizes="48px" className="object-contain p-1" />
                       </button>
                     ))}
                   </div>

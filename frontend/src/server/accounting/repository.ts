@@ -12,5 +12,5 @@ export async function getAccountingOverview(user: UserAccount): Promise<Accounti
 }
 
 export async function getJournalEntryDetails(user: UserAccount, limit = 20): Promise<JournalEntryDetail[]> {
-  return backendFetch(`/api/v1/accounting/journal-entries`);
+  return backendFetch(`/api/v1/accounting/journal-entries?limit=${limit}`);
 }

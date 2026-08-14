@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
-import { AlertTriangle, Boxes, Building2, PackageCheck, RefreshCw, Upload, X, WalletCards } from "lucide-react";
+import { useState } from "react";
+import Image from "next/image";
+import { AlertTriangle, Boxes, PackageCheck, RefreshCw, WalletCards } from "lucide-react";
 import type { Product, Supplier, OperationsOverview, ProductVariant, OperationsDocumentType } from "@/lib/domain";
 import { formatVnd } from "@/lib/money";
 import { StatusPill } from "../ui/StatusPill";
@@ -14,6 +15,7 @@ interface AdminInventoryProps {
   allCategories: string[];
   operationsOverview: OperationsOverview | null;
   isOperationsLoading: boolean;
+  overviewError: string;
   fetchProducts: () => Promise<void>;
   fetchSuppliers: () => Promise<void>;
   fetchCategories: () => Promise<void>;
@@ -29,6 +31,7 @@ export function AdminInventory({
   allCategories,
   operationsOverview,
   isOperationsLoading,
+  overviewError,
   fetchProducts,
   fetchSuppliers,
   fetchCategories,
@@ -44,13 +47,11 @@ export function AdminInventory({
   const [formProductSupplier, setFormProductSupplier] = useState("");
   const [formImage, setFormImage] = useState("/product-food.svg");
   const [formImages, setFormImages] = useState<string[]>([]);
-  const [newImageUrlInput, setNewImageUrlInput] = useState("");
   const [formDimensions, setFormDimensions] = useState("");
   const [formWeight, setFormWeight] = useState(0);
   const [formDescription, setFormDescription] = useState("");
   const [formTags, setFormTags] = useState("");
   const [formVariants, setFormVariants] = useState<ProductVariant[]>([]);
-  const [variantUploadingIndex, setVariantUploadingIndex] = useState<number | null>(null);
 
   // --- LOCAL STATES FOR CATEGORY ---
   const [showCategoryForm, setShowCategoryForm] = useState(false);
@@ -89,11 +90,6 @@ export function AdminInventory({
       stock_adjustment: "Kiểm kê / điều chỉnh"
     };
     return labels[type];
-  };
-
-  const visibleSupplierName = (supplierId: string) => {
-    const found = suppliers.find((s) => s.id === supplierId);
-    return found ? found.name : "Nhà cung cấp nội bộ";
   };
 
   // --- LOGIC HANDLERS ---
@@ -400,7 +396,7 @@ export function AdminInventory({
                     <tr key={p.id}>
                       <td className="w-16">
                         <div className="relative w-12 h-12 rounded-xl overflow-hidden border bg-orange-50 flex items-center justify-center p-1 shrink-0">
-                          <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain" />
+                          <Image src={p.imageUrl} alt={p.name} fill sizes="48px" className="object-contain p-1" />
                         </div>
                         <span className="text-[10px] font-mono font-bold text-orange-950 block mt-1 text-center">{p.code}</span>
                       </td>
@@ -700,12 +696,12 @@ export function AdminInventory({
             </div>
           </div>
 
-          {operationsError && (
+          {(overviewError || operationsError) && (
             <div className="p-4 border border-red-200 bg-red-50 rounded-2xl flex items-start gap-3">
               <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
               <div>
                 <strong className="text-sm text-red-950 block">Không xử lý được nghiệp vụ vận hành</strong>
-                <p className="text-xs text-red-800 m-0 mt-1">{operationsError}</p>
+                <p className="text-xs text-red-800 m-0 mt-1">{operationsError || overviewError}</p>
               </div>
             </div>
           )}
@@ -928,8 +924,8 @@ export function AdminInventory({
                     value={formImage}
                     onChange={(e) => setFormImage(e.target.value)}
                   />
-                  <div className="w-9 h-9 rounded-lg overflow-hidden border bg-white shrink-0 flex items-center justify-center p-0.5">
-                    <img src={formImage} alt="Preview" className="w-full h-full object-contain" />
+                  <div className="relative w-9 h-9 rounded-lg overflow-hidden border bg-white shrink-0 flex items-center justify-center p-0.5">
+                    <Image src={formImage} alt="Preview" fill sizes="36px" className="object-contain p-0.5" />
                   </div>
                 </div>
               </div>

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Users, X } from "lucide-react";
+import Image from "next/image";
+import { Users } from "lucide-react";
 import type { ApiUser } from "../../types";
 import { fullNameSchema, emailSchema, phoneSchema, passwordSchema, shortTextSchema } from "@/lib/validation";
 
@@ -110,9 +111,9 @@ export function AdminUsers({ isAdmin, userList, fetchUsers }: AdminUsersProps) {
                 <tr key={u.id} className="text-xs hover:bg-orange-50/20">
                   <td className="py-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full overflow-hidden bg-orange-50 flex items-center justify-center font-bold text-orange-750 text-xs shrink-0 border border-orange-200">
+                      <div className="relative w-8 h-8 rounded-full overflow-hidden bg-orange-50 flex items-center justify-center font-bold text-orange-750 text-xs shrink-0 border border-orange-200">
                         {u.avatarUrl ? (
-                          <img src={u.avatarUrl} alt="" className="w-full h-full object-cover" />
+                          <Image src={u.avatarUrl} alt="" fill sizes="32px" className="object-cover" />
                         ) : (
                           u.name?.charAt(0) || "U"
                         )}

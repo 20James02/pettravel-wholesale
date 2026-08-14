@@ -1,54 +1,96 @@
+from datetime import timedelta
+
+import jwt
 import pytest
+from sqlalchemy import text
 from fastapi import HTTPException
 
-from app.core.security import get_password_hash
-from app.models.wholesale import User
+from app.core.config import settings
+from app.core.security import create_access_token, get_password_hash
 from app.routers.v1.endpoints.auth import LoginJsonInput, login_json
 
 
+def test_access_token_round_trip_uses_hs256():
+    token = create_access_token("u_token_probe", expires_delta=timedelta(minutes=5))
+
+    payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+
+    assert payload["sub"] == "u_token_probe"
+
+
 @pytest.mark.asyncio
-async def test_login_json_returns_user_for_valid_credentials(db_session):
-    db_session.add(
-        User(
-            id="u_auth_valid",
-            email="owner@example.com",
-            hashed_password=get_password_hash("CorrectPassword123"),
-            name="Owner",
-            phone="0900000000",
-            role="super_admin",
-            company="Pet Travel Wholesale",
-        )
+async def test_login_json_returns_canonical_user_role_and_organization(canonical_db_session):
+    await canonical_db_session.execute(
+        text("insert into organizations (id, name) values ('org_pettravel', 'Pet Travel Wholesale')")
     )
-    await db_session.commit()
+    await canonical_db_session.execute(
+        text("""insert into app_users
+            (id, organization_id, email, password_hash, full_name, phone, status)
+            values (:id, :organization_id, :email, :password_hash, :full_name, :phone, 'active')"""),
+        {
+            "id": "u_auth_valid",
+            "organization_id": "org_pettravel",
+            "email": "owner@example.com",
+            "password_hash": get_password_hash("CorrectPassword123"),
+            "full_name": "Owner",
+            "phone": "0900000000",
+        },
+    )
+    await canonical_db_session.execute(
+        text("insert into user_roles (user_id, role_id) values ('u_auth_valid', 'role_admin')")
+    )
+    await canonical_db_session.commit()
 
     result = await login_json(
         LoginJsonInput(email="owner@example.com", password="CorrectPassword123"),
-        db_session,
+        canonical_db_session,
     )
 
     assert result["token_type"] == "bearer"
     assert result["access_token"]
     assert result["user"]["id"] == "u_auth_valid"
     assert result["user"]["role"] == "super_admin"
+    assert result["user"]["organizationId"] == "org_pettravel"
+    assert result["user"]["company"] == "Pet Travel Wholesale"
 
 
 @pytest.mark.asyncio
-async def test_login_json_rejects_invalid_stored_password_hash(db_session):
-    db_session.add(
-        User(
-            id="u_auth_bad_hash",
-            email="bad-hash@example.com",
-            hashed_password="...",
-            name="Bad Hash",
-            role="customer_owner",
-        )
+async def test_login_json_rejects_invalid_stored_password_hash(canonical_db_session):
+    await canonical_db_session.execute(
+        text("""insert into app_users
+            (id, email, password_hash, full_name, status)
+            values ('u_auth_bad_hash', 'bad-hash@example.com', '...', 'Bad Hash', 'active')""")
     )
-    await db_session.commit()
+    await canonical_db_session.commit()
 
     with pytest.raises(HTTPException) as exc:
         await login_json(
             LoginJsonInput(email="bad-hash@example.com", password="CorrectPassword123"),
-            db_session,
+            canonical_db_session,
         )
 
     assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_json_rejects_disabled_account(canonical_db_session):
+    await canonical_db_session.execute(
+        text("""insert into app_users
+            (id, email, password_hash, full_name, status)
+            values (:id, :email, :password_hash, :full_name, 'disabled')"""),
+        {
+            "id": "u_disabled",
+            "email": "disabled@example.com",
+            "password_hash": get_password_hash("CorrectPassword123"),
+            "full_name": "Disabled User",
+        },
+    )
+    await canonical_db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        await login_json(
+            LoginJsonInput(email="disabled@example.com", password="CorrectPassword123"),
+            canonical_db_session,
+        )
+
+    assert exc.value.status_code == 403

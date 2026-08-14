@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { cookies } from "next/headers";
 import type { PermissionKey, RoleKey, UserAccount } from "@/lib/domain";
 import { getBackendHeaders, getBackendUrl } from "@/server/backend-client";
+import { hasPermission as userHasPermission } from "@/server/authorization";
 
 const SESSION_COOKIE = "pt_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
@@ -14,47 +15,6 @@ const INTERNAL_ROLE_KEYS: ReadonlySet<RoleKey> = new Set([
   "accountant",
   "warehouse"
 ]);
-const ROLE_PERMISSIONS: Record<RoleKey, PermissionKey[]> = {
-  super_admin: [
-    "catalog.read", "catalog.write",
-    "supplier.read", "supplier.write",
-    "order.read", "order.quote", "order.adjust",
-    "order.confirm_payment", "order.ship",
-    "order.comment_internal",
-    "accounting.read", "accounting.write", "accounting.post",
-    "accounting.close_period", "accounting.export",
-    "operations.read", "operations.write", "operations.post",
-    "rbac.write"
-  ],
-  admin_manager: [
-    "catalog.read", "catalog.write",
-    "supplier.read", "supplier.write",
-    "order.read", "order.quote", "order.adjust",
-    "order.confirm_payment", "order.ship",
-    "order.comment_internal",
-    "accounting.read", "accounting.write", "accounting.post",
-    "accounting.close_period", "accounting.export",
-    "operations.read", "operations.write", "operations.post"
-  ],
-  order_operator: [
-    "catalog.read", "supplier.read",
-    "order.read", "order.quote", "order.adjust",
-    "order.ship", "order.comment_internal",
-    "operations.read", "operations.write"
-  ],
-  accountant: [
-    "order.read", "order.confirm_payment", "order.comment_internal",
-    "accounting.read", "accounting.write", "accounting.post", "accounting.export",
-    "operations.read", "operations.write", "operations.post"
-  ],
-  warehouse: [
-    "catalog.read", "supplier.read", "order.read", "order.ship", "order.comment_internal",
-    "operations.read", "operations.write", "operations.post"
-  ],
-  customer_owner: ["catalog.read", "order.read"],
-  customer_staff: ["catalog.read", "order.read"]
-};
-
 function getRequiredSecret(name: "JWT_SECRET"): string {
   const value = process.env[name];
   if (value && value.length >= 32) return value;
@@ -146,16 +106,20 @@ export async function getSessionUser(): Promise<UserAccount | null> {
     if (!res.ok) return null;
     const row = await res.json();
     const role = row.role as RoleKey;
+    if (!INTERNAL_ROLE_KEYS.has(role) && role !== "customer_owner" && role !== "customer_staff") {
+      return null;
+    }
     const isAdmin = INTERNAL_ROLE_KEYS.has(role);
 
     return {
       id: row.id,
       name: row.name,
       company: row.company,
-      organizationId: undefined,
+      organizationId: row.organizationId || undefined,
       email: row.email,
       role,
-      isAdmin
+      isAdmin,
+      permissions: Array.isArray(row.permissions) ? row.permissions : []
     };
   } catch {
     return null;
@@ -184,7 +148,7 @@ export async function requireAdmin(): Promise<UserAccount> {
 }
 
 export function hasPermission(user: UserAccount, permission: PermissionKey): boolean {
-  return ROLE_PERMISSIONS[user.role]?.includes(permission) ?? false;
+  return userHasPermission(user, permission);
 }
 
 export async function requirePermission(permission: PermissionKey): Promise<UserAccount> {

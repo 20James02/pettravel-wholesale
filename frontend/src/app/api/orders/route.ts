@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSessionUser, requireSameOrigin } from "@/server/auth";
+import { BackendRequestError } from "@/server/backend-client";
 import { normalizeOrderQuoteFinancials } from "@/server/accounting/order-financials";
+import { getMissingOrderPermissions } from "@/server/order-authorization";
 import { getAdminPolicy, getOrders, getProducts, saveOrder } from "@/server/db";
 import type { CustomerOrder, OrderComment, OrderItem, PaymentProof } from "@/lib/domain";
 import {
@@ -41,6 +43,9 @@ const customerProofSchema = z.object({
   id: idSchema,
   paymentRequestId: idSchema,
   fileName: z.string().trim().min(3, "Tên file quá ngắn.").max(180, "Tên file quá dài."),
+  storageKey: z.string().trim().min(3).max(500),
+  contentType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]),
+  fileSizeBytes: z.number().int().positive().max(10 * 1024 * 1024),
   uploadedAt: z.string().optional()
 });
 
@@ -71,7 +76,8 @@ const adminQuoteAdjustmentSchema = z.object({
   type: z.enum(["discount", "free_shipping", "offer", "shipping_fee"]),
   label: shortTextSchema("Tên điều chỉnh", 1, 160),
   amount: z.number().int("Số tiền điều chỉnh phải là số nguyên VND.").min(-10_000_000_000).max(10_000_000_000),
-  requiresApproval: z.boolean()
+  requiresApproval: z.boolean(),
+  approvedBy: idSchema.optional()
 });
 
 const adminQuoteSchema = z.object({
@@ -248,11 +254,20 @@ export async function POST(request: Request) {
       updatedAt: new Date().toISOString()
     };
 
-    await saveOrder(newOrder, user.id);
-    return NextResponse.json({ order: sanitizeOrderForCustomer(newOrder) });
+    const saved = await saveOrder(newOrder, user.id);
+    const persistedOrder = {
+      ...newOrder,
+      id: saved.orderId,
+      number: saved.orderNumber,
+      updatedAt: saved.updatedAt
+    };
+    return NextResponse.json({ order: sanitizeOrderForCustomer(persistedOrder) });
   } catch (error) {
     const msg = getValidationErrorMessage(error, "Lỗi tạo đơn hàng.");
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return NextResponse.json(
+      { error: msg },
+      { status: error instanceof BackendRequestError ? error.status : 400 }
+    );
   }
 }
 
@@ -286,6 +301,13 @@ export async function PUT(request: Request) {
 
     let orderToSave = updatedOrder;
     if (user.isAdmin) {
+      const missingPermissions = getMissingOrderPermissions(existing, updatedOrder, user);
+      if (missingPermissions.length > 0) {
+        return NextResponse.json(
+          { error: `Thiếu quyền nghiệp vụ: ${missingPermissions.join(", ")}.` },
+          { status: 403 }
+        );
+      }
       if (existing.assignedStaffId && existing.assignedStaffId !== user.id && user.role !== "super_admin") {
         return NextResponse.json(
           { error: `Đơn hàng này đang được xử lý bởi nhân viên khác (${existing.assignedStaffName || "Nhân viên vận hành"}). Bạn không có quyền chỉnh sửa.` },
@@ -322,6 +344,9 @@ export async function PUT(request: Request) {
             id: proof.id,
             paymentRequestId: proof.paymentRequestId,
             fileName: proof.fileName,
+            storageKey: proof.storageKey,
+            contentType: proof.contentType,
+            fileSizeBytes: proof.fileSizeBytes,
             uploadedAt: proof.uploadedAt ?? new Date().toISOString(),
             status: "pending_admin_confirmation" as const
           }))
@@ -351,12 +376,16 @@ export async function PUT(request: Request) {
       };
     }
 
-    await saveOrder(orderToSave, user.id);
-    const result = user.isAdmin ? orderToSave : sanitizeOrderForCustomer(orderToSave);
+    const saved = await saveOrder(orderToSave, user.id, existing.updatedAt);
+    const persistedOrder = { ...orderToSave, updatedAt: saved.updatedAt };
+    const result = user.isAdmin ? persistedOrder : sanitizeOrderForCustomer(persistedOrder);
     return NextResponse.json({ order: result });
   } catch (error) {
     const msg = getValidationErrorMessage(error, "Lỗi cập nhật đơn hàng.");
-    return NextResponse.json({ error: msg }, { status: 400 });
+    return NextResponse.json(
+      { error: msg },
+      { status: error instanceof BackendRequestError ? error.status : 400 }
+    );
   }
 }
 

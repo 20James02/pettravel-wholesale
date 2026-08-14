@@ -2,7 +2,12 @@ import pytest
 from datetime import datetime, timezone
 from sqlalchemy import text
 from app.models.wholesale import Product, ProductVariant, Supplier
-from app.routers.v1.endpoints.operations import check_sku_availability, get_operations_overview, create_operations_document
+from app.routers.v1.endpoints.operations import (
+    _require_actor_permission,
+    check_sku_availability,
+    create_operations_document,
+    get_operations_overview,
+)
 from fastapi import HTTPException
 
 @pytest.mark.asyncio
@@ -91,3 +96,34 @@ async def test_operations_endpoints(db_session):
     assert overview["inventory"]["defectiveQty"] == 5
     assert overview["inventory"]["availableQty"] == 35 # 50 - 10 - 5
     assert overview["inventory"]["inventoryValueVnd"] == 50 * 150000
+
+
+@pytest.mark.asyncio
+async def test_operations_actor_cannot_cross_organization(canonical_db_session):
+    await canonical_db_session.execute(
+        text("insert into organizations (id, name) values ('org_1', 'Pet Travel'), ('org_2', 'Khác')")
+    )
+    await canonical_db_session.execute(
+        text("""insert into app_users (id, organization_id, full_name, email, status)
+            values ('warehouse_1', 'org_1', 'Kho', 'warehouse@example.com', 'active')""")
+    )
+    await canonical_db_session.execute(
+        text("insert into user_roles (user_id, role_id) values ('warehouse_1', 'role_admin')")
+    )
+    await canonical_db_session.execute(
+        text("insert into permissions (key, description) values ('operations.write', 'Write operations')")
+    )
+    await canonical_db_session.execute(
+        text("insert into role_permissions (role_id, permission_key) values ('role_admin', 'operations.write')")
+    )
+    await canonical_db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        await _require_actor_permission(
+            canonical_db_session,
+            actor_id="warehouse_1",
+            permission="operations.write",
+            organization_id="org_2",
+        )
+
+    assert exc.value.status_code == 403

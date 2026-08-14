@@ -1,8 +1,12 @@
 from sqlalchemy import Column, String, Integer, Float, Boolean, ForeignKey, DateTime, JSON, Text
 from sqlalchemy.orm import declarative_base, relationship
-from datetime import datetime
+from datetime import datetime, timezone
 
 Base = declarative_base()
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 class User(Base):
     __tablename__ = "users"
@@ -15,7 +19,7 @@ class User(Base):
     role = Column(String, default="customer_owner") # super_admin, operator, accountant, customer_owner
     company = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
 
 class Product(Base):
     __tablename__ = "products"
@@ -30,7 +34,7 @@ class Product(Base):
     weight = Column(Float, default=0.0)
     description = Column(Text, nullable=True)
     tags = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
     
     variants = relationship("ProductVariant", back_populates="product", cascade="all, delete-orphan")
 
@@ -57,7 +61,7 @@ class Supplier(Base):
     name = Column(String, nullable=False)
     lead_time_days = Column(Integer, default=3)
     is_admin_only = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
 
 
 # --- BUSINESS LOGIC MODELS: ORDERS, PAYMENTS, ACCOUNTING, INVENTORY RESERVATION ---
@@ -89,8 +93,8 @@ class Order(Base):
     shipment_eta = Column(String, nullable=True)
     shipment_note = Column(String, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     quotes = relationship("QuoteVersion", back_populates="order", cascade="all, delete-orphan")
@@ -126,7 +130,7 @@ class QuoteVersion(Base):
     cod_remaining = Column(Integer, nullable=False)
     shipping_fee_option = Column(String, default="included") # included, separate_cod
     expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
     
     order = relationship("Order", back_populates="quotes")
     adjustments = relationship("QuoteAdjustment", back_populates="quote", cascade="all, delete-orphan")
@@ -155,7 +159,7 @@ class PaymentRequest(Base):
     qr_payload = Column(String, nullable=False)
     status = Column(String, default="active") # active, superseded, paid, expired
     expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
     
     order = relationship("Order", back_populates="payment_requests")
 
@@ -166,7 +170,7 @@ class PaymentProof(Base):
     order_id = Column(String, ForeignKey("orders.id"), nullable=False)
     payment_request_id = Column(String, ForeignKey("payment_requests.id"), nullable=False)
     file_name = Column(String, nullable=False)
-    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    uploaded_at = Column(DateTime(timezone=True), default=utc_now)
     status = Column(String, default="pending_admin_confirmation") # pending_admin_confirmation, accepted, rejected
     
     order = relationship("Order", back_populates="payment_proofs")
@@ -179,7 +183,7 @@ class OrderComment(Base):
     author = Column(String, nullable=False)
     audience = Column(String, nullable=False) # customer_visible, internal
     message = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
     
     order = relationship("Order", back_populates="comments")
 
@@ -193,8 +197,8 @@ class StockReservation(Base):
     status = Column(String, default="reserved") # reserved, released, expired, consumed
     reason = Column(String, nullable=True)
     expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 class JournalEntry(Base):
     __tablename__ = "journal_entries"
@@ -205,7 +209,7 @@ class JournalEntry(Base):
     status = Column(String, default="draft") # draft, posted, void
     source_type = Column(String, nullable=False) # order, purchase, adjustment, expense
     source_id = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
     posted_at = Column(DateTime, nullable=True)
     
     lines = relationship("JournalLine", back_populates="entry", cascade="all, delete-orphan")

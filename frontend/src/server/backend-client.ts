@@ -4,6 +4,16 @@ function isVercelRuntime(): boolean {
   return process.env.VERCEL === "1" || ["production", "preview"].includes(process.env.VERCEL_ENV ?? "");
 }
 
+export class BackendRequestError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string
+  ) {
+    super(message);
+    this.name = "BackendRequestError";
+  }
+}
+
 export function getBackendUrl(): string {
   const configuredUrl = process.env.BACKEND_URL?.trim().replace(/\/$/, "");
   if (!configuredUrl) {
@@ -38,7 +48,11 @@ export async function backendFetchJson(path: string, options: RequestInit = {}) 
   });
 
   if (!response.ok) {
-    throw new Error(`Backend request failed with HTTP ${response.status}.`);
+    const body = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new BackendRequestError(
+      response.status,
+      body?.detail || `Backend request failed with HTTP ${response.status}.`
+    );
   }
 
   return response.json();

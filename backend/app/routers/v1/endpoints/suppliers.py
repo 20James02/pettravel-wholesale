@@ -1,70 +1,81 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from typing import List, Dict, Any
-from app.core.db import get_db
-from app.models.wholesale import Supplier
 import uuid
+from typing import Any, Dict, List
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.db import get_db
+
 
 router = APIRouter()
 
+
 @router.get("/", response_model=List[Dict[str, Any]])
 async def get_suppliers(db: AsyncSession = Depends(get_db)):
-    """
-    Truy xuất danh sách nhà cung cấp.
-    """
-    result = await db.execute(select(Supplier))
-    suppliers = result.scalars().all()
+    rows = (
+        await db.execute(
+            text("""select id, code, name, lead_time_days, admin_only
+                from suppliers where active = true order by code""")
+        )
+    ).mappings().all()
     return [
         {
-            "id": s.id,
-            "code": s.code,
-            "name": s.name,
-            "leadTimeDays": s.lead_time_days,
-            "isAdminOnly": s.is_admin_only
+            "id": row["id"],
+            "code": row["code"],
+            "name": row["name"],
+            "leadTimeDays": int(row["lead_time_days"]),
+            "adminOnly": bool(row["admin_only"]),
         }
-        for s in suppliers
+        for row in rows
     ]
+
 
 @router.post("/", response_model=Dict[str, Any])
 async def save_supplier(payload: Dict[str, Any], db: AsyncSession = Depends(get_db)):
-    """
-    Thêm mới hoặc cập nhật một nhà cung cấp.
-    """
-    id_ = payload.get("id")
-    if id_:
-        result = await db.execute(select(Supplier).filter(Supplier.id == id_))
-        db_supplier = result.scalars().first()
-    else:
-        db_supplier = None
-        
-    if not db_supplier:
-        db_supplier = Supplier(
-            id=id_ or f"sup_{uuid.uuid4().hex[:12]}",
-            code=payload["code"],
-            name=payload["name"],
-            lead_time_days=payload.get("leadTimeDays", 3),
-            is_admin_only=payload.get("isAdminOnly", False)
+    code = str(payload.get("code") or "").strip()
+    name = str(payload.get("name") or "").strip()
+    if not code or not name:
+        raise HTTPException(status_code=400, detail="Mã và tên nhà cung cấp là bắt buộc.")
+    supplier_id = str(payload.get("id") or f"sup_{uuid.uuid4().hex}")
+    existing = (
+        await db.execute(
+            text("select id from suppliers where id = :id or code = :code limit 1"),
+            {"id": supplier_id, "code": code},
         )
-        db.add(db_supplier)
+    ).mappings().first()
+    values = {
+        "id": str(existing["id"]) if existing else supplier_id,
+        "code": code,
+        "name": name,
+        "lead_time_days": max(0, int(payload.get("leadTimeDays") or 1)),
+        "admin_only": bool(payload.get("adminOnly", True)),
+    }
+    if existing:
+        await db.execute(
+            text("""update suppliers set code = :code, name = :name,
+                lead_time_days = :lead_time_days, admin_only = :admin_only,
+                active = true where id = :id"""),
+            values,
+        )
     else:
-        db_supplier.code = payload.get("code", db_supplier.code)
-        db_supplier.name = payload.get("name", db_supplier.name)
-        db_supplier.lead_time_days = payload.get("leadTimeDays", db_supplier.lead_time_days)
-        db_supplier.is_admin_only = payload.get("isAdminOnly", db_supplier.is_admin_only)
-        
+        await db.execute(
+            text("""insert into suppliers
+                (id, code, name, lead_time_days, admin_only, active)
+                values (:id, :code, :name, :lead_time_days, :admin_only, true)"""),
+            values,
+        )
     await db.commit()
-    return {"status": "success", "message": "Lưu nhà cung cấp thành công."}
+    return {"status": "success", "supplierId": values["id"], "message": "Lưu nhà cung cấp thành công."}
 
-@router.delete("/{id}", response_model=Dict[str, Any])
-async def delete_supplier(id: str, db: AsyncSession = Depends(get_db)):
-    """
-    Xóa một nhà cung cấp.
-    """
-    result = await db.execute(select(Supplier).filter(Supplier.id == id))
-    supplier = result.scalars().first()
-    if not supplier:
+
+@router.delete("/{supplier_id}", response_model=Dict[str, Any])
+async def delete_supplier(supplier_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        text("update suppliers set active = false where id = :id"),
+        {"id": supplier_id},
+    )
+    if not result.rowcount:
         raise HTTPException(status_code=404, detail="Không tìm thấy nhà cung cấp.")
-    await db.delete(supplier)
     await db.commit()
-    return {"status": "success", "message": "Xóa nhà cung cấp thành công."}
+    return {"status": "success", "message": "Đã ngừng sử dụng nhà cung cấp."}

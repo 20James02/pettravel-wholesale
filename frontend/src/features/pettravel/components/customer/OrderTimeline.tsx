@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { ChevronRight, MapPin, QrCode, Truck, Upload } from "lucide-react";
 import type { CustomerOrder } from "@/lib/domain";
-import type { ApiUser } from "../../types";
 import { formatVnd } from "@/lib/money";
 import { StatusPill } from "../ui/StatusPill";
 
@@ -9,17 +8,15 @@ interface OrderTimelineProps {
   isLoggedIn: boolean;
   mode: string;
   workingOrder: CustomerOrder;
-  currentUser: ApiUser | null;
   onPayNowClick: () => void;
   onBuyMore: () => void;
-  onUploadProof: () => void;
+  onUploadProof: (file: File) => void;
 }
 
 export function OrderTimeline({
   isLoggedIn,
   mode,
   workingOrder,
-  currentUser,
   onPayNowClick,
   onBuyMore,
   onUploadProof
@@ -49,6 +46,21 @@ export function OrderTimeline({
     }
     return workingOrder.paymentRequests[workingOrder.paymentRequests.length - 1];
   }, [workingOrder.paymentRequests]);
+  const paymentDetails = useMemo(() => {
+    const fields = new Map(
+      (activeReq?.qrPayload ?? "")
+        .split("|")
+        .slice(1)
+        .map((part) => {
+          const separator = part.indexOf("=");
+          return separator > 0 ? [part.slice(0, separator), part.slice(separator + 1)] : [part, ""];
+        })
+    );
+    return {
+      account: fields.get("account") || "Chưa cấu hình",
+      name: fields.get("name") || "PET TRAVEL WHOLESALE"
+    };
+  }, [activeReq?.qrPayload]);
 
   return (
     <section className="grid-dashboard">
@@ -259,22 +271,22 @@ export function OrderTimeline({
                 </div>
 
                 <strong className="text-sm text-orange-600 block mt-3 font-extrabold">{formatVnd(activeReq.amount)}</strong>
-                <span className="text-[8px] text-gray-500 font-mono mt-1">Techcombank · 190356782390</span>
+                <span className="text-[8px] text-gray-500 font-mono mt-1">TK · {paymentDetails.account}</span>
               </div>
 
               {/* Payment information details */}
               <div className="flex flex-col gap-2 w-full text-xs text-[#331B08] bg-orange-50/50 p-3 rounded-2xl border border-orange-100">
                 <div className="flex justify-between">
                   <span className="muted font-semibold">Ngân hàng:</span>
-                  <strong>Techcombank (TCB)</strong>
+                  <strong>Theo cấu hình thanh toán</strong>
                 </div>
                 <div className="flex justify-between">
                   <span className="muted font-semibold">Chủ tài khoản:</span>
-                  <strong>PET TRAVEL WHOLESALE</strong>
+                  <strong>{paymentDetails.name}</strong>
                 </div>
                 <div className="flex justify-between">
                   <span className="muted font-semibold">Số tài khoản:</span>
-                  <strong>1903 5678 2390</strong>
+                  <strong>{paymentDetails.account}</strong>
                 </div>
                 <div className="flex justify-between items-center border-t border-dashed border-orange-200 pt-2 mt-1">
                   <span className="muted font-bold text-[10px] uppercase">Nội dung:</span>
@@ -285,13 +297,21 @@ export function OrderTimeline({
               </div>
 
               {workingOrder.paymentStatus.includes("requested") && (
-                <button
-                  type="button"
+                <label
                   className="tab-button text-xs py-2 w-full justify-center bg-orange-500 text-white border-orange-600 hover:bg-orange-600 cursor-pointer font-bold rounded-xl mt-1 flex items-center gap-1.5"
-                  onClick={onUploadProof}
                 >
                   <Upload size={14} /> Gửi minh chứng chuyển khoản
-                </button>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    className="sr-only"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) onUploadProof(file);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
               )}
             </div>
           )}

@@ -165,7 +165,7 @@ async def vietqr_webhook(payload: Dict[str, Any], db: AsyncSession = Depends(get
     
     return {"status": "success", "message": "Đối soát ngân hàng hoàn tất, trạng thái đơn sỉ đã được cập nhật tự động."}
 
-@router.get("/list", response_model=List[Dict[str, Any]])
+@router.get("/legacy-list", response_model=List[Dict[str, Any]], include_in_schema=False)
 async def list_orders(
     user_id: str = None,
     is_admin: bool = False,
@@ -307,7 +307,7 @@ async def list_orders(
         
     return output
 
-@router.post("/save", response_model=Dict[str, Any])
+@router.post("/legacy-save", response_model=Dict[str, Any], include_in_schema=False)
 async def save_order(
     payload: Dict[str, Any],
     creator_id: str = "u_demo_customer",
@@ -562,4 +562,3 @@ async def calculate_financials(payload: Dict[str, Any]):
         "paymentDueNow": deposit_amount,
         "appliedAdjustments": applied_adjustments
     }
-

@@ -36,12 +36,11 @@ export async function postOrderAccounting(
   input: AccountingOrderPostingInput,
   user: UserAccount
 ): Promise<AccountingOrderPostingResult> {
-  void user;
-
   const data = await backendFetchJson("/api/v1/accounting/order-posting", {
     method: "POST",
     body: JSON.stringify({
       orderId: input.orderId,
+      actorId: user.id,
       mode: input.mode,
       vatRateBps: input.vatRateBps,
       requireConsumedStock: input.requireConsumedStock

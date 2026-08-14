@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import Image from "next/image";
 import { AlertTriangle } from "lucide-react";
 import type { CustomerOrder, OrderItem, Product } from "@/lib/domain";
 import { formatVnd } from "@/lib/money";
@@ -125,7 +126,7 @@ export function Cart({
                     {/* Header sản phẩm */}
                     <div className="flex items-center gap-3 pb-2 border-b border-dashed border-orange-100">
                       <div className="relative w-10 h-10 rounded-xl bg-orange-50 overflow-hidden flex items-center justify-center border border-orange-100 shrink-0">
-                        <img src={group.productImage} alt={group.productName} className="w-full h-full object-cover" />
+                        <Image src={group.productImage} alt={group.productName} fill sizes="40px" className="object-cover" />
                       </div>
                       <div>
                         <strong className="text-xs text-[#331B08] block">{group.productName}</strong>

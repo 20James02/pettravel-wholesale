@@ -1,170 +1,168 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from collections import OrderedDict
+from typing import Any, Dict, List
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func
-from typing import Dict, Any, List
+
 from app.core.db import get_db
-from app.models.wholesale import JournalEntry, JournalLine, AccountingPeriod
-from app.services.accounting import post_order_sales_and_cost, post_order_deposit_receipt
+from app.services.canonical_accounting import post_order_accounting
+
 
 router = APIRouter()
+
+
+def _iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
 
 @router.get("/journal-entries", response_model=List[Dict[str, Any]])
 async def list_journal_entries(
     status_filter: str = "all",
-    db: AsyncSession = Depends(get_db)
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    Truy xuất danh sách bút toán nhật ký kế toán kép phục vụ đối soát tài chính B2B.
-    """
-    query = select(JournalEntry)
-    if status_filter != "all":
-        query = query.filter(JournalEntry.status == status_filter)
-        
-    query = query.order_by(JournalEntry.created_at.desc())
-    result = await db.execute(query)
-    entries = result.scalars().all()
-    
-    output = []
-    for entry in entries:
-        # Load dòng hạch toán chi tiết
-        line_query = select(JournalLine).filter(JournalLine.entry_id == entry.id)
-        line_result = await db.execute(line_query)
-        lines = line_result.scalars().all()
-        
-        lines_data = []
-        debit_total = 0
-        credit_total = 0
-        for line in lines:
-            lines_data.append({
-                "lineNo": line.line_no,
-                "accountCode": line.account_code,
-                "accountName": line.account_name,
-                "debitAmountVnd": line.debit_amount_vnd,
-                "creditAmountVnd": line.credit_amount_vnd,
-                "memo": line.memo,
-                "orderId": line.order_id,
-                "supplierId": line.supplier_id,
-                "partnerOrgId": line.partner_org_id
-            })
-            debit_total += line.debit_amount_vnd
-            credit_total += line.credit_amount_vnd
-            
-        output.append({
-            "id": entry.id,
-            "entryNo": entry.entry_no,
-            "description": entry.description,
-            "status": entry.status,
-            "sourceType": entry.source_type,
-            "sourceId": entry.source_id,
-            "createdAt": entry.created_at.isoformat(),
-            "postedAt": entry.posted_at.isoformat() if entry.posted_at else None,
-            "debitTotalVnd": debit_total,
-            "creditTotalVnd": credit_total,
-            "isBalanced": debit_total == credit_total,
-            "lines": lines_data
-        })
-        
+    if status_filter not in {"all", "draft", "posted", "void"}:
+        raise HTTPException(status_code=400, detail="Trạng thái bút toán không hợp lệ.")
+    limit = max(1, min(limit, 200))
+    rows = (
+        await db.execute(
+            text("""select
+                je.id, je.entry_no, je.description, je.status, je.source_type,
+                je.source_id, je.created_at, je.posted_at,
+                jl.line_no, jl.account_code, jl.account_name,
+                jl.debit_amount, jl.credit_amount, jl.memo,
+                jl.order_id, jl.supplier_id, jl.partner_org_id
+            from journal_entries je
+            left join journal_lines jl on jl.entry_id = je.id
+            where (:status_filter = 'all' or je.status = :status_filter)
+            order by je.created_at desc, je.id, jl.line_no
+            limit :row_limit"""),
+            {"status_filter": status_filter, "row_limit": limit * 20},
+        )
+    ).mappings().all()
+
+    entries: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    for row in rows:
+        entry = entries.setdefault(
+            str(row["id"]),
+            {
+                "id": row["id"],
+                "entryNo": row["entry_no"],
+                "description": row["description"],
+                "status": row["status"],
+                "sourceType": row["source_type"],
+                "sourceId": row["source_id"],
+                "createdAt": _iso(row["created_at"]),
+                "postedAt": _iso(row["posted_at"]),
+                "debitTotalVnd": 0,
+                "creditTotalVnd": 0,
+                "isBalanced": False,
+                "lines": [],
+            },
+        )
+        if row["line_no"] is not None:
+            debit = int(row["debit_amount"] or 0)
+            credit = int(row["credit_amount"] or 0)
+            entry["debitTotalVnd"] += debit
+            entry["creditTotalVnd"] += credit
+            entry["lines"].append(
+                {
+                    "lineNo": row["line_no"],
+                    "accountCode": row["account_code"],
+                    "accountName": row["account_name"],
+                    "debitAmountVnd": debit,
+                    "creditAmountVnd": credit,
+                    "memo": row["memo"],
+                    "orderId": row["order_id"],
+                    "supplierId": row["supplier_id"],
+                    "partnerOrgId": row["partner_org_id"],
+                }
+            )
+
+    output = list(entries.values())[:limit]
+    for entry in output:
+        entry["isBalanced"] = (
+            entry["debitTotalVnd"] > 0
+            and entry["debitTotalVnd"] == entry["creditTotalVnd"]
+        )
     return output
 
+
 @router.post("/order-posting", response_model=Dict[str, Any])
-async def manual_order_posting(
-    payload: Dict[str, Any],
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Ghi sổ kế toán thủ công (chủ yếu phục vụ admin sửa đổi hạch toán hoặc ép ghi sổ kế toán).
-    """
-    order_id = payload.get("orderId")
-    mode = payload.get("mode", "post_all") # post_all hoặc post_confirmed_payments
-    
-    if not order_id:
-        raise HTTPException(status_code=400, detail="Thiếu orderId.")
-        
+async def manual_order_posting(payload: Dict[str, Any], db: AsyncSession = Depends(get_db)):
+    order_id = str(payload.get("orderId") or "")
+    actor_id = str(payload.get("actorId") or "")
+    if not order_id or not actor_id:
+        raise HTTPException(status_code=400, detail="Thiếu orderId hoặc actorId.")
+
     try:
-        created_count = 0
-        if mode == "post_confirmed_payments":
-            await post_order_deposit_receipt(order_id, db)
-            created_count = 1
-        else:
-            # Ghi cả doanh thu & giá vốn
-            await post_order_sales_and_cost(order_id, db)
-            created_count = 2
-            
+        result = await post_order_accounting(
+            db,
+            order_id=order_id,
+            actor_id=actor_id,
+            mode=str(payload.get("mode") or "post_all"),
+            vat_rate_bps=int(payload.get("vatRateBps") or 0),
+            require_consumed_stock=bool(payload.get("requireConsumedStock", True)),
+        )
         await db.commit()
-        return {
-            "status": "success",
-            "message": "Đã ghi sổ kế toán thành công cho đơn hàng sỉ.",
-            "result": {
-                "createdEntries": created_count,
-                "skippedEntries": 0
-            }
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception:
-        raise HTTPException(status_code=500, detail="Lỗi hệ thống khi ghi sổ kế toán.")
+        return {"status": "success", "message": "Đã ghi sổ kế toán cho đơn hàng.", "result": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Lỗi hệ thống khi ghi sổ kế toán.") from exc
+
 
 @router.get("/overview", response_model=Dict[str, Any])
 async def get_accounting_overview(
-    user_id: str = None,
-    org_id: str = None,
-    db: AsyncSession = Depends(get_db)
+    org_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    Truy xuất tổng hợp hoạt động kế toán.
-    """
-    # 1. Đếm chu kỳ kế toán
-    period_total_query = select(func.count()).select_from(AccountingPeriod)
-    if org_id:
-        period_total_query = period_total_query.filter(AccountingPeriod.organization_id == org_id)
-    
-    period_open_query = select(func.count()).select_from(AccountingPeriod).filter(AccountingPeriod.status == "open")
-    if org_id:
-        period_open_query = period_open_query.filter(AccountingPeriod.organization_id == org_id)
-        
-    period_closed_query = select(func.count()).select_from(AccountingPeriod).filter(AccountingPeriod.status == "closed")
-    if org_id:
-        period_closed_query = period_closed_query.filter(AccountingPeriod.organization_id == org_id)
-        
-    # 2. Đếm bút toán
-    draft_query = select(func.count()).select_from(JournalEntry).filter(JournalEntry.status == "draft")
-    posted_query = select(func.count()).select_from(JournalEntry).filter(JournalEntry.status == "posted")
-    void_query = select(func.count()).select_from(JournalEntry).filter(JournalEntry.status == "void")
-    
-    # 3. Lấy 10 bút toán gần nhất
-    recent_query = select(JournalEntry).order_by(JournalEntry.created_at.desc()).limit(10)
-    
-    r_period_total = await db.execute(period_total_query)
-    r_period_open = await db.execute(period_open_query)
-    r_period_closed = await db.execute(period_closed_query)
-    
-    r_draft = await db.execute(draft_query)
-    r_posted = await db.execute(posted_query)
-    r_void = await db.execute(void_query)
-    
-    r_recent = await db.execute(recent_query)
-    recent_entries = r_recent.scalars().all()
-    
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Thiếu organization id.")
+
+    counts = (
+        await db.execute(
+            text("""select
+                (select count(*) from accounting_periods where organization_id = :org_id) as periods_total,
+                (select count(*) from accounting_periods where organization_id = :org_id and status = 'open') as open_periods,
+                (select count(*) from accounting_periods where organization_id = :org_id and status = 'closed') as closed_periods,
+                (select count(*) from journal_entries where organization_id = :org_id and status = 'draft') as draft_entries,
+                (select count(*) from journal_entries where organization_id = :org_id and status = 'posted') as posted_entries,
+                (select count(*) from journal_entries where organization_id = :org_id and status = 'void') as void_entries"""),
+            {"org_id": org_id},
+        )
+    ).mappings().one()
+    recent = (
+        await db.execute(
+            text("""select id, entry_no, description, status, source_type, source_id, created_at, posted_at
+                from journal_entries where organization_id = :org_id
+                order by created_at desc limit 10"""),
+            {"org_id": org_id},
+        )
+    ).mappings().all()
+
     return {
-        "periodsTotal": r_period_total.scalar() or 0,
-        "openPeriods": r_period_open.scalar() or 0,
-        "closedPeriods": r_period_closed.scalar() or 0,
-        "draftEntries": r_draft.scalar() or 0,
-        "postedEntries": r_posted.scalar() or 0,
-        "voidEntries": r_void.scalar() or 0,
+        "periodsTotal": int(counts["periods_total"] or 0),
+        "openPeriods": int(counts["open_periods"] or 0),
+        "closedPeriods": int(counts["closed_periods"] or 0),
+        "draftEntries": int(counts["draft_entries"] or 0),
+        "postedEntries": int(counts["posted_entries"] or 0),
+        "voidEntries": int(counts["void_entries"] or 0),
         "recentEntries": [
             {
-                "id": e.id,
-                "entryNo": e.entry_no,
-                "description": e.description,
-                "status": e.status,
-                "sourceType": e.source_type,
-                "sourceId": e.source_id,
-                "createdAt": e.created_at.isoformat(),
-                "postedAt": e.posted_at.isoformat() if e.posted_at else None
+                "id": row["id"],
+                "entryNo": row["entry_no"],
+                "description": row["description"],
+                "status": row["status"],
+                "sourceType": row["source_type"],
+                "sourceId": row["source_id"],
+                "createdAt": _iso(row["created_at"]),
+                "postedAt": _iso(row["posted_at"]),
             }
-            for e in recent_entries
-        ]
+            for row in recent
+        ],
     }
-

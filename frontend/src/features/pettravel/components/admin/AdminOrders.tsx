@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import Image from "next/image";
 import { AlertTriangle, CheckCircle2, LockKeyhole, ShieldCheck, Truck } from "lucide-react";
 import type { CustomerOrder, Supplier, Product } from "@/lib/domain";
 import type { ApiUser } from "../../types";
@@ -350,7 +351,7 @@ export function AdminOrders({
                         <tr key={item.id} className={item.quantity === 0 ? "opacity-50 bg-gray-50/50" : ""}>
                           <td className="w-16">
                             <div className="relative w-10 h-10 rounded-xl overflow-hidden border bg-orange-50 flex items-center justify-center p-1 shrink-0">
-                              <img src={image} alt={item.productName} className="w-full h-full object-cover" />
+                              <Image src={image} alt={item.productName} fill sizes="40px" className="object-cover" />
                             </div>
                             <span className="text-[8px] font-mono font-bold text-orange-900 block mt-1 text-center">
                               {item.variantSku}

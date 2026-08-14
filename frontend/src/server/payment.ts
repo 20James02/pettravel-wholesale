@@ -1,7 +1,5 @@
 import "server-only";
 
-import { serverEnv } from "@/server/env";
-
 interface PaymentQrInput {
   orderNumber: string;
   quoteVersion: number;
@@ -20,8 +18,11 @@ export function buildPaymentReference(input: PaymentQrInput): string {
 
 export function buildQrPayload(input: PaymentQrInput): string {
   const reference = buildPaymentReference(input);
-  const accountName = serverEnv.PAYMENT_QR_ACCOUNT_NAME ?? "PET TRAVEL WHOLESALE";
-  const accountNo = serverEnv.PAYMENT_QR_ACCOUNT_NO ?? "CONFIGURE_BANK_ACCOUNT";
+  const accountName = process.env.PAYMENT_QR_ACCOUNT_NAME?.trim() || "PET TRAVEL WHOLESALE";
+  const accountNo = process.env.PAYMENT_QR_ACCOUNT_NO?.trim();
+  if (!accountNo) {
+    throw new Error("PAYMENT_QR_ACCOUNT_NO is not configured.");
+  }
 
   return [
     "PETTRAVEL_WHOLESALE_PAYMENT",
