@@ -237,14 +237,19 @@ export function PetTravelApp() {
         const res = await fetch("/api/auth/me");
         if (res.ok) {
           const data = await res.json();
-          setCurrentUser(data.user);
-          setMode(data.user.isAdmin ? "admin" : "customer");
-          // Restore user's cart from localStorage
-          const savedCart = localStorage.getItem(`ptw_cart_${data.user.id}`);
-          if (savedCart) {
-            try {
-              setCartItems(JSON.parse(savedCart));
-            } catch { /* silent */ }
+          if (data.user) {
+            setCurrentUser(data.user);
+            setMode(data.user.isAdmin ? "admin" : "customer");
+            if (data.user.isAdmin) {
+              setActiveTab((prev) => (prev === "catalog" || prev === "profile" ? "admin" : prev));
+            }
+            // Restore user's cart from localStorage
+            const savedCart = localStorage.getItem(`ptw_cart_${data.user.id}`);
+            if (savedCart) {
+              try {
+                setCartItems(JSON.parse(savedCart));
+              } catch { /* silent */ }
+            }
           }
         }
       } catch { /* silent */ }
@@ -566,7 +571,7 @@ export function PetTravelApp() {
       }
       setCurrentUser(data.user);
       setMode(data.user.isAdmin ? "admin" : "customer");
-      setActiveTab("catalog");
+      setActiveTab(data.user.isAdmin ? "admin" : "catalog");
       setShowLoginModal(false);
       setLoginEmail("");
       setLoginPassword("");
@@ -1194,6 +1199,7 @@ export function PetTravelApp() {
           <Topbar
             isLoggedIn={isLoggedIn}
             activeUser={currentUser}
+            isAdmin={isAdmin}
             activeTab={activeTab}
             setActiveTab={setActiveTab}
             setShowLoginModal={setShowLoginModal}

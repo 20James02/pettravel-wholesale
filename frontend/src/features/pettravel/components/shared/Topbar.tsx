@@ -1,6 +1,6 @@
 "use client";
 
-import { ShoppingBag, ShoppingCart, Clock, FileText } from "lucide-react";
+import { ShoppingBag, ShoppingCart, Clock, FileText, ShieldCheck } from "lucide-react";
 import type { TabKey, ApiUser } from "../../types";
 
 interface TopbarProps {
@@ -15,6 +15,7 @@ interface TopbarProps {
 
 export function Topbar({
   isLoggedIn,
+  isAdmin = false,
   activeTab,
   setActiveTab,
   setShowLoginModal,
@@ -67,14 +68,28 @@ export function Topbar({
           onClick={() => {
             if (!isLoggedIn) {
               setShowLoginModal(true);
+            } else if (isAdmin) {
+              setActiveTab("admin");
             } else {
               setActiveTab("profile");
             }
           }}
         >
           <FileText size={15} className="tab-icon-file" />
-          <span>Tài khoản & Lịch sử</span>
+          <span>{isAdmin ? "Hồ sơ Admin" : "Tài khoản & Lịch sử"}</span>
         </button>
+
+        {/* Tab 5 (Admin Portal quick badge): Cổng Quản trị Admin */}
+        {isAdmin && (
+          <button
+            type="button"
+            className={`liquid-glass-tab font-extrabold ${activeTab.startsWith("admin") || activeTab === "settings" ? "active" : ""}`}
+            onClick={() => setActiveTab("admin")}
+          >
+            <ShieldCheck size={15} className="text-orange-600" />
+            <span className="text-orange-950 font-bold">Cổng Quản Trị</span>
+          </button>
+        )}
       </nav>
     </header>
   );
