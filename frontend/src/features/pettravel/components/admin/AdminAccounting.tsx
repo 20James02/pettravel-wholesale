@@ -1,8 +1,14 @@
+"use client";
+
 import { useState, useMemo } from "react";
-import { AlertTriangle, BookOpenCheck, CheckCircle2, Clock, RefreshCw } from "lucide-react";
+import {
+  RefreshCw,
+  ShieldCheck,
+  Scale,
+  SlidersHorizontal
+} from "lucide-react";
 import type { CustomerOrder, AccountingOverview, JournalEntryDetail } from "@/lib/domain";
 import { formatVnd } from "@/lib/money";
-import { StatusPill } from "../ui/StatusPill";
 import { promotionsPolicySchema } from "@/lib/validation";
 
 interface PromotionsPolicy {
@@ -40,35 +46,27 @@ interface AdminAccountingProps {
 export function AdminAccounting({
   activeTab,
   isAdmin,
-  workingOrder,
   accountingOverview,
   accountingJournalEntries,
   isAccountingLoading,
   isAccountingJournalLoading,
-  accountingError,
   promotionsPolicy,
   setPromotionsPolicy,
   fetchAccountingOverview,
   fetchAccountingJournalEntries,
-  fetchPromotions,
-  rolePermissions,
-  adminPolicy
+  fetchPromotions
 }: AdminAccountingProps) {
-  // Local state for promotions config modal
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [showPromotionsForm, setShowPromotionsForm] = useState(false);
 
-  // Lấy bản báo giá cuối cùng của đơn hàng
-  const quote = useMemo(() => {
-    if (!workingOrder.quoteVersions || workingOrder.quoteVersions.length === 0) {
-      return { finalTotal: 0, depositAmount: 0 };
+  // Selected Journal Entry for Right Inspector
+  const activeJournalEntry = useMemo(() => {
+    if (selectedEntryId) {
+      const found = accountingJournalEntries.find((e) => e.id === selectedEntryId);
+      if (found) return found;
     }
-    return workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1];
-  }, [workingOrder.quoteVersions]);
-
-  // Formatter tỷ lệ phần trăm
-  const percent = (val: number) => {
-    return `${Math.round(val * 100)}%`;
-  };
+    return accountingJournalEntries.length > 0 ? accountingJournalEntries[0] : null;
+  }, [selectedEntryId, accountingJournalEntries]);
 
   const handleSavePromotions = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,580 +92,327 @@ export function AdminAccounting({
   if (!isAdmin) return null;
 
   return (
-    <div className="flex flex-col gap-6 animate-fade-in w-full text-xs">
-      {/* 1. TAB KẾ TOÁN DOANH NGHIỆP */}
+    <div className="flex flex-col gap-6 w-full animate-fade-in text-xs">
+      {/* 1. GENERAL LEDGER DOCK (Finnova Midnight Indigo Dual-Pane) */}
       {activeTab === "admin_accounting" && (
-        <div className="flex flex-col gap-6 w-full animate-fade-in">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <BookOpenCheck size={22} className="text-orange-600" />
-                <h2 className="text-xl font-bold text-[#331B08] font-['Varela_Round']">Kế toán doanh nghiệp</h2>
+        <div className="admin-dark-dock w-full p-4 sm:p-6 lg:p-7 flex flex-col gap-6">
+          {/* Header Strip with Refresh & Metrics */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#222744] pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
+                <Scale size={20} />
               </div>
-              <p className="muted text-xs font-semibold">
-                Theo dõi kỳ kế toán, bút toán nháp/đã ghi sổ và chuẩn bị luồng tự động ghi nhận cọc, COD, doanh thu, VAT.
-              </p>
+              <div className="flex flex-col">
+                <span className="text-sm font-extrabold text-white tracking-tight">
+                  Double-Entry General Ledger
+                </span>
+                <span className="text-xs text-gray-400 font-medium">
+                  Bút toán cân đối Nợ/Có (Debit ≡ Credit) & Nhật ký đối soát minh bạch
+                </span>
+              </div>
             </div>
-            <button
-              type="button"
-              className="tab-button text-xs py-2 px-4 border-orange-200 bg-white hover:bg-orange-50 cursor-pointer font-bold rounded-xl flex items-center gap-1.5"
-              onClick={() => {
-                fetchAccountingOverview();
-                fetchAccountingJournalEntries();
-              }}
-              disabled={isAccountingLoading || isAccountingJournalLoading}
-            >
-              <RefreshCw size={14} className={isAccountingLoading || isAccountingJournalLoading ? "animate-spin" : ""} />
-              {isAccountingLoading || isAccountingJournalLoading ? "Đang tải..." : "Làm mới số liệu"}
-            </button>
+
+            <div className="flex items-center gap-3 self-stretch sm:self-auto justify-end">
+              <button
+                type="button"
+                className="bg-[#191e36] hover:bg-[#222846] text-gray-200 border border-[#2b3356] font-bold text-xs py-2 px-4 rounded-full flex items-center gap-2 cursor-pointer transition"
+                onClick={() => {
+                  fetchAccountingOverview();
+                  fetchAccountingJournalEntries();
+                }}
+                disabled={isAccountingLoading || isAccountingJournalLoading}
+              >
+                <RefreshCw size={14} className={isAccountingLoading || isAccountingJournalLoading ? "animate-spin" : ""} />
+                <span>{isAccountingLoading || isAccountingJournalLoading ? "Đang tải..." : "Refresh Data"}</span>
+              </button>
+            </div>
           </div>
 
-          {accountingError && (
-            <div className="p-4 border border-red-200 bg-red-50 rounded-2xl flex items-start gap-3">
-              <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
-              <div>
-                <strong className="text-sm text-red-950 block">Không tải được dữ liệu kế toán</strong>
-                <p className="text-xs text-red-800 m-0 mt-1">{accountingError}</p>
+          {/* Quick Metrics Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-[#191e36] p-3.5 rounded-2xl border border-[#283152] flex flex-col justify-between">
+              <span className="text-[10px] font-bold text-gray-400 uppercase">Kỳ kế toán</span>
+              <div className="text-lg font-black text-white font-mono mt-1">
+                {accountingOverview ? accountingOverview.periodsTotal : "—"}
               </div>
-            </div>
-          )}
-
-          <div className="metrics-grid">
-            <div className="metric">
-              <span className="muted text-sm flex items-center gap-1 font-semibold">
-                <BookOpenCheck size={14} className="text-orange-600" /> Kỳ kế toán
-              </span>
-              <strong>{accountingOverview ? accountingOverview.periodsTotal : "—"}</strong>
-              <span className="text-[10px] muted">
+              <span className="text-[10px] text-gray-400">
                 Mở: {accountingOverview?.openPeriods ?? 0} · Đóng: {accountingOverview?.closedPeriods ?? 0}
               </span>
             </div>
-            <div className="metric">
-              <span className="muted text-sm flex items-center gap-1 font-semibold">
-                <Clock size={14} className="text-amber-600" /> Bút toán nháp
-              </span>
-              <strong className="text-amber-700">{accountingOverview ? accountingOverview.draftEntries : "—"}</strong>
-              <span className="text-[10px] muted">Chưa hạch toán, có thể kiểm tra/sửa đổi trước khi ghi sổ.</span>
+
+            <div className="bg-[#191e36] p-3.5 rounded-2xl border border-[#283152] flex flex-col justify-between">
+              <span className="text-[10px] font-bold text-amber-400 uppercase">Bút toán nháp</span>
+              <div className="text-lg font-black text-amber-400 font-mono mt-1">
+                {accountingOverview ? accountingOverview.draftEntries : "0"}
+              </div>
+              <span className="text-[10px] text-gray-400">Chưa ghi sổ</span>
             </div>
-            <div className="metric">
-              <span className="muted text-sm flex items-center gap-1 font-semibold">
-                <CheckCircle2 size={14} className="text-green-600" /> Đã ghi sổ
-              </span>
-              <strong className="text-green-700">{accountingOverview ? accountingOverview.postedEntries : "—"}</strong>
-              <span className="text-[10px] muted">Bút toán đã post sẽ bị khóa cứng để đảm bảo tính minh bạch.</span>
+
+            <div className="bg-[#191e36] p-3.5 rounded-2xl border border-[#283152] flex flex-col justify-between">
+              <span className="text-[10px] font-bold text-emerald-400 uppercase">Đã ghi sổ</span>
+              <div className="text-lg font-black text-emerald-400 font-mono mt-1">
+                {accountingOverview ? accountingOverview.postedEntries : "0"}
+              </div>
+              <span className="text-[10px] text-emerald-500/80 font-bold">Khóa sổ minh bạch</span>
             </div>
-            <div className="metric">
-              <span className="muted text-sm flex items-center gap-1 font-semibold">
-                <AlertTriangle size={14} className="text-red-600" /> Bút toán hủy
-              </span>
-              <strong className="text-red-700">{accountingOverview ? accountingOverview.voidEntries : "—"}</strong>
-              <span className="text-[10px] muted">Theo dõi sai lệch và điều chỉnh dòng tiền doanh nghiệp.</span>
+
+            <div className="bg-[#191e36] p-3.5 rounded-2xl border border-[#283152] flex flex-col justify-between">
+              <span className="text-[10px] font-bold text-rose-400 uppercase">Bút toán hủy</span>
+              <div className="text-lg font-black text-rose-400 font-mono mt-1">
+                {accountingOverview ? accountingOverview.voidEntries : "0"}
+              </div>
+              <span className="text-[10px] text-gray-400">Đã điều chỉnh</span>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_0.6fr] gap-6">
-            <div className="panel p-4 flex flex-col gap-4 overflow-x-auto w-full">
-              <div className="flex items-center justify-between border-b border-dashed border-orange-100 pb-2">
-                <h3 className="text-sm font-bold text-[#331B08]">Bút toán gần nhất</h3>
-                <StatusPill tone={accountingOverview?.recentEntries.length ? "info" : "warning"}>
-                  {accountingOverview?.recentEntries.length ? `${accountingOverview.recentEntries.length} dòng` : "Chưa có dữ liệu"}
-                </StatusPill>
-              </div>
-
-              <table className="variant-table w-full">
-                <thead>
-                  <tr>
-                    <th>Số bút toán</th>
-                    <th>Nguồn</th>
-                    <th>Diễn giải</th>
-                    <th>Ngày tạo</th>
-                    <th>Trạng thái</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {accountingOverview?.recentEntries && accountingOverview.recentEntries.length > 0 ? (
-                    accountingOverview.recentEntries.map((entry) => (
-                      <tr key={entry.id}>
-                        <td className="text-xs font-mono font-bold text-orange-950">{entry.entryNo}</td>
-                        <td>
-                          <span className="text-xs font-bold block text-[#331B08]">{entry.sourceType}</span>
-                          <span className="text-[10px] muted font-mono">{entry.sourceId}</span>
-                        </td>
-                        <td className="text-xs text-[#331B08] font-semibold">{entry.description}</td>
-                        <td className="text-xs text-gray-500 font-mono">
-                          {new Date(entry.createdAt).toLocaleString("vi-VN")}
-                        </td>
-                        <td>
+          {/* DUAL-PANE JOURNAL INSPECTOR: Left List (35%) & Right Detail Lines (65%) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-[500px]">
+            {/* Left List of Journal Entries */}
+            <div className="lg:col-span-5 flex flex-col gap-2.5 max-h-[520px] overflow-y-auto pr-1 admin-dark-scroll">
+              {accountingJournalEntries.length === 0 ? (
+                <div className="p-8 text-center text-xs text-gray-400 border border-dashed border-[#293050] rounded-2xl bg-[#161a30]">
+                  Chưa có bút toán nào trong hệ thống.
+                </div>
+              ) : (
+                accountingJournalEntries.map((entry) => {
+                  const isSelected = entry.id === activeJournalEntry?.id;
+                  return (
+                    <div
+                      key={entry.id}
+                      className={`p-3.5 rounded-2xl transition-all duration-200 cursor-pointer flex items-center justify-between gap-3 ${
+                        isSelected
+                          ? "bg-[#4f46e5] text-white shadow-[0_10px_28px_rgba(79,70,229,0.45)] scale-[1.01]"
+                          : "bg-[#181d33] hover:bg-[#1f2542] text-gray-200 border border-[#272e4e]"
+                      }`}
+                      onClick={() => setSelectedEntryId(entry.id)}
+                    >
+                      <div className="flex flex-col min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-extrabold text-xs tracking-tight truncate">
+                            {entry.entryNo}
+                          </span>
                           <span
-                            className={`status-pill text-[10px] ${
-                              entry.status === "posted" ? "success" : entry.status === "draft" ? "warning" : "info"
+                            className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                              isSelected
+                                ? "bg-white/20 text-white"
+                                : entry.status === "posted"
+                                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                                : "bg-amber-500/20 text-amber-300"
                             }`}
                           >
-                            {entry.status === "posted" ? "Đã ghi sổ" : entry.status === "draft" ? "Nháp" : "Đã hủy"}
+                            {entry.status === "posted" ? "Posted" : "Draft"}
                           </span>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={5} className="py-8 text-center text-xs text-gray-500 font-medium">
-                        Chưa có hạch toán nào.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-
-              <div className="flex flex-col gap-3 border-t border-dashed border-orange-100 pt-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-bold text-[#331B08] m-0">Sổ nhật ký chi tiết Nợ/Có</h3>
-                    <p className="text-[10px] muted m-0 mt-0.5 font-semibold">
-                      Hiển thị từng dòng hạch toán chi tiết để kiểm tra tài khoản, đối tượng và trạng thái cân Nợ/Có.
-                    </p>
-                  </div>
-                  <StatusPill tone={accountingJournalEntries.length ? "info" : "warning"}>
-                    {accountingJournalEntries.length ? `${accountingJournalEntries.length} hạch hạch` : "Chưa có dòng"}
-                  </StatusPill>
-                </div>
-
-                {accountingJournalEntries.length ? (
-                  <div className="flex flex-col gap-3">
-                    {accountingJournalEntries.map((entry) => (
-                      <div key={entry.id} className="rounded-2xl border border-orange-100 bg-[#FFFDF9] overflow-hidden">
-                        <div className="p-3 bg-orange-50/50 border-b border-orange-100 flex flex-col lg:flex-row lg:items-center justify-between gap-2">
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <strong className="text-xs font-mono text-orange-950">{entry.entryNo}</strong>
-                              <span
-                                className={`status-pill text-[9px] ${
-                                  entry.status === "posted" ? "success" : entry.status === "draft" ? "warning" : "info"
-                                }`}
-                              >
-                                {entry.status === "posted" ? "Đã ghi sổ" : entry.status === "draft" ? "Nháp" : "Đã hủy"}
-                              </span>
-                              <span className={`status-pill text-[9px] ${entry.isBalanced ? "success" : "warning"}`}>
-                                {entry.isBalanced ? "Cân Nợ/Có" : "Lệch Nợ/Có"}
-                              </span>
-                            </div>
-                            <p className="text-[11px] text-[#331B08] font-semibold m-0 mt-1">{entry.description}</p>
-                            <p className="text-[10px] muted m-0 mt-0.5 font-semibold">
-                              Nguồn: <span className="font-mono">{entry.sourceType}</span> ·{" "}
-                              <span className="font-mono">{entry.sourceId}</span>
-                            </p>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 text-right min-w-[220px]">
-                            <div className="rounded-xl bg-white border border-orange-100 p-2">
-                              <span className="text-[9px] muted uppercase font-bold block">Tổng Nợ</span>
-                              <strong className="text-xs text-green-700">{formatVnd(entry.debitTotalVnd)}</strong>
-                            </div>
-                            <div className="rounded-xl bg-white border border-orange-100 p-2">
-                              <span className="text-[9px] muted uppercase font-bold block">Tổng Có</span>
-                              <strong className="text-xs text-blue-700">{formatVnd(entry.creditTotalVnd)}</strong>
-                            </div>
-                          </div>
+                          {entry.isBalanced && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-400/20 text-indigo-200">
+                              Balanced
+                            </span>
+                          )}
                         </div>
-
-                        <div className="overflow-x-auto">
-                          <table className="variant-table w-full">
-                            <thead>
-                              <tr>
-                                <th>Dòng</th>
-                                <th>Tài khoản</th>
-                                <th>Đối tượng / đơn</th>
-                                <th className="text-right">Nợ</th>
-                                <th className="text-right">Có</th>
-                                <th>Ghi chú</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {entry.lines.map((line) => (
-                                <tr key={line.id}>
-                                  <td className="text-xs font-mono">{line.lineNo}</td>
-                                  <td>
-                                    <span className="text-xs font-bold text-[#331B08] block">
-                                      {line.accountCode} - {line.accountName}
-                                    </span>
-                                  </td>
-                                  <td className="text-[10px] text-gray-600 font-mono">
-                                    {line.orderId ? <span className="block">Đơn: {line.orderId}</span> : null}
-                                    {line.partnerOrgId ? <span className="block">Đối tác: {line.partnerOrgId}</span> : null}
-                                    {line.supplierId ? <span className="block">NCC: {line.supplierId}</span> : null}
-                                    {!line.orderId && !line.partnerOrgId && !line.supplierId ? "—" : null}
-                                  </td>
-                                  <td className="text-right text-xs font-bold text-green-700">
-                                    {line.debitAmountVnd > 0 ? formatVnd(line.debitAmountVnd) : "—"}
-                                  </td>
-                                  <td className="text-right text-xs font-bold text-blue-700">
-                                    {line.creditAmountVnd > 0 ? formatVnd(line.creditAmountVnd) : "—"}
-                                  </td>
-                                  <td className="text-[10px] text-gray-600">{line.memo || "—"}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
+                        <span className={`text-[11px] truncate mt-1 ${isSelected ? "text-indigo-100" : "text-gray-400"}`}>
+                          {entry.description}
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="p-4 rounded-2xl border border-dashed border-orange-200 bg-orange-50/30 text-xs text-orange-950 font-semibold">
-                    Chưa có dòng nhật ký chi tiết nào. Bấm “Ghi sổ toàn bộ đơn” để đồng bộ hạch toán.
-                  </div>
-                )}
-              </div>
+
+                      <div className="text-right shrink-0">
+                        <div className="font-mono font-black text-xs sm:text-sm tracking-tight">
+                          {formatVnd(entry.debitTotalVnd)}
+                        </div>
+                        <span className={`text-[10px] block ${isSelected ? "text-indigo-200" : "text-gray-400"}`}>
+                          {entry.lines.length} lines
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
 
-            <aside className="panel p-4 flex flex-col gap-4">
-              <div className="section-title">
-                <h3 className="text-lg font-bold">Kiểm soát kế toán</h3>
-              </div>
-              <div className="flex flex-col gap-3 text-[#331B08]">
-                <div className="p-3 border border-green-200 bg-green-50/40 rounded-2xl">
-                  <strong className="block text-green-800">Hạch toán Server-authoritative</strong>
-                  <p className="m-0 mt-1 text-green-900 leading-relaxed font-semibold">
-                    Mọi số liệu Nợ/Có đều được tính toán lại tại Server để chống gian lận.
-                  </p>
-                </div>
-                <div className="p-3 border border-orange-200 bg-orange-50/40 rounded-2xl">
-                  <strong className="block text-orange-900">Bảo mật chứng từ</strong>
-                  <p className="m-0 mt-1 text-orange-950 leading-relaxed font-semibold">
-                    Bút toán đã post không thể chỉnh sửa, chỉ có thể hạch toán đảo để giữ tính toàn vẹn.
-                  </p>
-                </div>
-              </div>
-            </aside>
-          </div>
-        </div>
-      )}
-
-      {/* 2. TAB QUẢN LÝ HÓA ĐƠN VAT */}
-      {activeTab === "admin_invoices" && (
-        <div className="flex flex-col gap-6 w-full animate-fade-in">
-          <div>
-            <h2 className="text-xl font-bold text-[#331B08] font-['Varela_Round']">🧾 Quản lý Hóa đơn đỏ (VAT)</h2>
-            <p className="muted text-xs font-semibold">
-              Xuất hóa đơn giá trị gia tăng chính thức cho các đại lý yêu cầu chứng từ sỉ.
-            </p>
-          </div>
-
-          <div className="panel p-4 flex flex-col gap-4 w-full">
-            <div className="flex justify-between items-center border-b border-dashed border-orange-100 pb-2">
-              <h3 className="text-sm font-bold text-[#331B08]">📋 Danh sách yêu cầu hóa đơn đỏ</h3>
-              <span className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-full px-2.5 py-0.5 font-bold">
-                {workingOrder.invoiceRequested ? "1 Yêu cầu mới" : "Không có yêu cầu"}
-              </span>
-            </div>
-
-            {workingOrder.invoiceRequested ? (
-              <div className="border border-orange-100 rounded-2xl p-4 bg-[#FFFDF9] flex flex-col gap-4">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[10px] muted font-bold">Tên công ty xuất:</span>
-                    <strong className="text-xs text-[#331B08]">{workingOrder.customerCompany}</strong>
-                  </div>
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[10px] muted font-bold">Mã số thuế:</span>
-                    <strong className="text-xs text-orange-950 font-mono">MST-031782601</strong>
-                  </div>
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[10px] muted font-bold">Địa chỉ hóa đơn:</span>
-                    <strong className="text-xs text-[#331B08]">Quận 1, Thành phố Hồ Chí Minh</strong>
-                  </div>
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[10px] muted font-bold">Trạng thái phát hành:</span>
+            {/* Right Detailed Journal Lines Inspector */}
+            <div className="lg:col-span-7 flex flex-col justify-between bg-[#171b30] rounded-2xl border border-[#272e4e] p-4 sm:p-6 shadow-inner">
+              {activeJournalEntry ? (
+                <div className="flex flex-col gap-4">
+                  {/* Inspector Header */}
+                  <div className="flex items-center justify-between border-b border-[#242a49] pb-3">
                     <div>
-                      {workingOrder.commercialStatus === "locked" ? (
-                        <span className="status-pill info text-[9px]">Chờ phát hành (Chờ thanh toán)</span>
-                      ) : workingOrder.paymentStatus === "paid" ? (
-                        <span className="status-pill success text-[9px]">Sẵn sàng phát hành (Đã thanh toán)</span>
-                      ) : (
-                        <span className="status-pill warning text-[9px]">Chờ thanh toán chốt tiền</span>
-                      )}
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                        Chi tiết bút toán
+                      </span>
+                      <h3 className="text-lg font-black text-white font-mono m-0 mt-0.5">
+                        {activeJournalEntry.entryNo}
+                      </h3>
+                      <p className="text-xs text-gray-300 m-0 mt-1">{activeJournalEntry.description}</p>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="text-[10px] text-gray-400 block font-semibold">TỔNG GIAO DỊCH</span>
+                      <span className="text-base font-black text-emerald-400 font-mono">
+                        {formatVnd(activeJournalEntry.debitTotalVnd)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Lines Table */}
+                  <div className="overflow-x-auto max-h-[300px] admin-dark-scroll">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-[#293154] text-gray-400 text-[10px] uppercase font-bold">
+                          <th className="py-2 px-2">Tài khoản</th>
+                          <th className="py-2 px-2">Đối tượng</th>
+                          <th className="py-2 px-2 text-right">Nợ (Debit)</th>
+                          <th className="py-2 px-2 text-right">Có (Credit)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#232a48]">
+                        {activeJournalEntry.lines.map((line, idx) => (
+                          <tr key={line.id || idx} className="hover:bg-[#1f2542] transition">
+                            <td className="py-2.5 px-2 font-mono font-bold text-indigo-300">
+                              {line.accountCode} - {line.accountName}
+                            </td>
+                            <td className="py-2.5 px-2 text-gray-300">{line.memo || line.accountName || "Nội bộ"}</td>
+                            <td className="py-2.5 px-2 text-right font-mono font-bold text-emerald-400">
+                              {line.debitAmountVnd > 0 ? formatVnd(line.debitAmountVnd) : "—"}
+                            </td>
+                            <td className="py-2.5 px-2 text-right font-mono font-bold text-sky-400">
+                              {line.creditAmountVnd > 0 ? formatVnd(line.creditAmountVnd) : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Summary Bar */}
+                  <div className="p-3 bg-[#13172b] rounded-xl border border-[#272e4e] flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck size={16} className="text-emerald-400" />
+                      <span className="font-bold text-gray-200">Bảo toàn cân đối Nợ/Có:</span>
+                      <span className="font-mono text-emerald-300 font-black">
+                        {activeJournalEntry.isBalanced ? "100% CÂN ĐỐI" : "LỆCH NỢ CÓ"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-4 font-mono font-bold">
+                      <span className="text-emerald-400">Nợ: {formatVnd(activeJournalEntry.debitTotalVnd)}</span>
+                      <span className="text-sky-400">Có: {formatVnd(activeJournalEntry.creditTotalVnd)}</span>
                     </div>
                   </div>
                 </div>
-
-                <div className="border-t border-dashed border-orange-100 pt-3 flex justify-between items-center flex-wrap gap-2">
-                  <span className="text-xs text-orange-950 font-bold">
-                    Giá trị hóa đơn (gồm VAT 10%):{" "}
-                    <strong className="text-orange-600">{formatVnd(quote.finalTotal)}</strong>
-                  </span>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      className="tab-button text-xs py-1.5 px-3 border-orange-200 bg-white cursor-pointer font-bold rounded-xl"
-                      onClick={() => alert("Đang tải xuống bản nháp Hóa đơn đỏ PDF...")}
-                    >
-                      Tải hóa đơn nháp
-                    </button>
-                    <button
-                      type="button"
-                      className="primary-button text-xs py-1.5 px-4 bg-orange-500 text-white border-orange-600 hover:bg-orange-600 cursor-pointer rounded-xl font-bold"
-                      disabled={workingOrder.paymentStatus !== "paid"}
-                      onClick={() =>
-                        alert("Hóa đơn điện tử số điện tử đã được phát hành thành công và gửi tới email của đại lý!")
-                      }
-                    >
-                      Phát hành hóa đơn điện tử
-                    </button>
-                  </div>
+              ) : (
+                <div className="h-full flex items-center justify-center text-sm text-gray-400">
+                  Chọn bút toán để kiểm tra chi tiết
                 </div>
-              </div>
-            ) : (
-              <div className="text-center py-6 muted text-xs font-semibold">
-                Đơn hàng sỉ hiện tại không có yêu cầu xuất hóa đơn đỏ từ đại lý.
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      {/* 3. TAB CHÍNH SÁCH VÀ HẠN MỨC QUYỀN */}
-      {activeTab === "settings" && (
-        <section className="grid-dashboard w-full animate-fade-in">
-          <div className="panel flex flex-col gap-4">
-            <div className="section-title">
-              <h3 className="text-lg font-bold">🛡️ Phân quyền Nhân sự theo Vai trò</h3>
+      {/* 2. SETTINGS / PRICING TIERS TAB */}
+      {(activeTab === "settings" || activeTab === "admin_promotions") && (
+        <div className="admin-dark-dock w-full p-4 sm:p-6 lg:p-7 flex flex-col gap-6">
+          <div className="flex items-center justify-between border-b border-[#222744] pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
+                <SlidersHorizontal size={20} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-extrabold text-white tracking-tight">
+                  Wholesale Pricing & Tier Policies
+                </span>
+                <span className="text-xs text-gray-400 font-medium">
+                  Cấu hình chính sách chiết khấu, tỷ lệ đặt cọc mặc định và ngưỡng phê duyệt quản lý
+                </span>
+              </div>
             </div>
-            <div className="flex flex-col gap-3">
-              {Object.entries(rolePermissions).map(([role, permissions]) => (
-                <div className="p-4 border-2 border-orange-100 rounded-2xl bg-[#FFFDF9]" key={role}>
-                  <strong className="text-sm text-[#331B08] font-bold block">{role}</strong>
-                  <p className="muted text-xs m-0 mt-0.5">{permissions.length} quyền vận hành đang hoạt động</p>
-                  <div className="flex flex-wrap gap-1.5 mt-3">
-                    {permissions.map((p) => (
-                      <span className="tag text-[10px] px-2 py-0.5 font-bold" key={p}>
-                        {p}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
 
-          <aside className="panel flex flex-col gap-4">
-            <div className="section-title">
-              <h3 className="text-lg font-bold">⚙️ Ngưỡng tự động & Hạn mức</h3>
-            </div>
-            <div className="flex flex-col gap-3 text-xs text-[#331B08]">
-              <div className="flex justify-between items-center p-2 border-b border-dashed border-orange-100">
-                <span>Freeship toàn quốc từ:</span>
-                <strong>{formatVnd(adminPolicy.freeShippingThreshold)}</strong>
-              </div>
-              <div className="flex justify-between items-center p-2 border-b border-dashed border-orange-100">
-                <span>Tỷ lệ đặt cọc mặc định:</span>
-                <strong>{percent(adminPolicy.defaultDepositRate)}</strong>
-              </div>
-              <div className="flex justify-between items-center p-2 border-b border-dashed border-orange-100">
-                <span>Nhân viên giảm giá tối đa:</span>
-                <strong>{percent(adminPolicy.maxOperatorDiscountRate)}</strong>
-              </div>
-              <div className="flex justify-between items-center p-2 border-b border-dashed border-orange-100">
-                <span>Hạn mức cần Quản lý duyệt:</span>
-                <strong>{formatVnd(adminPolicy.requireManagerApprovalAbove)}</strong>
-              </div>
-            </div>
-            <div className="p-3 border border-orange-200 bg-orange-50/30 rounded-xl flex items-start gap-2 mt-2">
-              <AlertTriangle size={15} className="text-orange-600 mt-0.5 shrink-0" />
-              <p className="text-[10px] text-orange-950 m-0 leading-relaxed font-bold">
-                Lưu ý an toàn dòng tiền: Tuyệt đối không cho phép chỉnh sửa trực tiếp số tiền đã được xác nhận tiền về ngân hàng. Mọi
-                thay đổi sai sót phải làm qua bút toán phụ hoặc hoàn tiền.
-              </p>
-            </div>
-          </aside>
-        </section>
-      )}
-
-      {/* 4. TAB KHUYẾN MÃI & ƯU ĐÃI MẶC ĐỊNH */}
-      {activeTab === "admin_promotions" && (
-        <div className="flex flex-col gap-6 w-full animate-fade-in">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-bold text-[#331B08] font-['Varela_Round']">⚙️ Khuyến mãi & Chỉ số mặc định</h2>
-              <p className="muted text-xs font-semibold">
-                Cấu hình các chỉ số ưu đãi mặc định cho đại lý khi tạo đơn sỉ tự động và các quy tắc hệ thống.
-              </p>
-            </div>
             <button
               type="button"
-              className="tab-button text-xs py-2 px-4 border-orange-200 bg-orange-50/50 hover:bg-orange-100 cursor-pointer font-bold rounded-xl flex items-center gap-1.5"
-              onClick={() => {
-                fetchPromotions();
-                setShowPromotionsForm(true);
-              }}
+              className="admin-pill-btn-white text-xs py-2 px-5"
+              onClick={() => setShowPromotionsForm(!showPromotionsForm)}
             >
-              ⚙️ Cấu hình Ưu đãi
+              {showPromotionsForm ? "Đóng form" : "Chỉnh sửa chính sách"}
             </button>
           </div>
 
-          <div className="panel bg-[#FFFDF9] border border-orange-100 rounded-3xl p-6 w-full">
-            <h4 className="text-sm font-bold text-orange-950 uppercase flex items-center gap-2 border-b pb-3 border-orange-100">
-              💡 Quy tắc Khuyến mại & Vận hành đang áp dụng
-            </h4>
-            <ul className="text-xs text-[#331B08]/85 pl-4 flex flex-col gap-4 mt-4 list-disc leading-relaxed font-semibold">
-              <li>
-                Miễn phí vận chuyển cho các đơn sỉ từ <strong>{formatVnd(promotionsPolicy.freeShippingThreshold)}</strong> trở
-                lên.
-              </li>
-              <li>
-                Đại lý thanh toán trước <strong>{promotionsPolicy.defaultDepositRate * 100}%</strong> giá trị đơn sỉ làm tiền cọc
-                đóng gói, <strong>{(1 - promotionsPolicy.defaultDepositRate) * 100}%</strong> COD còn lại khi nhận hàng.
-              </li>
-              <li>
-                Nếu đơn sỉ có trị giá từ <strong>{formatVnd(promotionsPolicy.giftThreshold || 0)}</strong>, hệ thống tự động tặng
-                kèm quà: <strong>{promotionsPolicy.giftName || "Chưa thiết lập"}</strong>.
-              </li>
-              <li>
-                Nhân viên vận hành được tự động chiết khấu tối đa <strong>{promotionsPolicy.maxOperatorDiscountRate * 100}%</strong>{" "}
-                hoặc giảm trực tiếp đến <strong>{formatVnd(promotionsPolicy.requireManagerApprovalAbove)}</strong> cho đại lý mà
-                không cần Quản lý duyệt.
-              </li>
-            </ul>
-          </div>
-        </div>
-      )}
-
-      {/* --- PROMOTIONS CONFIG MODAL --- */}
-      {showPromotionsForm && (
-        <div
-          className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm flex items-start justify-center p-4 sm:p-6 animate-fade-in"
-          onClick={() => setShowPromotionsForm(false)}
-        >
-          <div
-            className="panel max-w-lg w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in my-4 sm:my-8"
-            onClick={(e) => e.stopPropagation()}
-            style={{ borderRadius: "1.75rem" }}
-          >
-            <div className="flex justify-between items-center border-b pb-2 border-orange-100">
-              <h3 className="text-base font-bold text-orange-950 m-0 font-['Varela_Round']">
-                Cấu hình Khuyến mãi & Chỉ số mặc định
-              </h3>
-              <button
-                type="button"
-                className="w-6 h-6 rounded-full bg-orange-50 text-orange-700 flex items-center justify-center text-xs font-bold hover:bg-orange-100 transition cursor-pointer"
-                onClick={() => setShowPromotionsForm(false)}
-              >
-                ✕
-              </button>
+          {/* Cards Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-[#191e36] p-4 rounded-2xl border border-[#283152]">
+              <span className="text-[10px] font-bold text-gray-400 uppercase">Miễn phí ship từ</span>
+              <div className="text-lg font-black text-white font-mono mt-1">
+                {formatVnd(promotionsPolicy.freeShippingThreshold)}
+              </div>
+              <span className="text-[10px] text-gray-400 mt-1 block">Tự động áp dụng cho đơn sỉ</span>
             </div>
-            <form onSubmit={handleSavePromotions} className="flex flex-col gap-4 mt-2">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">
-                  Ngưỡng miễn phí vận chuyển sỉ (Freeship Threshold - VND)
-                </label>
-                <input
-                  type="number"
-                  className="text-input text-xs py-2 px-3"
-                  value={promotionsPolicy.freeShippingThreshold}
-                  onChange={(e) =>
-                    setPromotionsPolicy({
-                      ...promotionsPolicy,
-                      freeShippingThreshold: Math.max(0, parseInt(e.target.value, 10) || 0)
-                    })
-                  }
-                  required
-                />
-              </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-[#78350F] uppercase">Tỷ lệ đặt cọc mặc định (Ví dụ: 0.3 = 30%)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="1"
-                  className="text-input text-xs py-2 px-3 font-semibold"
-                  value={promotionsPolicy.defaultDepositRate}
-                  onChange={(e) =>
-                    setPromotionsPolicy({
-                      ...promotionsPolicy,
-                      defaultDepositRate: Math.max(0, Math.min(1, parseFloat(e.target.value) || 0))
-                    })
-                  }
-                  required
-                />
+            <div className="bg-[#191e36] p-4 rounded-2xl border border-[#283152]">
+              <span className="text-[10px] font-bold text-gray-400 uppercase">Tỷ lệ đặt cọc chuẩn</span>
+              <div className="text-lg font-black text-indigo-400 font-mono mt-1">
+                {Math.round(promotionsPolicy.defaultDepositRate * 100)}%
               </div>
+              <span className="text-[10px] text-gray-400 mt-1 block">Tối thiểu trước khi xuất kho</span>
+            </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-[#78350F] uppercase">
-                  Chiết khấu tối đa của nhân viên (Ví dụ: 0.08 = 8%)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="1"
-                  className="text-input text-xs py-2 px-3 font-semibold"
-                  value={promotionsPolicy.maxOperatorDiscountRate}
-                  onChange={(e) =>
-                    setPromotionsPolicy({
-                      ...promotionsPolicy,
-                      maxOperatorDiscountRate: Math.max(0, Math.min(1, parseFloat(e.target.value) || 0))
-                    })
-                  }
-                  required
-                />
+            <div className="bg-[#191e36] p-4 rounded-2xl border border-[#283152]">
+              <span className="text-[10px] font-bold text-gray-400 uppercase">Giới hạn duyệt Operator</span>
+              <div className="text-lg font-black text-amber-400 font-mono mt-1">
+                {Math.round(promotionsPolicy.maxOperatorDiscountRate * 100)}%
               </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-[#78350F] uppercase">
-                  Hạn mức chiết khấu cần Quản lý duyệt (VND)
-                </label>
-                <input
-                  type="number"
-                  className="text-input text-xs py-2 px-3"
-                  value={promotionsPolicy.requireManagerApprovalAbove}
-                  onChange={(e) =>
-                    setPromotionsPolicy({
-                      ...promotionsPolicy,
-                      requireManagerApprovalAbove: Math.max(0, parseInt(e.target.value, 10) || 0)
-                    })
-                  }
-                  required
-                />
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Ngưỡng tặng quà sỉ mặc định (VND)</label>
-                <input
-                  type="number"
-                  className="text-input text-xs py-2 px-3"
-                  value={promotionsPolicy.giftThreshold || 0}
-                  onChange={(e) =>
-                    setPromotionsPolicy({
-                      ...promotionsPolicy,
-                      giftThreshold: Math.max(0, parseInt(e.target.value, 10) || 0)
-                    })
-                  }
-                />
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Tên Quà Tặng kèm theo</label>
-                <input
-                  type="text"
-                  className="text-input text-xs py-2 px-3"
-                  placeholder="Không quà tặng"
-                  value={promotionsPolicy.giftName || ""}
-                  onChange={(e) =>
-                    setPromotionsPolicy({
-                      ...promotionsPolicy,
-                      giftName: e.target.value
-                    })
-                  }
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="primary-button text-xs py-2.5 w-full justify-center font-bold cursor-pointer mt-2 bg-orange-500 text-white rounded-xl"
-              >
-                Lưu thiết lập ưu đãi
-              </button>
-            </form>
+              <span className="text-[10px] text-gray-400 mt-1 block">
+                Vượt quá {formatVnd(promotionsPolicy.requireManagerApprovalAbove)} cần Super Admin
+              </span>
+            </div>
           </div>
+
+          {showPromotionsForm && (
+            <form onSubmit={handleSavePromotions} className="bg-[#15192e] p-5 rounded-2xl border border-[#293256] flex flex-col gap-4 animate-fade-in">
+              <h4 className="font-extrabold text-white text-sm m-0">Cập nhật chính sách chiết khấu sỉ</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[11px] font-bold text-gray-300">Ngưỡng miễn phí vận chuyển (VND)</label>
+                  <input
+                    type="number"
+                    className="w-full mt-1 bg-[#1e2440] border border-[#303960] rounded-xl py-2 px-3 text-white text-xs font-mono"
+                    value={promotionsPolicy.freeShippingThreshold}
+                    onChange={(e) =>
+                      setPromotionsPolicy({
+                        ...promotionsPolicy,
+                        freeShippingThreshold: Number(e.target.value) || 0
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-gray-300">Tỷ lệ đặt cọc mặc định (0 - 1)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="1"
+                    className="w-full mt-1 bg-[#1e2440] border border-[#303960] rounded-xl py-2 px-3 text-white text-xs font-mono"
+                    value={promotionsPolicy.defaultDepositRate}
+                    onChange={(e) =>
+                      setPromotionsPolicy({
+                        ...promotionsPolicy,
+                        defaultDepositRate: Number(e.target.value) || 0.3
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 mt-2">
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded-xl text-gray-300 hover:text-white cursor-pointer"
+                  onClick={() => setShowPromotionsForm(false)}
+                >
+                  Hủy
+                </button>
+                <button type="submit" className="admin-pill-btn-primary text-xs py-2 px-6">
+                  Lưu cấu hình
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       )}
     </div>

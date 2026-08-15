@@ -1,10 +1,18 @@
-import { useMemo } from "react";
-import Image from "next/image";
-import { AlertTriangle, CheckCircle2, LockKeyhole, ShieldCheck, Truck } from "lucide-react";
+"use client";
+
+import { useState, useMemo } from "react";
+import {
+  ShieldCheck,
+  Plus,
+  ArrowUpRight,
+  Link as LinkIcon,
+  Calendar as CalendarIcon,
+  Sparkles,
+  SlidersHorizontal
+} from "lucide-react";
 import type { CustomerOrder, Supplier, Product } from "@/lib/domain";
 import type { ApiUser } from "../../types";
 import { formatVnd } from "@/lib/money";
-import { StatusPill } from "../ui/StatusPill";
 
 interface AdminOrdersProps {
   allOrders: CustomerOrder[];
@@ -46,628 +54,456 @@ export function AdminOrders({
   allOrders,
   workingOrder,
   currentUser,
-  suppliers,
-  allProducts,
-  allCategories,
   adminDiscount,
   setAdminDiscount,
   adminShippingFee,
   setAdminShippingFee,
   shippingFeeOption,
   setShippingFeeOption,
-  customDepositInput,
-  setCustomDepositInput,
   isManagerApproved,
   setIsManagerApproved,
-  adminCategoryFilter,
-  setAdminCategoryFilter,
-  adminSupplierFilter,
-  setAdminSupplierFilter,
   isOrderModified,
-  isOrderFrozen,
   requiresManagerApproval,
   selectOrder,
-  setSelectedOrderId,
-  setWorkingOrder,
-  handleAdminQtyChange,
   handlePublishQuote,
   confirmDeposit,
-  attachShipment,
-  handleStockReservationAction,
-  handlePostOrderAccounting,
-  addComment
+  handlePostOrderAccounting
 }: AdminOrdersProps) {
-  // Lấy bản báo giá cuối cùng
+  const [darkTabFilter, setDarkTabFilter] = useState<"all" | "draft" | "unpaid" | "accepted" | "locked">("all");
+  const [showAdjustments, setShowAdjustments] = useState<boolean>(false);
+
+  // Active selected order or default to first order
+  const activeOrder = useMemo(() => {
+    if (workingOrder.id) return workingOrder;
+    return allOrders.length > 0 ? allOrders[0] : workingOrder;
+  }, [workingOrder, allOrders]);
+
+  // Latest Quote calculation
   const quote = useMemo(() => {
-    if (!workingOrder.quoteVersions || workingOrder.quoteVersions.length === 0) {
+    if (!activeOrder.quoteVersions || activeOrder.quoteVersions.length === 0) {
       return null;
     }
-    return workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1];
-  }, [workingOrder.quoteVersions]);
+    return activeOrder.quoteVersions[activeOrder.quoteVersions.length - 1];
+  }, [activeOrder.quoteVersions]);
 
-  // Map supplier ID sang Name để hiển thị
-  const visibleSupplierName = (supplierId: string) => {
-    const found = suppliers.find((s) => s.id === supplierId);
-    return found ? found.name : "Nhà cung cấp nội bộ";
-  };
-
-  // Tạo danh mục động dùng lọc
-  const availableCategories = useMemo(() => {
-    const catsFromProducts = allProducts.map((p) => p.category).filter(Boolean);
-    const catsFromDb = allCategories.filter(Boolean);
-    return ["Tất cả", ...Array.from(new Set([...catsFromProducts, ...catsFromDb]))];
-  }, [allProducts, allCategories]);
-
-  // Lọc sản phẩm sỉ của đơn hàng cho Admin
-  const filteredAdminOrderItems = useMemo(() => {
-    if (!workingOrder.items) return [];
-    return workingOrder.items.filter((item) => {
-      const parent = allProducts.find((p) => p.code === item.productCode);
-      const category = parent?.category ?? "Tất cả";
-
-      const matchCategory = adminCategoryFilter === "Tất cả" || category === adminCategoryFilter;
-      const matchSupplier = adminSupplierFilter === "Tất cả" || item.supplierId === adminSupplierFilter;
-
-      return matchCategory && matchSupplier;
-    });
-  }, [workingOrder.items, allProducts, adminCategoryFilter, adminSupplierFilter]);
-
-  // Kiểm tra gán quyền cho Admin
-  const isLockedByOther = useMemo(() => {
-    if (!workingOrder.id) return false;
-    return (
-      workingOrder.assignedStaffId &&
-      workingOrder.assignedStaffId !== currentUser?.id &&
-      currentUser?.role !== "super_admin"
-    );
-  }, [workingOrder.id, workingOrder.assignedStaffId, currentUser]);
+  // Filter orders for the left pane
+  const filteredOrders = useMemo(() => {
+    if (darkTabFilter === "all") return allOrders;
+    if (darkTabFilter === "draft") return allOrders.filter((o) => o.commercialStatus === "draft" || o.commercialStatus === "submitted");
+    if (darkTabFilter === "unpaid") return allOrders.filter((o) => o.paymentStatus !== "paid");
+    if (darkTabFilter === "accepted") return allOrders.filter((o) => o.commercialStatus === "customer_accepted");
+    if (darkTabFilter === "locked") return allOrders.filter((o) => o.commercialStatus === "locked");
+    return allOrders;
+  }, [allOrders, darkTabFilter]);
 
   const latestQuote = (ord: CustomerOrder) => {
     if (!ord.quoteVersions || ord.quoteVersions.length === 0) {
-      return { finalTotal: 0 };
+      return { finalTotal: 0, subtotal: 0, depositAmount: 0 };
     }
     return ord.quoteVersions[ord.quoteVersions.length - 1];
   };
 
-  if (workingOrder.id === "") {
+  const isLockedByOther = useMemo(() => {
+    if (!activeOrder.id) return false;
     return (
-      <div className="panel flex flex-col gap-6 w-full animate-fade-in">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-xl font-bold text-[#331B08] flex items-center gap-2 font-['Varela_Round']">
-            📋 Danh sách Đơn hàng sỉ
-          </h2>
-          <p className="muted text-xs">
-            Chọn một đơn hàng từ danh sách dưới đây để tiến hành thẩm định chi phí, báo giá, phát hành VietQR hoặc đối soát dòng tiền
-            thực tế.
-          </p>
+      activeOrder.assignedStaffId &&
+      activeOrder.assignedStaffId !== currentUser?.id &&
+      currentUser?.role !== "super_admin"
+    );
+  }, [activeOrder.id, activeOrder.assignedStaffId, currentUser]);
+
+  // Financial totals
+  const subtotal = quote ? quote.subtotal : activeOrder.items?.reduce((sum, i) => sum + i.quantity * i.unitPriceSnapshot, 0) || 0;
+  const finalTotal = quote ? quote.finalTotal : subtotal;
+  const depositRequired = quote ? quote.depositAmount : Math.round(finalTotal * 0.3);
+  const balanceDue = finalTotal - (activeOrder.paymentStatus === "deposit_confirmed" ? depositRequired : 0);
+
+  return (
+    <div className="admin-dark-dock w-full p-4 sm:p-6 lg:p-7 flex flex-col gap-6 animate-fade-in">
+      {/* 1. TOP TABS & VIEW SWITCHER STRIP (Finnova Dark Header) */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#222744] pb-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-extrabold text-white tracking-tight">Unpaid Invoices</span>
+          <span className="text-xs text-gray-400 font-semibold">({allOrders.length} orders total)</span>
         </div>
 
-        <div className="grid grid-cols-1 gap-3">
-          {allOrders.length === 0 ? (
-            <div className="p-8 text-center muted text-sm font-semibold border-2 border-dashed border-orange-100 rounded-2xl bg-[#FFFDF9]">
-              Chưa có đơn sỉ nào được đề xuất.
+        {/* Dark Filter Pills */}
+        <div className="flex flex-wrap items-center gap-1.5 bg-[#0e1020] p-1 rounded-full border border-[#232742]">
+          <button
+            type="button"
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
+              darkTabFilter === "all" ? "bg-[#4f46e5] text-white shadow-sm" : "text-gray-400 hover:text-white"
+            }`}
+            onClick={() => setDarkTabFilter("all")}
+          >
+            All Invoices
+          </button>
+          <button
+            type="button"
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              darkTabFilter === "draft" ? "bg-[#4f46e5] text-white shadow-sm" : "text-gray-400 hover:text-white"
+            }`}
+            onClick={() => setDarkTabFilter("draft")}
+          >
+            <span>Draft</span>
+            <span className="w-4 h-4 rounded-full bg-white/15 text-[10px] flex items-center justify-center">
+              {allOrders.filter((o) => o.commercialStatus === "draft" || o.commercialStatus === "submitted").length}
+            </span>
+          </button>
+          <button
+            type="button"
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              darkTabFilter === "unpaid" ? "bg-[#4f46e5] text-white shadow-sm" : "text-gray-400 hover:text-white"
+            }`}
+            onClick={() => setDarkTabFilter("unpaid")}
+          >
+            <span>Unpaid</span>
+            <span className="w-4 h-4 rounded-full bg-indigo-400 text-black text-[10px] font-black flex items-center justify-center">
+              $
+            </span>
+          </button>
+          <button
+            type="button"
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
+              darkTabFilter === "accepted" ? "bg-[#4f46e5] text-white shadow-sm" : "text-gray-400 hover:text-white"
+            }`}
+            onClick={() => setDarkTabFilter("accepted")}
+          >
+            Accepted
+          </button>
+        </div>
+      </div>
+
+      {/* 2. DUAL-PANE WORKSPACE: LEFT LIST (35%) & RIGHT DETAIL (65%) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 min-h-[540px]">
+        {/* === LEFT PANE: INVOICES / ORDERS LIST (4/12 cols) === */}
+        <div className="lg:col-span-4 flex flex-col gap-2.5 max-h-[580px] overflow-y-auto pr-1 admin-dark-scroll">
+          {filteredOrders.length === 0 ? (
+            <div className="p-8 text-center text-xs text-gray-400 border border-dashed border-[#293050] rounded-2xl bg-[#161a30]">
+              Không có đơn hàng nào phù hợp bộ lọc.
             </div>
           ) : (
-            allOrders.map((ord) => {
+            filteredOrders.map((ord) => {
               const q = latestQuote(ord);
+              const isSelected = ord.id === activeOrder.id;
+
               return (
                 <div
                   key={ord.id}
-                  className="p-5 border-2 border-orange-100 hover:border-orange-500 rounded-2xl bg-white hover:-translate-y-0.5 transition flex flex-col md:flex-row justify-between items-start md:items-center gap-4 cursor-pointer"
+                  className={`p-3.5 rounded-2xl transition-all duration-200 cursor-pointer flex items-center justify-between gap-3 ${
+                    isSelected
+                      ? "bg-[#4f46e5] text-white shadow-[0_10px_28px_rgba(79,70,229,0.45)] scale-[1.01]"
+                      : "bg-[#181d33] hover:bg-[#1f2542] text-gray-200 border border-[#272e4e]"
+                  }`}
                   onClick={() => selectOrder(ord.id)}
                 >
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-extrabold text-[#331B08]">{ord.number}</span>
-                      <span
-                        className={`status-pill text-[10px] ${ord.commercialStatus === "locked" ? "success" : ord.commercialStatus === "quoted" ? "info" : "warning"}`}
-                      >
-                        {ord.commercialStatus === "submitted"
-                          ? "Chờ duyệt giá"
-                          : ord.commercialStatus === "quoted"
-                            ? "Đã báo giá"
-                            : ord.commercialStatus === "customer_accepted"
-                              ? "Chờ cọc"
+                  <div className="flex items-center gap-3 min-w-0">
+                    {/* Avatar Pill */}
+                    <div
+                      className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-xs shrink-0 ${
+                        isSelected ? "bg-white text-indigo-700 shadow-sm" : "bg-[#252b4b] text-indigo-300"
+                      }`}
+                    >
+                      {ord.customerName?.charAt(0) || "U"}
+                    </div>
+
+                    <div className="flex flex-col min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold text-xs tracking-tight truncate font-mono">
+                          # {ord.number}
+                        </span>
+                        <span
+                          className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                            isSelected
+                              ? "bg-white/20 text-white"
+                              : ord.commercialStatus === "customer_accepted"
+                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
                               : ord.commercialStatus === "locked"
-                                ? "Chờ đóng hàng"
-                                : "Hoàn tất"}
+                              ? "bg-sky-500/20 text-sky-300 border border-sky-500/30"
+                              : "bg-gray-700/50 text-gray-300"
+                          }`}
+                        >
+                          {ord.commercialStatus === "customer_accepted"
+                            ? "Accepted"
+                            : ord.commercialStatus === "locked"
+                            ? "Locked"
+                            : "Unsent"}
+                        </span>
+                      </div>
+                      <span className={`text-[11px] truncate mt-0.5 ${isSelected ? "text-indigo-100" : "text-gray-400"}`}>
+                        {ord.customerCompany || ord.customerName}
                       </span>
                     </div>
-                    <span className="text-xs font-semibold text-[#78350F]">
-                      {ord.customerName} · {ord.customerCompany}
-                    </span>
-                    <span className="muted text-[10px]">
-                      {ord.items.length} mặt hàng sỉ · Cập nhật:{" "}
-                      {new Date(ord.updatedAt).toLocaleTimeString("vi-VN")} {new Date(ord.updatedAt).toLocaleDateString("vi-VN")}
-                    </span>
                   </div>
-                  <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end">
-                    <div className="text-right flex flex-col">
-                      <span className="text-[10px] muted font-bold">TỔNG ĐƠN SỈ</span>
-                      <strong className="text-sm text-orange-950 font-extrabold">{formatVnd(q.finalTotal)}</strong>
+
+                  {/* Amount */}
+                  <div className="text-right shrink-0">
+                    <div className="font-black text-xs sm:text-sm font-mono tracking-tight">
+                      {formatVnd(q.finalTotal)}
                     </div>
-                    <button
-                      type="button"
-                      className="tab-button bg-orange-500 text-white border-orange-600 hover:bg-orange-600 text-xs py-2 px-4 cursor-pointer font-bold rounded-xl"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        selectOrder(ord.id);
-                      }}
-                    >
-                      Xử lý đơn
-                    </button>
+                    <span className={`text-[10px] block ${isSelected ? "text-indigo-200" : "text-gray-400"}`}>
+                      {ord.items.length} SKUs
+                    </span>
                   </div>
                 </div>
               );
             })
           )}
         </div>
-      </div>
-    );
-  }
 
-  return (
-    <div className="flex flex-col gap-4 w-full animate-fade-in">
-      {/* Back to list and quick switcher */}
-      <div className="panel p-4 bg-orange-50/50 border border-orange-100 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            className="tab-button text-xs py-1.5 px-3 bg-white hover:bg-orange-100 font-bold border-orange-200 rounded-xl"
-            onClick={() => {
-              setSelectedOrderId(null);
-              setWorkingOrder({
-                id: "",
-                number: "",
-                customerName: "",
-                customerCompany: "",
-                customerId: "",
-                commercialStatus: "draft",
-                paymentStatus: "unrequested",
-                fulfillmentStatus: "not_started",
-                paymentIntent: "deposit_cod",
-                invoiceRequested: false,
-                updatedAt: new Date().toISOString(),
-                items: [],
-                quoteVersions: [],
-                paymentRequests: [],
-                paymentProofs: [],
-                fulfillmentGroups: [],
-                comments: []
-              });
-            }}
-          >
-            ← Quay lại danh sách
-          </button>
-          <span className="text-sm font-bold text-[#331B08]">
-            Đang xử lý đơn: <span className="text-orange-600">{workingOrder.number}</span> ({workingOrder.customerName})
-          </span>
-        </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <span className="text-xs font-semibold text-orange-950 shrink-0">Chuyển nhanh đơn:</span>
-          <select
-            className="text-input text-xs py-1.5 px-2 bg-white border border-orange-200 rounded-xl flex-grow sm:flex-none sm:w-[200px] font-semibold"
-            value={workingOrder.id}
-            onChange={(e) => selectOrder(e.target.value)}
-          >
-            {allOrders.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.number} - {o.customerName}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* WARNING BANNER FOR LOCKED ORDER */}
-      {isLockedByOther ? (
-        <div className="p-4 bg-red-50 border-2 border-red-200 text-red-950 rounded-2xl flex items-center gap-3 animate-fade-in">
-          <span className="text-2xl">🔒</span>
-          <div>
-            <h4 className="font-extrabold text-sm m-0">Đơn hàng này đã bị khóa thao tác!</h4>
-            <p className="m-0 text-xs mt-1">
-              Đơn hàng này đã được gán cho nhân viên <strong>{workingOrder.assignedStaffName || "khác"}</strong> phụ trách. Bạn chỉ
-              có quyền xem chi tiết và trao đổi nội bộ, không thể thay đổi số lượng, báo giá hay xác nhận giao dịch.
-            </p>
-          </div>
-        </div>
-      ) : workingOrder.assignedStaffId ? (
-        <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-950 rounded-2xl flex items-center gap-2.5 animate-fade-in">
-          <span className="text-lg">👤</span>
-          <p className="m-0 text-xs font-bold">Đơn hàng được gán cho bạn phụ trách xử lý ({workingOrder.assignedStaffName}).</p>
-        </div>
-      ) : null}
-
-      <section className="grid-dashboard">
-        <div className="flex flex-col gap-4">
-          {/* Danh sách sản phẩm sỉ trong đơn */}
-          <div className="panel flex flex-col gap-4">
-            <div className="section-title flex justify-between items-center">
-              <h3 className="text-lg font-bold">📦 Sản phẩm sỉ trong đơn hàng</h3>
-              {isOrderModified && (
-                <span className="bg-amber-100 text-amber-800 text-[10px] px-2 py-0.5 rounded-full font-bold animate-pulse">
-                  Đã chỉnh sửa (Chưa lưu)
-                </span>
-              )}
-            </div>
-
-            {/* Bộ lọc sản phẩm sỉ dành cho Admin */}
-            <div className="grid grid-cols-2 gap-3 p-3 bg-orange-50/30 rounded-2xl border border-orange-100">
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Lọc theo phân loại</label>
-                <select
-                  className="text-input text-xs py-1.5 px-2 bg-white border border-orange-200 rounded-xl"
-                  value={adminCategoryFilter}
-                  onChange={(e) => setAdminCategoryFilter(e.target.value)}
-                >
-                  {availableCategories.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat === "Tất cả" ? "Tất cả phân loại" : cat}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Lọc theo nhà cung cấp</label>
-                <select
-                  className="text-input text-xs py-1.5 px-2 bg-white border border-orange-200 rounded-xl"
-                  value={adminSupplierFilter}
-                  onChange={(e) => setAdminSupplierFilter(e.target.value)}
-                >
-                  <option value="Tất cả">Tất cả nhà cung cấp</option>
-                  {suppliers.map((sup) => (
-                    <option key={sup.id} value={sup.id}>
-                      {sup.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="variant-table w-full">
-                <thead>
-                  <tr>
-                    <th>Ảnh/Mã</th>
-                    <th>Sản phẩm sỉ & Nhà cung cấp</th>
-                    <th className="text-center w-28">Số lượng</th>
-                    <th className="text-right">Đơn giá sỉ</th>
-                    <th className="text-right">Thành tiền</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredAdminOrderItems.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="text-center py-6 muted text-xs font-semibold">
-                        Không tìm thấy sản phẩm sỉ phù hợp với bộ lọc.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredAdminOrderItems.map((item) => {
-                      const parent = allProducts.find((p) => p.code === item.productCode);
-                      const image = parent?.imageUrl ?? "/product-food.svg";
-                      return (
-                        <tr key={item.id} className={item.quantity === 0 ? "opacity-50 bg-gray-50/50" : ""}>
-                          <td className="w-16">
-                            <div className="relative w-10 h-10 rounded-xl overflow-hidden border bg-orange-50 flex items-center justify-center p-1 shrink-0">
-                              <Image src={image} alt={item.productName} fill sizes="40px" className="object-cover" />
-                            </div>
-                            <span className="text-[8px] font-mono font-bold text-orange-900 block mt-1 text-center">
-                              {item.variantSku}
-                            </span>
-                          </td>
-                          <td>
-                            <strong className="text-xs text-[#331B08] block">{item.productName}</strong>
-                            <span className="text-[10px] text-gray-500 font-semibold block">{item.variantLabel}</span>
-                            <span className="text-[9px] bg-blue-50 text-blue-800 px-2 py-0.5 rounded-full font-bold inline-block mt-1">
-                              🏭 {visibleSupplierName(item.supplierId)}
-                            </span>
-                          </td>
-                          <td className="text-center">
-                            <div className="flex items-center justify-center gap-1 border border-orange-200 rounded-xl p-0.5 bg-orange-50/25 max-w-[100px] mx-auto">
-                              <button
-                                type="button"
-                                className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-xs font-bold text-[#78350F] shadow-sm active:scale-90 cursor-pointer disabled:opacity-40"
-                                disabled={isOrderFrozen}
-                                onClick={() => handleAdminQtyChange(item.id, item.quantity - 1)}
-                              >
-                                -
-                              </button>
-                              <input
-                                type="number"
-                                className="w-8 text-center text-xs font-bold bg-transparent border-0 focus:ring-0 p-0"
-                                disabled={isOrderFrozen}
-                                value={item.quantity}
-                                onChange={(e) => handleAdminQtyChange(item.id, parseInt(e.target.value, 10) || 0)}
-                              />
-                              <button
-                                type="button"
-                                className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-xs font-bold text-[#78350F] shadow-sm active:scale-90 cursor-pointer disabled:opacity-40"
-                                disabled={isOrderFrozen}
-                                onClick={() => handleAdminQtyChange(item.id, item.quantity + 1)}
-                              >
-                                +
-                              </button>
-                            </div>
-                          </td>
-                          <td className="text-right text-xs text-[#78350F] font-semibold">{formatVnd(item.unitPriceSnapshot)}</td>
-                          <td className="text-right text-xs font-bold text-[#331B08]">
-                            {formatVnd(item.quantity * item.unitPriceSnapshot)}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <aside className="flex flex-col gap-4">
-          {/* Thẩm định Chi phí, Báo giá & Đặt cọc */}
-          <div className="panel flex flex-col gap-4">
-            <div className="section-title">
-              <h3 className="text-lg font-bold">1. Chi phí & Báo giá</h3>
-              <StatusPill tone={isOrderFrozen ? "warning" : "info"}>
-                {isOrderFrozen ? "Đơn đã khóa" : "Thẩm định sỉ"}
-              </StatusPill>
-            </div>
-
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-orange-950/80">Chiết khấu sỉ giảm giá (VND)</label>
-                <input
-                  type="number"
-                  className="text-input text-xs py-2 px-3"
-                  disabled={isOrderFrozen}
-                  value={adminDiscount}
-                  onChange={(e) => setAdminDiscount(parseInt(e.target.value, 10) || 0)}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+        {/* === RIGHT PANE: DETAILED INSPECTION & ACTION WORKSPACE (8/12 cols) === */}
+        <div className="lg:col-span-8 flex flex-col justify-between bg-[#171b30] rounded-2xl border border-[#272e4e] p-4 sm:p-6 shadow-inner">
+          {activeOrder.id ? (
+            <div className="flex flex-col gap-5">
+              {/* Header: Invoice Details + Company Name & Logo + Customer Card */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#242a49] pb-4">
+                {/* Left: Invoice Number & Status */}
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-bold text-orange-950/80">Phí vận chuyển (VND)</label>
-                  <input
-                    type="number"
-                    className="text-input text-xs py-2 px-3"
-                    disabled={isOrderFrozen || shippingFeeOption === "separate_cod"}
-                    value={shippingFeeOption === "separate_cod" ? 0 : adminShippingFee}
-                    onChange={(e) => setAdminShippingFee(parseInt(e.target.value, 10) || 0)}
-                  />
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    Invoice details
+                  </span>
+                  <div className="flex items-center gap-2.5">
+                    <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight font-mono m-0">
+                      # {activeOrder.number}
+                    </h2>
+                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                      {activeOrder.commercialStatus === "customer_accepted" ? "Accepted" : "Unsent"}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-bold text-orange-950/80">Phương thức tính phí</label>
-                  <div className="flex flex-col gap-1 mt-1">
-                    <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
-                      <input
-                        type="radio"
-                        name="ship_opt"
-                        disabled={isOrderFrozen}
-                        checked={shippingFeeOption === "included"}
-                        onChange={() => setShippingFeeOption("included")}
-                      />
-                      Cộng vào đơn
-                    </label>
-                    <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
-                      <input
-                        type="radio"
-                        name="ship_opt"
-                        disabled={isOrderFrozen}
-                        checked={shippingFeeOption === "separate_cod"}
-                        onChange={() => {
-                          setShippingFeeOption("separate_cod");
-                          setAdminShippingFee(0);
-                        }}
-                      />
-                      Khách trả COD
-                    </label>
+                {/* Middle: Company Brand */}
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    Company
+                  </span>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="font-extrabold text-sm sm:text-base text-white">
+                      {activeOrder.customerCompany || "Pet Care Partner"}
+                    </span>
+                    <Sparkles size={15} className="text-indigo-400" />
+                  </div>
+                </div>
+
+                {/* Right: Customer Profile Card */}
+                <div className="flex items-center gap-2.5 bg-[#1f2544] p-2 pr-3.5 rounded-2xl border border-[#2f375f]">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center font-black text-white text-xs shadow-sm">
+                    {activeOrder.customerName?.charAt(0) || "C"}
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="font-bold text-xs text-white leading-tight">
+                      {activeOrder.customerName}
+                    </span>
+                    <span className="text-[10px] text-gray-400 font-medium">
+                      Đại lý Sỉ VIP
+                    </span>
                   </div>
                 </div>
               </div>
 
-              <div className="flex flex-col gap-1 border-t border-dashed border-orange-100 pt-3">
-                <label className="text-xs font-bold text-orange-950/80">Số tiền cọc gửi (VND)</label>
-                <input
-                  type="number"
-                  className="text-input text-xs py-2 px-3"
-                  disabled={isOrderFrozen}
-                  placeholder={formatVnd(quote?.depositAmount || 0)}
-                  value={customDepositInput}
-                  onChange={(e) => setCustomDepositInput(e.target.value)}
-                />
-                <span className="text-[10px] muted">Mặc định: 30% tổng đơn nếu bỏ trống.</span>
-              </div>
-
-              {requiresManagerApproval && !isManagerApproved && (
-                <div className="p-3 border-2 border-dashed border-red-200 bg-red-50/20 rounded-2xl flex flex-col gap-2 mt-2">
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={16} />
-                    <div>
-                      <strong className="text-xs text-red-950 block">Vượt hạn mức chiết khấu Operator!</strong>
-                      <p className="text-[10px] text-red-900 m-0 mt-0.5 leading-relaxed font-bold">
-                        Cần Quản lý ký số phê duyệt để tiếp tục áp dụng mức giảm giá này.
-                      </p>
-                    </div>
-                  </div>
+              {/* Itemized Service / Product Cards (3 Columns + Add Item Box) */}
+              <div className="flex flex-col gap-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                    Sản phẩm trong đơn sỉ ({activeOrder.items?.length || 0} items)
+                  </span>
                   <button
-                    className="tab-button text-xs py-2 w-max text-red-700 border-red-300 hover:bg-red-50 cursor-pointer"
                     type="button"
-                    onClick={() => {
-                      setIsManagerApproved(true);
-                      addComment("internal", "Quản lý (Manager) đã kiểm tra và phê duyệt mức chiết khấu sỉ đặc biệt cho đơn này.");
-                    }}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 font-bold cursor-pointer transition flex items-center gap-1"
+                    onClick={() => setShowAdjustments(!showAdjustments)}
                   >
-                    <ShieldCheck size={14} /> Ký phê duyệt
+                    <SlidersHorizontal size={13} />
+                    <span>{showAdjustments ? "Ẩn điều chỉnh giá" : "Điều chỉnh chiết khấu & VAT"}</span>
                   </button>
                 </div>
-              )}
 
-              {isManagerApproved && (
-                <div className="p-3 bg-green-50 border border-green-200 rounded-xl flex items-center gap-2 text-xs text-green-800 font-bold">
-                  <CheckCircle2 size={16} className="text-green-600" /> Quản lý đã duyệt hạn mức!
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {activeOrder.items?.slice(0, 3).map((item, idx) => (
+                    <div
+                      key={item.id || idx}
+                      className="bg-[#202644] hover:bg-[#252c4e] p-3.5 rounded-2xl border border-[#2e375e] transition flex flex-col justify-between min-h-[95px] relative group"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="font-mono font-black text-sm text-white">
+                          {formatVnd(item.unitPriceSnapshot * item.quantity)}
+                        </div>
+                        <ArrowUpRight size={14} className="text-gray-400 group-hover:text-indigo-400 transition" />
+                      </div>
+
+                      <div className="flex flex-col mt-2">
+                        <span className="text-xs font-bold text-gray-200 truncate">
+                          {item.variantLabel || item.variantSku || item.productName}
+                        </span>
+                        <span className="text-[10px] text-gray-400 font-mono">
+                          SL: {item.quantity} × {formatVnd(item.unitPriceSnapshot)}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Add Item Card Box */}
+                  <div
+                    className="border-2 border-dashed border-[#2f375e] hover:border-indigo-500/60 bg-[#1a1f38] hover:bg-[#202644] p-3.5 rounded-2xl transition flex flex-col items-center justify-center gap-1.5 cursor-pointer min-h-[95px]"
+                    onClick={() => setShowAdjustments(true)}
+                  >
+                    <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white">
+                      <Plus size={15} />
+                    </div>
+                    <span className="text-xs font-bold text-gray-300">Add item</span>
+                  </div>
                 </div>
-              )}
+              </div>
 
-              <button
-                className={`primary-button text-xs py-3 justify-center w-full mt-2 font-bold cursor-pointer transition rounded-xl ${
-                  isOrderModified
-                    ? "bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white shadow-md"
-                    : "bg-orange-500 text-white border-orange-600 hover:bg-orange-600"
-                }`}
-                type="button"
-                disabled={isOrderFrozen || (requiresManagerApproval && !isManagerApproved)}
-                onClick={handlePublishQuote}
-              >
-                📬 Gửi khách xác nhận
-              </button>
-            </div>
-          </div>
-
-          {/* Kế toán đối soát */}
-          <div className="panel flex flex-col gap-4">
-            <div className="section-title">
-              <h3 className="text-lg font-bold">2. Đối soát dòng tiền</h3>
-            </div>
-
-            <div className="flex flex-col gap-3 text-xs">
-              <div className="p-3 border-2 border-orange-100 rounded-2xl bg-[#FFFDF9] flex flex-col gap-2">
-                <strong className="text-xs text-[#331B08] block">Trạng thái dòng tiền sỉ:</strong>
-                <div className="flex justify-between items-center py-1 border-b border-dashed border-orange-100">
-                  <span>Yêu cầu chuyển khoản:</span>
-                  <strong>{formatVnd(workingOrder.paymentRequests[workingOrder.paymentRequests.length - 1]?.amount || 0)}</strong>
-                </div>
-                <div className="flex justify-between items-center py-1">
-                  <span>Trạng thái chứng từ:</span>
-                  <div>
-                    {workingOrder.paymentStatus === "deposit_uploaded" || workingOrder.paymentStatus === "full_uploaded" ? (
-                      <span className="status-pill warning text-[9px]">Chờ đối soát biên lai</span>
-                    ) : workingOrder.paymentStatus.includes("confirmed") || workingOrder.paymentStatus === "paid" ? (
-                      <span className="status-pill success text-[9px]">Đã nhận tiền sỉ</span>
-                    ) : (
-                      <span className="status-pill info text-[9px]">Chờ thanh toán</span>
+              {/* Price Adjustments & Approval Section (if toggled) */}
+              {showAdjustments && (
+                <div className="p-4 rounded-2xl bg-[#14182b] border border-[#262c4c] flex flex-col gap-3 animate-fade-in text-xs">
+                  <div className="flex items-center justify-between font-bold text-gray-200">
+                    <span className="flex items-center gap-1.5">
+                      <ShieldCheck size={15} className="text-indigo-400" /> Báo giá & Chiết khấu thương mại
+                    </span>
+                    {requiresManagerApproval && (
+                      <span className="text-rose-400 font-bold bg-rose-500/10 px-2 py-0.5 rounded-md">
+                        Cần Quản lý duyệt (&gt; 8% hoặc &gt; 500k)
+                      </span>
                     )}
                   </div>
-                </div>
-              </div>
 
-              {workingOrder.paymentProofs && workingOrder.paymentProofs.length > 0 && (
-                <div className="p-3 border-2 border-orange-100 rounded-2xl bg-[#FFFDF9] flex flex-col gap-3">
-                  <div>
-                    <strong className="text-xs text-[#331B08] block">Ảnh biên lai đại lý gửi:</strong>
-                    <p className="muted text-[10px] m-0 mt-0.5">{workingOrder.paymentProofs[0].fileName}</p>
-                  </div>
-
-                  <div className="aspect-video w-full rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center font-bold text-orange-950/70 text-xs">
-                    [ HÌNH ẢNH BIÊN LAI ]
-                  </div>
-
-                  {workingOrder.paymentProofs[0].status === "pending_admin_confirmation" ? (
-                    <button
-                      type="button"
-                      className="tab-button py-2 w-full justify-center bg-green-500 text-white border-green-600 hover:bg-green-600 font-bold cursor-pointer"
-                      onClick={confirmDeposit}
-                    >
-                      Xác nhận Nhận đủ tiền
-                    </button>
-                  ) : (
-                    <div className="p-2.5 bg-green-50 border border-green-200 rounded-xl text-green-800 font-bold text-center">
-                      ✓ Giao dịch đã xác nhận thành công
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">Chiết khấu (VND)</label>
+                      <input
+                        type="number"
+                        className="w-full mt-1 bg-[#1e2440] border border-[#303960] rounded-xl py-1.5 px-3 text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500"
+                        value={adminDiscount}
+                        onChange={(e) => setAdminDiscount(Math.max(0, Number(e.target.value) || 0))}
+                      />
                     </div>
+                    <div>
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">Phí vận chuyển (VND)</label>
+                      <input
+                        type="number"
+                        className="w-full mt-1 bg-[#1e2440] border border-[#303960] rounded-xl py-1.5 px-3 text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500"
+                        value={adminShippingFee}
+                        onChange={(e) => setAdminShippingFee(Math.max(0, Number(e.target.value) || 0))}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-400 font-bold uppercase">Hình thức phí ship</label>
+                      <select
+                        className="w-full mt-1 bg-[#1e2440] border border-[#303960] rounded-xl py-1.5 px-3 text-white text-xs focus:ring-1 focus:ring-indigo-500"
+                        value={shippingFeeOption}
+                        onChange={(e) => setShippingFeeOption(e.target.value as "included" | "separate_cod")}
+                      >
+                        <option value="included">Cộng vào đơn sỉ</option>
+                        <option value="separate_cod">Thu riêng khi nhận hàng</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {requiresManagerApproval && currentUser?.role === "super_admin" && (
+                    <label className="flex items-center gap-2 cursor-pointer mt-1 font-bold text-indigo-300">
+                      <input
+                        type="checkbox"
+                        checked={isManagerApproved}
+                        onChange={(e) => setIsManagerApproved(e.target.checked)}
+                        className="rounded text-indigo-600 focus:ring-0"
+                      />
+                      <span>Super Admin: Tôi xác nhận phê duyệt chiết khấu đặc biệt này</span>
+                    </label>
                   )}
                 </div>
               )}
             </div>
-          </div>
+          ) : (
+            <div className="h-full flex items-center justify-center text-sm text-gray-400">
+              Chọn một đơn hàng từ danh sách bên trái để xem chi tiết
+            </div>
+          )}
 
-          {/* Bàn giao vận chuyển */}
-          <div className="panel flex flex-col gap-4">
-            <div className="section-title">
-              <h3 className="text-lg font-bold">3. Kho hàng & Vận chuyển</h3>
+          {/* 3. BOTTOM FINANCIAL SUMMARY BAR & WHITE ACTION PILL BUTTON (Finnova Footer) */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-t border-[#242a49] pt-4 mt-6">
+            {/* Financial Figures */}
+            <div className="flex flex-wrap items-baseline gap-6 sm:gap-8">
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                  Sub Total
+                </span>
+                <span className="text-sm sm:text-base font-extrabold text-white font-mono">
+                  {formatVnd(subtotal)}
+                </span>
+              </div>
+
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                  Total
+                </span>
+                <span className="text-sm sm:text-base font-extrabold text-white font-mono">
+                  {formatVnd(finalTotal)}
+                </span>
+              </div>
+
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">
+                  Balance Due
+                </span>
+                <span className="text-base sm:text-lg font-black text-indigo-300 font-mono">
+                  {formatVnd(balanceDue)}
+                </span>
+              </div>
             </div>
 
-            <div className="flex flex-col gap-3">
+            {/* Actions: Utility Icons + Primary White Action Pill */}
+            <div className="flex items-center gap-2.5 self-stretch sm:self-auto justify-end">
               <button
                 type="button"
-                className="tab-button text-xs py-3 justify-center w-full bg-blue-600 text-white border-blue-700 hover:bg-blue-700 cursor-pointer font-bold rounded-xl flex items-center justify-center gap-1.5"
-                disabled={
-                  workingOrder.fulfillmentStatus === "shipped" ||
-                  (!workingOrder.paymentStatus.includes("confirmed") && workingOrder.paymentStatus !== "paid")
-                }
-                onClick={attachShipment}
+                className="w-9 h-9 rounded-xl bg-[#202644] hover:bg-[#293156] border border-[#2e375e] flex items-center justify-center text-gray-300 hover:text-white transition cursor-pointer"
+                title="Sao chép link"
+                onClick={() => navigator.clipboard?.writeText(window.location.href)}
               >
-                <Truck size={15} /> Bàn giao GHN (Mã vận đơn)
+                <LinkIcon size={15} />
               </button>
-              <div className="grid grid-cols-2 gap-2">
+
+              <button
+                type="button"
+                className="w-9 h-9 rounded-xl bg-[#202644] hover:bg-[#293156] border border-[#2e375e] flex items-center justify-center text-gray-300 hover:text-white transition cursor-pointer"
+                title="Lịch sử giao dịch"
+              >
+                <CalendarIcon size={15} />
+              </button>
+
+              {/* Primary White Action Pill Button */}
+              {activeOrder.commercialStatus === "submitted" || isOrderModified ? (
                 <button
                   type="button"
-                  className="tab-button text-[10px] py-2 justify-center border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 cursor-pointer font-bold rounded-xl flex items-center justify-center gap-1"
-                  disabled={!["customer_accepted", "locked"].includes(workingOrder.commercialStatus)}
-                  onClick={() => handleStockReservationAction("reserve_order")}
+                  className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
+                  onClick={handlePublishQuote}
+                  disabled={Boolean(isLockedByOther)}
                 >
-                  <LockKeyhole size={13} /> Giữ hàng 72h
+                  Publish Quote
                 </button>
+              ) : activeOrder.commercialStatus === "customer_accepted" ? (
                 <button
                   type="button"
-                  className="tab-button text-[10px] py-2 justify-center border-orange-200 bg-orange-50 text-orange-800 hover:bg-orange-100 cursor-pointer font-bold rounded-xl"
-                  onClick={() => handleStockReservationAction("release_order")}
+                  className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
+                  onClick={confirmDeposit}
+                  disabled={Boolean(isLockedByOther)}
                 >
-                  Nhả giữ hàng
+                  Confirm Deposit & ATP
                 </button>
+              ) : (
                 <button
                   type="button"
-                  className="tab-button text-[10px] py-2 justify-center border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 cursor-pointer font-bold rounded-xl"
-                  onClick={() => handleStockReservationAction("expire_order")}
+                  className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
+                  onClick={() => handlePostOrderAccounting("post_all")}
+                  disabled={Boolean(isLockedByOther)}
                 >
-                  Hết hạn giữ
+                  Post Ledger & Complete
                 </button>
-                <button
-                  type="button"
-                  className="tab-button text-[10px] py-2 justify-center border-green-200 bg-green-50 text-green-800 hover:bg-green-100 cursor-pointer font-bold rounded-xl"
-                  onClick={() => handleStockReservationAction("consume_order")}
-                >
-                  Chốt đã xuất
-                </button>
-              </div>
-              <div className="p-3 rounded-2xl border border-emerald-100 bg-emerald-50/50 flex flex-col gap-2">
-                <div>
-                  <strong className="text-xs text-emerald-950 block">Ghi sổ kế toán đơn hiện tại</strong>
-                  <p className="text-[10px] muted m-0 mt-0.5">
-                    Tự post thu tiền đã xác nhận, công nợ phải thu, doanh thu và giá vốn nếu đơn đã chốt xuất kho.
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 gap-2">
-                  <button
-                    type="button"
-                    className="tab-button text-[10px] py-2 justify-center border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer font-bold rounded-xl"
-                    disabled={
-                      !workingOrder.id ||
-                      !["deposit_confirmed", "paid", "cod_remaining"].includes(workingOrder.paymentStatus)
-                    }
-                    onClick={() => handlePostOrderAccounting("post_all")}
-                  >
-                    Ghi sổ toàn bộ đơn
-                  </button>
-                  <button
-                    type="button"
-                    className="tab-button text-[10px] py-2 justify-center border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-50 cursor-pointer font-bold rounded-xl"
-                    disabled={
-                      !workingOrder.id ||
-                      !["deposit_confirmed", "paid", "cod_remaining"].includes(workingOrder.paymentStatus)
-                    }
-                    onClick={() => handlePostOrderAccounting("post_confirmed_payments")}
-                  >
-                    Chỉ ghi nhận tiền đã thu
-                  </button>
-                </div>
-              </div>
+              )}
             </div>
           </div>
-        </aside>
-      </section>
+        </div>
+      </div>
     </div>
   );
 }

@@ -52,7 +52,20 @@ async def test_catalog_reads_canonical_products_variants_and_supplier_offers(can
         }
     ]
     assert customer[0]["variants"][0]["supplierId"] == "sup_pettravel"
-    assert guest[0]["variants"] == []
+    assert guest[0]["variants"] == [
+        {
+            "id": "var_1",
+            "sku": "SKU-001",
+            "label": "Màu xanh",
+            "barcode": "8930001",
+            "stock": 12,
+            "imageUrl": "/blue.webp",
+        }
+    ]
+    # Strictly verify Guest does NOT receive wholesalePrice, minOrderQty, or supplierId
+    assert "wholesalePrice" not in guest[0]["variants"][0]
+    assert "minOrderQty" not in guest[0]["variants"][0]
+    assert "supplierId" not in guest[0]["variants"][0]
 
 
 @pytest.mark.asyncio

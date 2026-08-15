@@ -96,7 +96,8 @@ a {
 
 /* Scrollbar styling */
 ::-webkit-scrollbar {
-  width: 10px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: #FFF7ED;
@@ -104,7 +105,7 @@ a {
 ::-webkit-scrollbar-thumb {
   background: #FED7AA;
   border-radius: 99px;
-  border: 2px solid #FFF7ED;
+  border: 1px solid #FFF7ED;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #F97316;
@@ -121,7 +122,7 @@ a {
   animation: float 4s ease-in-out infinite;
 }
 
-/* Modal animation */
+/* Modal & Sheet animations */
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -132,12 +133,45 @@ a {
   to { transform: scale(1); opacity: 1; }
 }
 
+@keyframes slideUpSheet {
+  from { transform: translateY(100%); opacity: 0.5; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes slideDownSheet {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(100%); opacity: 0; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
 .animate-fade-in {
-  animation: fadeIn 0.18s ease-out forwards;
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .animate-scale-in {
   animation: scaleIn 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.animate-slide-up-sheet {
+  animation: slideUpSheet 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, #FFFBEB 25%, #FED7AA 50%, #FFFBEB 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s infinite linear;
+}
+
+.overscroll-contain {
+  overscroll-behavior: contain;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 16px);
 }
 
 .z-1000 {
@@ -146,8 +180,10 @@ a {
 
 /* Squish spring button feedback */
 button:active {
-  transform: scale(0.95);
+  transform: scale(0.96);
+  transition: transform 0.1s ease;
 }
+
 
 .app-shell {
   min-height: 100vh;
@@ -324,21 +360,28 @@ button:active {
 
 .catalog-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr); /* 3 sản phẩm 1 hàng trên mobile */
-  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr)); /* 2 sản phẩm 1 hàng trên mobile - Chuẩn UI/UX Pro Max */
+  gap: 12px;
 }
 
 @media (min-width: 640px) {
   .catalog-grid {
-    grid-template-columns: repeat(5, 1fr); /* 5 sản phẩm 1 hàng trên tablet */
-    gap: 8px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
   }
 }
 
 @media (min-width: 1024px) {
   .catalog-grid {
-    grid-template-columns: repeat(8, 1fr); /* 8 sản phẩm 1 hàng trên máy tính */
-    gap: 10px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .catalog-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 18px;
   }
 }
 
@@ -350,18 +393,26 @@ button:active {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: transform 0.2s, box-shadow 0.2s;
-  aspect-ratio: 3 / 4; /* Box tỷ lệ 3:4 */
+  height: 100%;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
 }
-.product-card:hover {
-  transform: translateY(-6px);
-  box-shadow: inset -4px -4px 10px rgba(120, 53, 15, 0.04), inset 4px 4px 10px rgba(255, 255, 255, 0.9), 0 20px 40px rgba(249, 115, 22, 0.12);
+.product-card:active {
+  transform: scale(0.97);
+}
+@media (hover: hover) {
+  .product-card:hover {
+    transform: translateY(-4px);
+    box-shadow: inset -4px -4px 10px rgba(120, 53, 15, 0.04), inset 4px 4px 10px rgba(255, 255, 255, 0.9), 0 16px 32px rgba(249, 115, 22, 0.12);
+  }
 }
 
 .product-card img {
   width: 100%;
   aspect-ratio: 1 / 1;
   height: auto;
+
   object-fit: cover;
   background: var(--panel-soft);
   border-bottom: 2px solid var(--line);
@@ -675,18 +726,25 @@ button:active {
 
 @media (max-width: 760px) {
   .main-area {
-    padding: 16px;
+    padding: 12px 12px 88px 12px; /* Dành khoảng trống cho Bottom Navigation */
   }
 
-  .topbar,
+  .topbar {
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    border-radius: 1.25rem;
+  }
+
   .order-strip,
   .section-title {
     align-items: flex-start;
     flex-direction: column;
+    gap: 8px;
   }
 
   .metrics-grid {
     grid-template-columns: 1fr 1fr;
+    gap: 10px;
   }
 
   .variant-table,
@@ -695,6 +753,80 @@ button:active {
     overflow-x: auto;
     white-space: nowrap;
   }
+}
+
+/* Mobile Bottom Navigation Bar */
+.mobile-bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 990;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(16px);
+  border-top: 1.5px solid var(--line);
+  box-shadow: 0 -4px 20px rgba(120, 53, 15, 0.08);
+  padding: 6px 12px max(6px, env(safe-area-inset-bottom, 6px)) 12px;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+}
+
+.mobile-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px 8px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'Varela Round', sans-serif;
+  border-radius: 1rem;
+  transition: all 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+  min-width: 54px;
+  background: transparent;
+  border: 0;
+}
+
+.mobile-nav-item[data-active="true"] {
+  color: var(--primary-strong);
+}
+
+.mobile-nav-item[data-active="true"] .nav-icon-container {
+  background: #FFF7ED;
+  border-color: var(--primary);
+  color: var(--primary);
+  transform: translateY(-2px);
+}
+
+.nav-icon-container {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid transparent;
+  transition: all 0.2s;
+  position: relative;
+}
+
+/* Sticky Bottom Summary Bar */
+.sticky-bottom-bar {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+  border-top: 2px solid var(--line);
+  padding: 12px 16px max(12px, env(safe-area-inset-bottom, 12px)) 16px;
+  box-shadow: 0 -8px 24px rgba(120, 53, 15, 0.06);
+  z-index: 100;
+  border-bottom-left-radius: var(--radius-panel);
+  border-bottom-right-radius: var(--radius-panel);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -706,3 +838,129 @@ button:active {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* ==========================================================================
+   FINNOVA ADMIN UI DASHBOARD THEME (Dual-Surface FinTech / SaaS Architecture)
+   ========================================================================== */
+
+.admin-theme-container {
+  background-color: #f4f6fb;
+  color: #111827;
+  min-height: 100vh;
+  font-family: 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.admin-kpi-card {
+  background-color: #ffffff;
+  border: 1px solid #eef1f6;
+  border-radius: 1.5rem; /* 24px */
+  padding: 1.35rem 1.5rem;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.035);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.admin-kpi-card:hover {
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.06);
+  transform: translateY(-2px);
+}
+
+.admin-dark-dock {
+  background-color: #121528;
+  border: 1px solid #232742;
+  border-radius: 1.75rem; /* 28px */
+  box-shadow: 0 24px 60px rgba(18, 21, 40, 0.25);
+  color: #f8fafc;
+  position: relative;
+  overflow: hidden;
+}
+
+.admin-dark-card {
+  background-color: #1c213a;
+  border: 1px solid #293050;
+  border-radius: 1.25rem;
+  transition: all 0.2s ease;
+}
+
+.admin-dark-card:hover {
+  background-color: #222846;
+  border-color: #374068;
+}
+
+.admin-dark-pill-active {
+  background-color: #4f46e5;
+  color: #ffffff;
+  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.4);
+}
+
+.admin-pill-btn-white {
+  background-color: #ffffff;
+  color: #111827;
+  font-weight: 700;
+  border-radius: 9999px;
+  padding: 0.65rem 1.4rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.admin-pill-btn-white:hover {
+  background-color: #f8fafc;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
+.admin-pill-btn-white:active {
+  transform: scale(0.97);
+}
+
+.admin-pill-btn-primary {
+  background-color: #4f46e5;
+  color: #ffffff;
+  font-weight: 700;
+  border-radius: 9999px;
+  padding: 0.65rem 1.4rem;
+  box-shadow: 0 6px 20px rgba(79, 70, 229, 0.35);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.admin-pill-btn-primary:hover {
+  background-color: #4338ca;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 25px rgba(79, 70, 229, 0.45);
+}
+
+.admin-pill-btn-primary:active {
+  transform: scale(0.97);
+}
+
+/* Custom dark scrollbar for Finnova master-detail pane */
+.admin-dark-scroll::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.admin-dark-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 9999px;
+}
+
+.admin-dark-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+
+.admin-dark-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+

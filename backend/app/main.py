@@ -29,10 +29,12 @@ async def vercel_path_rewrite(request: Request, call_next):
     We strip the leading /api to restore the original path.
     """
     path = request.scope.get("path", "")
-    if path.startswith("/api/"):
-        request.scope["path"] = path[4:]  # strip "/api" prefix, keep "/"
-    elif path == "/api":
+    if path.startswith("/api/api/"):
+        request.scope["path"] = path[4:]  # strip duplicate "/api" prefix from Vercel rewrite
+    elif path in {"/api", "/api/"}:
         request.scope["path"] = "/"
+    elif path.startswith("/api/") and not path.startswith("/api/v1"):
+        request.scope["path"] = path[4:]  # strip "/api" for root-level routes like /debug, /docs
 
     final_path = request.scope.get("path", "")
     if PRODUCTION_CONFIG_ERROR and final_path not in {"/", "/debug"}:

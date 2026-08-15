@@ -48,6 +48,7 @@ export type PaymentStatus =
   | "cod_remaining"
   | "refunded";
 
+
 export type FulfillmentStatus =
   | "not_started"
   | "supplier_checking"
@@ -83,10 +84,10 @@ export interface ProductVariant {
   sku: string;
   label: string;
   barcode?: string;
-  wholesalePrice: number;
+  wholesalePrice?: number;
   minOrderQty: number;
   stock: number;
-  supplierId: string;
+  supplierId?: string;
   imageUrl?: string;
 }
 
@@ -103,6 +104,19 @@ export interface Product {
   description?: string;
   tags: string[];
   variants: ProductVariant[];
+}
+
+export type UploadStatus = "pending" | "uploading" | "success" | "error" | "retrying";
+
+export interface ProductUploadImage {
+  id: string;
+  file?: File;
+  previewUrl: string;
+  r2Url?: string;
+  r2Key?: string;
+  status: UploadStatus;
+  progress: number;
+  error?: string;
 }
 
 export interface OrderItem {

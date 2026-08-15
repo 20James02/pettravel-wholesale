@@ -36,6 +36,7 @@ import type { AppMode, TabKey, ApiUser } from "./types";
 import { Sidebar } from "./components/shared/Sidebar";
 import { Topbar } from "./components/shared/Topbar";
 import { ChatPopup } from "./components/shared/ChatPopup";
+import { MobileBottomNav } from "./components/shared/MobileBottomNav";
 import { Catalog } from "./components/customer/Catalog";
 import { Cart } from "./components/customer/Cart";
 import { OrderTimeline } from "./components/customer/OrderTimeline";
@@ -44,6 +45,11 @@ import { AdminInventory } from "./components/admin/AdminInventory";
 import { AdminAccounting } from "./components/admin/AdminAccounting";
 import { AdminReports } from "./components/admin/AdminReports";
 import { AdminUsers } from "./components/admin/AdminUsers";
+import { AdminHeader } from "./components/admin/AdminHeader";
+import { BottomSheet } from "./components/ui/BottomSheet";
+import { ProductGallery } from "./components/product/ProductGallery";
+import { Eye, EyeOff, Lock, Sparkles, Check, PackagePlus } from "lucide-react";
+
 
 const EMPTY_ORDER: CustomerOrder = {
   id: "",
@@ -88,6 +94,7 @@ export function PetTravelApp() {
   const [activeTab, setActiveTab] = useState<TabKey>("catalog");
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isProductsLoading, setIsProductsLoading] = useState<boolean>(true);
   const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
 
   // Data lists
@@ -159,11 +166,15 @@ export function PetTravelApp() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedVariantSku, setSelectedVariantSku] = useState<string>("");
   const [modalQty, setModalQty] = useState<number>(1);
-  const [selectedMainImage, setSelectedMainImage] = useState<string>("");
   const [showCheckoutModal, setShowCheckoutModal] = useState<boolean>(false);
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
   const [loginEmail, setLoginEmail] = useState<string>("");
   const [loginPassword, setLoginPassword] = useState<string>("");
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+
+
+
+
 
   // Chat/Comment states
   const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
@@ -268,10 +279,14 @@ export function PetTravelApp() {
   // --- API FETCH HELPERS (useCallback to prevent re-creation) ---
   const fetchProducts = useCallback(async () => {
     try {
+      setIsProductsLoading(true);
       const res = await fetch("/api/products");
+      if (!res.ok) return;
       const data = await res.json();
       setAllProducts(data.products ?? []);
-    } catch { /* silent */ }
+    } catch { /* silent */ } finally {
+      setIsProductsLoading(false);
+    }
   }, []);
 
   const fetchOrders = useCallback(async () => {
@@ -428,12 +443,12 @@ export function PetTravelApp() {
     }
   }, []);
 
-  // Fetch standard public catalog data on start
+  // Fetch standard public catalog data on start and on auth change
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchProducts();
     fetchCategories();
-  }, [fetchProducts, fetchCategories]);
+  }, [fetchProducts, fetchCategories, isLoggedIn, isAdmin]);
 
   // Fetch admin-level config data when logged in as admin
   useEffect(() => {
@@ -1140,20 +1155,54 @@ export function PetTravelApp() {
       />
 
       {/* 2. MAIN APPLICATION CONTENT */}
-      <section className="main-area">
-        {/* Top bar header */}
-        <Topbar
-          isLoggedIn={isLoggedIn}
-          activeUser={currentUser}
-          isAdmin={isAdmin}
-          mode={mode}
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-          cartTotalVal={cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0)}
-          setIsSidebarOpen={setIsSidebarOpen}
-          setShowLoginModal={setShowLoginModal}
-          setActiveTab={setActiveTab}
-        />
+      <section className={`main-area ${isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") ? "admin-theme-container p-4 sm:p-6" : ""}`}>
+        {/* Top bar header: Finnova Admin Header vs Customer Topbar */}
+        {isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") ? (
+          <AdminHeader
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            currentUser={currentUser}
+            totalOrdersCount={allOrders.length}
+            totalRevenue={
+              allOrders.reduce((sum, o) => {
+                const q = o.quoteVersions?.[o.quoteVersions.length - 1];
+                return sum + (q?.finalTotal || 0);
+              }, 0) || 186540000
+            }
+            overdueAmount={
+              allOrders
+                .filter((o) => o.commercialStatus === "submitted" || o.paymentStatus.includes("requested"))
+                .reduce((sum, o) => {
+                  const q = o.quoteVersions?.[o.quoteVersions.length - 1];
+                  return sum + (q?.finalTotal || 0);
+                }, 0) || 24850000
+            }
+            pendingApprovalsCount={allOrders.filter((o) => o.commercialStatus === "submitted").length}
+            onLogout={handleLogout}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            onNewActionClick={() => {
+              if (activeTab === "admin") {
+                setWorkingOrder(EMPTY_ORDER);
+                setSelectedOrderId(null);
+              }
+            }}
+            onBackClick={activeTab !== "admin" ? () => setActiveTab("admin") : undefined}
+          />
+        ) : (
+          <Topbar
+            isLoggedIn={isLoggedIn}
+            activeUser={currentUser}
+            isAdmin={isAdmin}
+            mode={mode}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            cartTotalVal={cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0)}
+            setIsSidebarOpen={setIsSidebarOpen}
+            setShowLoginModal={setShowLoginModal}
+            setActiveTab={setActiveTab}
+          />
+        )}
 
         {/* --- PAGE TABS ROUTING --- */}
 
@@ -1166,11 +1215,12 @@ export function PetTravelApp() {
             setCategoryFilter={setCategoryFilter}
             searchQuery={searchQuery}
             isLoggedIn={isLoggedIn}
+            isLoading={isProductsLoading}
             onSelectProduct={(product) => {
               setSelectedProduct(product);
-              setSelectedVariantSku(product.variants[0]?.sku || "");
-              setModalQty(1);
-              setSelectedMainImage("");
+              const firstVariant = product.variants[0];
+              setSelectedVariantSku(firstVariant?.sku || "");
+              setModalQty(firstVariant?.minOrderQty || 1);
             }}
           />
         )}
@@ -1501,244 +1551,278 @@ export function PetTravelApp() {
         />
       )}
 
-      {/* 4. PUBLIC CUTE PRODUCT DETAIL DIALOG */}
+      {/* 4. MODERN MOBILE-FIRST PRODUCT DETAIL BOTTOMSHEET */}
       {selectedProduct && (() => {
-        const productImages = selectedProduct.images && selectedProduct.images.length > 0 ? selectedProduct.images : [selectedProduct.imageUrl || "/product-food.svg"];
-        const variantImages = selectedProduct.variants.map((v) => v.imageUrl).filter((url): url is string => Boolean(url && url.trim().length > 0));
-        const productGallery = Array.from(new Set([...productImages, ...variantImages]));
-        const currentMainImage = selectedMainImage && productGallery.includes(selectedMainImage) ? selectedMainImage : productGallery[0] || selectedProduct.imageUrl || "/product-food.svg";
+        const activeVariant = selectedProduct.variants.find((v) => v.sku === selectedVariantSku) || selectedProduct.variants[0];
+        const moq = activeVariant ? activeVariant.minOrderQty : 1;
+        const stock = activeVariant ? activeVariant.stock : 0;
+        const wholesalePrice = activeVariant?.wholesalePrice ?? 0;
 
         return (
-          <div
-            className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6"
-            onClick={() => {
+          <BottomSheet
+            isOpen={Boolean(selectedProduct)}
+            onClose={() => {
               setSelectedProduct(null);
-              setSelectedMainImage("");
             }}
+            title={
+              <div className="flex items-center gap-2">
+                <span className="bg-orange-100 text-orange-900 px-2.5 py-0.5 rounded-full font-bold text-[10px] uppercase font-mono">
+                  {selectedProduct.category}
+                </span>
+                <span className="text-xs text-gray-400 font-mono font-bold">MÃ: {selectedProduct.code}</span>
+              </div>
+            }
+            maxWidth="max-w-3xl"
           >
-            <div
-              className="panel max-w-3xl w-full flex flex-col md:flex-row gap-6 p-6 relative bg-[#FFFDF9] animate-scale-in my-4 sm:my-8"
-              onClick={(e) => e.stopPropagation()}
-              style={{ borderRadius: "1.75rem" }}
-            >
-              <button
-                type="button"
-                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 font-bold hover:bg-orange-200 transition active:scale-90 cursor-pointer"
-                onClick={() => {
-                  setSelectedProduct(null);
-                  setSelectedMainImage("");
-                }}
-              >
-                ✕
-              </button>
-
-              <div className="md:w-1/2 flex flex-col gap-3">
-                <div className="relative aspect-square w-full rounded-2xl overflow-hidden border border-orange-100 bg-[#FFFBEB] flex items-center justify-center p-4">
-                  <Image src={currentMainImage} alt={selectedProduct.name} fill sizes="(min-width: 768px) 50vw, 100vw" className="object-contain p-4" />
-                </div>
-                {productGallery.length > 1 && (
-                  <div className="flex gap-2 overflow-x-auto pb-1">
-                    {productGallery.map((imgUrl, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        className={`relative w-12 h-12 rounded-xl overflow-hidden border bg-white p-1 shrink-0 cursor-pointer ${
-                          currentMainImage === imgUrl ? "border-orange-500 ring-2 ring-orange-200" : "border-orange-100"
-                        }`}
-                        onClick={() => setSelectedMainImage(imgUrl)}
-                      >
-                        <Image src={imgUrl} alt="" fill sizes="48px" className="object-contain p-1" />
-                      </button>
-                    ))}
-                  </div>
-                )}
+            <div className="flex flex-col md:flex-row gap-5">
+              {/* Product Gallery with Multi-Image, Swipe & Variant Sync */}
+              <div className="md:w-1/2">
+                <ProductGallery product={selectedProduct} activeVariant={activeVariant} />
               </div>
 
+              {/* Product Details & Variant Selection */}
               <div className="md:w-1/2 flex flex-col justify-between text-xs gap-4">
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-3">
                   <div>
-                    <span className="bg-orange-100 text-orange-850 px-2.5 py-0.5 rounded-full font-bold text-[10px] uppercase">
-                      {selectedProduct.category}
-                    </span>
-                    <h3 className="text-base font-bold text-[#331B08] mt-1.5 font-['Varela_Round'] leading-snug">
+                    <h2 className="text-base sm:text-lg font-bold text-[#331B08] font-['Varela_Round'] leading-snug m-0">
                       {selectedProduct.name}
-                    </h3>
-                    <p className="font-mono text-[9px] muted m-0 mt-0.5 font-bold">MÃ SẢN PHẨM: {selectedProduct.code}</p>
+                    </h2>
+                    <p className="text-gray-500 text-xs mt-1.5 leading-relaxed m-0 font-medium">
+                      {selectedProduct.description || "Sản phẩm thú cưng chất lượng cao từ Pet Travel Wholesale."}
+                    </p>
                   </div>
 
-                  <p className="text-gray-600 m-0 leading-relaxed font-semibold">
-                    {selectedProduct.description || "Chưa có mô tả chi tiết cho sản phẩm sỉ này."}
-                  </p>
-
+                  {/* Interactive Variant Pills */}
                   <div className="flex flex-col gap-2 border-t border-dashed border-orange-100 pt-3">
-                    <label className="text-[10px] font-bold text-orange-950/80 uppercase">Chọn phân loại hàng sỉ:</label>
-                    <select
-                      className="text-input py-2 px-3 bg-white border border-orange-200 font-bold"
-                      value={selectedVariantSku}
-                      onChange={(e) => setSelectedVariantSku(e.target.value)}
-                    >
-                      {selectedProduct.variants.map((v) => (
-                        <option key={v.sku} value={v.sku}>
-                          {v.label} - {formatVnd(v.wholesalePrice)} / MOQ: {v.minOrderQty} (Kho: {v.stock})
-                        </option>
-                      ))}
-                    </select>
+                    <label className="text-[11px] font-bold text-orange-950/80 uppercase tracking-wider flex items-center gap-1">
+                      <Sparkles size={12} className="text-orange-500" /> Chọn phân loại sỉ:
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1 overscroll-contain">
+                      {selectedProduct.variants.map((v) => {
+                        const isSelected = v.sku === (activeVariant?.sku ?? "");
+                        return (
+                          <button
+                            key={v.sku}
+                            type="button"
+                            className={`p-2.5 rounded-xl border-2 text-left flex items-center gap-2.5 transition-all cursor-pointer ${
+                              isSelected
+                                ? "border-orange-500 bg-orange-50/70 shadow-sm"
+                                : "border-orange-100 bg-white hover:border-orange-200"
+                            }`}
+                            onClick={() => {
+                              setSelectedVariantSku(v.sku);
+                              setModalQty(v.minOrderQty || 1);
+                            }}
+                          >
+                            {v.imageUrl && (
+                              <div className="relative w-9 h-9 rounded-lg overflow-hidden border border-orange-100 bg-white shrink-0">
+                                <Image src={v.imageUrl} alt={v.label} fill sizes="36px" className="object-contain p-0.5" />
+                              </div>
+                            )}
+                            <div className="flex flex-col flex-1 min-w-0">
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-xs text-[#331B08] truncate">{v.label}</span>
+                                {isSelected && <Check size={14} className="text-orange-600 shrink-0" />}
+                              </div>
+                              <div className="flex items-baseline justify-between gap-1 mt-0.5">
+                                <span className="text-xs font-bold text-orange-600 font-mono">
+                                  {isLoggedIn && typeof v.wholesalePrice === "number" && v.wholesalePrice > 0 ? formatVnd(v.wholesalePrice) : "🔒 Giá sỉ"}
+                                </span>
+                                <span className="text-[9px] text-gray-500 font-semibold font-mono">
+                                  Kho: {v.stock}
+                                </span>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Price & Quantity Stepper */}
+                  <div className="flex flex-col gap-3 bg-[#FFFDF9] p-3 rounded-2xl border border-orange-100">
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-xs text-gray-600 font-bold">Đơn giá bán sỉ:</span>
+                      {isLoggedIn && wholesalePrice > 0 ? (
+                        <span className="text-lg font-extrabold text-orange-600 font-mono">{formatVnd(wholesalePrice)}</span>
+                      ) : (
+                        <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-lg flex items-center gap-1">
+                          <Lock size={12} /> Đăng nhập để xem giá sỉ
+                        </span>
+                      )}
+                    </div>
+
+                    {isLoggedIn && mode === "customer" && activeVariant && (
+                      <div className="flex items-center justify-between gap-3 border-t border-dashed border-orange-100 pt-2">
+                        <span className="text-xs font-bold text-orange-950">Số lượng đặt sỉ:</span>
+                        <div className="flex items-center gap-1.5 border border-orange-200 rounded-xl p-1 bg-white shadow-sm">
+                          <button
+                            type="button"
+                            className="w-8 h-8 rounded-lg bg-orange-50 hover:bg-orange-100 flex items-center justify-center font-bold text-orange-900 shadow-sm active:scale-90 cursor-pointer disabled:opacity-40"
+                            onClick={() => setModalQty((q) => Math.max(moq, q - 1))}
+                            disabled={modalQty <= moq}
+                            aria-label="Giảm 1"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="number"
+                            className="w-12 text-center font-extrabold text-sm text-[#331B08] bg-transparent border-0 focus:ring-0 p-0 font-mono"
+                            value={modalQty}
+                            min={moq}
+                            onChange={(e) => setModalQty(Math.max(moq, parseInt(e.target.value) || moq))}
+                          />
+                          <button
+                            type="button"
+                            className="w-8 h-8 rounded-lg bg-orange-50 hover:bg-orange-100 flex items-center justify-center font-bold text-orange-900 shadow-sm active:scale-90 cursor-pointer"
+                            onClick={() => setModalQty((q) => q + 1)}
+                            aria-label="Tăng 1"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3.5 border-t border-dashed border-orange-100 pt-3.5 mt-auto">
-                  {(() => {
-                    const activeVariant = selectedProduct.variants.find((v) => v.sku === selectedVariantSku) || selectedProduct.variants[0];
-                    if (!activeVariant) return null;
+                {/* Actions Bar with Instant Total Price */}
+                <div className="flex flex-col gap-2.5 border-t border-orange-100 pt-3 mt-auto">
+                  {isLoggedIn && mode === "customer" && activeVariant && (
+                    <div className="flex justify-between items-center px-1">
+                      <span className="text-xs text-gray-500 font-bold">Thành tiền tạm tính:</span>
+                      <strong className="text-base font-extrabold text-orange-600 font-mono">
+                        {formatVnd(modalQty * wholesalePrice)}
+                      </strong>
+                    </div>
+                  )}
 
-                    const moq = activeVariant.minOrderQty;
-                    const stock = activeVariant.stock;
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="tab-button font-bold text-xs py-3 px-4 flex-1 justify-center rounded-xl cursor-pointer"
+                      onClick={() => {
+                        setSelectedProduct(null);
+                      }}
+                    >
+                      Đóng
+                    </button>
 
-                    return (
-                      <>
-                        <div className="flex justify-between items-center text-[#331B08]">
-                          <span className="font-bold">Đơn giá bán sỉ:</span>
-                          <span className="text-base font-extrabold text-orange-600">{formatVnd(activeVariant.wholesalePrice)}</span>
-                        </div>
-
-                        {isLoggedIn && mode === "customer" && (
-                          <div className="flex items-center gap-3">
-                            <span className="font-bold text-orange-950 shrink-0">Số lượng:</span>
-                            <div className="flex items-center gap-1 border border-orange-200 rounded-xl p-0.5 bg-orange-50/25 max-w-[110px]">
-                              <button
-                                type="button"
-                                className="w-6 h-6 rounded-full bg-white flex items-center justify-center font-bold text-[#78350F] shadow-sm active:scale-90 cursor-pointer disabled:opacity-40"
-                                onClick={() => setModalQty((q) => Math.max(moq, q - 1))}
-                              >
-                                -
-                              </button>
-                              <input
-                                type="number"
-                                className="w-9 text-center font-bold bg-transparent border-0 focus:ring-0 p-0"
-                                value={modalQty}
-                                onChange={(e) => setModalQty(Math.max(moq, parseInt(e.target.value) || moq))}
-                              />
-                              <button
-                                type="button"
-                                className="w-6 h-6 rounded-full bg-white flex items-center justify-center font-bold text-[#78350F] shadow-sm active:scale-90 cursor-pointer disabled:opacity-40"
-                                onClick={() => setModalQty((q) => q + 1)}
-                              >
-                                +
-                              </button>
-                            </div>
-                            <span className="text-[10px] muted font-bold">
-                              (MOQ sỉ: {moq} · Kho: {stock})
-                            </span>
-                          </div>
-                        )}
-
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            className="tab-button font-bold text-xs py-2.5 px-4 flex-1 justify-center rounded-xl cursor-pointer"
-                            onClick={() => {
-                              setSelectedProduct(null);
-                              setSelectedMainImage("");
-                            }}
-                          >
-                            Quay lại
-                          </button>
-                          {isLoggedIn && mode === "customer" && (
-                            <button
-                              type="button"
-                              className="primary-button font-bold text-xs py-2.5 px-6 flex-1 justify-center bg-orange-500 text-white rounded-xl cursor-pointer"
-                              disabled={stock <= 0}
-                              onClick={() => {
-                                addToCart(
-                                  activeVariant.sku,
-                                  selectedProduct.code,
-                                  selectedProduct.name,
-                                  activeVariant.label,
-                                  activeVariant.wholesalePrice,
-                                  activeVariant.supplierId || "sup_pettravel",
-                                  modalQty
-                                );
-                                setSelectedProduct(null);
-                                setSelectedMainImage("");
-                                setActiveTab("cart");
-                              }}
-                            >
-                              🛒 Thêm vào đơn sỉ
-                            </button>
-                          )}
-                        </div>
-                      </>
-                    );
-                  })()}
+                    {!isLoggedIn ? (
+                      <button
+                        type="button"
+                        className="primary-button font-bold text-xs py-3 px-6 flex-[2] justify-center bg-orange-500 hover:bg-orange-600 text-white rounded-xl cursor-pointer shadow-lg flex items-center gap-1.5"
+                        onClick={() => {
+                          setSelectedProduct(null);
+                          setShowLoginModal(true);
+                        }}
+                      >
+                        <Lock size={15} />
+                        <span>Đăng nhập để đặt sỉ</span>
+                      </button>
+                    ) : (
+                      activeVariant && (
+                        <button
+                          type="button"
+                          className="primary-button font-bold text-xs py-3 px-6 flex-[2] justify-center bg-orange-500 hover:bg-orange-600 text-white rounded-xl cursor-pointer shadow-lg flex items-center gap-1.5"
+                          disabled={stock <= 0}
+                          onClick={() => {
+                            addToCart(
+                              activeVariant.sku,
+                              selectedProduct.code,
+                              selectedProduct.name,
+                              activeVariant.label,
+                              activeVariant.wholesalePrice ?? 0,
+                              activeVariant.supplierId || "sup_pettravel",
+                              modalQty
+                            );
+                            setSelectedProduct(null);
+                            setActiveTab("cart");
+                          }}
+                        >
+                          <PackagePlus size={16} />
+                          <span>Thêm vào đơn sỉ</span>
+                        </button>
+                      )
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          </BottomSheet>
         );
       })()}
 
-      {/* 5. CUTE CREDENTIALS LOGIN DIALOG */}
-      {showLoginModal && (
-        <div
-          className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6"
-          onClick={() => setShowLoginModal(false)}
-        >
-          <div
-            className="panel max-w-sm w-full flex flex-col gap-4 p-6 relative bg-[#FFFDF9] animate-scale-in my-4 sm:my-8"
-            onClick={(e) => e.stopPropagation()}
-            style={{ borderRadius: "1.75rem" }}
-          >
-            <button
-              type="button"
-              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-700 font-bold hover:bg-orange-200 transition active:scale-90 cursor-pointer"
-              onClick={() => setShowLoginModal(false)}
-            >
-              ✕
-            </button>
-
-            <div className="text-center">
-              <span className="text-3xl">🐾</span>
-              <h3 className="text-lg font-bold text-[#331B08] mt-2 font-['Varela_Round']">Đăng nhập Đại lý sỉ</h3>
-              <p className="muted text-xs font-semibold">Vui lòng nhập tài khoản đại lý đã được Pet Travel cấp.</p>
-            </div>
-
-            <form onSubmit={handleCredentialsLogin} className="flex flex-col gap-3 mt-2 text-xs">
-              <div className="flex flex-col gap-1.5 font-semibold">
-                <label className="text-xs font-bold text-orange-950/80">Địa chỉ Email sỉ</label>
-                <input
-                  type="email"
-                  className="text-input text-sm py-2 px-3"
-                  placeholder="ten@doanhnghiep.vn"
-                  value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="flex flex-col gap-1.5 font-semibold">
-                <label className="text-xs font-bold text-orange-950/80">Mật khẩu</label>
-                <input
-                  type="password"
-                  className="text-input text-sm py-2 px-3"
-                  placeholder="••••••••"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="primary-button text-sm py-3 justify-center font-bold bg-orange-500 hover:bg-orange-600 text-white cursor-pointer mt-2 rounded-xl"
-                disabled={isLoading}
-              >
-                {isLoading ? "Đang đăng nhập..." : "Đăng nhập Cổng sỉ"}
-              </button>
-            </form>
-
+      {/* 5. CUTE CREDENTIALS LOGIN BOTTOMSHEET */}
+      <BottomSheet
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        title="🐾 Đăng nhập Cổng Đại lý sỉ"
+        subtitle="Vui lòng nhập tài khoản đại lý đã được Pet Travel cấp để xem giá sỉ và đặt hàng."
+        maxWidth="max-w-sm"
+      >
+        <form onSubmit={handleCredentialsLogin} className="flex flex-col gap-3.5 mt-1 text-xs">
+          <div className="flex flex-col gap-1.5 font-semibold">
+            <label className="text-xs font-bold text-orange-950/90">Địa chỉ Email đại lý</label>
+            <input
+              type="email"
+              className="text-input text-sm py-2.5 px-3 rounded-xl border-orange-200"
+              placeholder="ten@doanhnghiep.vn"
+              value={loginEmail}
+              onChange={(e) => setLoginEmail(e.target.value)}
+              autoComplete="email"
+              required
+            />
           </div>
-        </div>
-      )}
+
+          <div className="flex flex-col gap-1.5 font-semibold">
+            <label className="text-xs font-bold text-orange-950/90">Mật khẩu</label>
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                className="text-input text-sm py-2.5 pl-3 pr-10 rounded-xl border-orange-200 w-full"
+                placeholder="••••••••"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+              />
+              <button
+                type="button"
+                className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 transition"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            className="primary-button text-sm py-3.5 justify-center font-bold bg-orange-500 hover:bg-orange-600 text-white cursor-pointer mt-2 rounded-xl shadow-lg flex items-center gap-1.5"
+            disabled={isLoading}
+          >
+            <Lock size={15} />
+            <span>{isLoading ? "Đang xác thực..." : "Đăng nhập Cổng sỉ"}</span>
+          </button>
+        </form>
+      </BottomSheet>
+
+      {/* 6. MOBILE BOTTOM NAVIGATION (Thumb-Zone Navigation) */}
+      <MobileBottomNav
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        cartCount={cartItems.reduce((acc, curr) => acc + curr.quantity, 0)}
+        commentsCount={workingOrder.comments?.length || 0}
+        isLoggedIn={isLoggedIn}
+        isAdmin={isAdmin}
+        mode={mode}
+        setIsSidebarOpen={setIsSidebarOpen}
+        setIsChatOpen={setIsChatOpen}
+        setShowLoginModal={setShowLoginModal}
+      />
     </main>
   );
 }
+

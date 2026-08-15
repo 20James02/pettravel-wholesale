@@ -6,6 +6,8 @@ import { formatVnd } from "@/lib/money";
 import { StatusPill } from "../ui/StatusPill";
 import { productSchema, supplierSchema } from "@/lib/validation";
 import { getValidationErrorMessage } from "@/lib/validation";
+import { ImageUploader } from "@/features/pettravel/components/product/ImageUploader";
+import { VariantImageUploader } from "@/features/pettravel/components/product/VariantImageUploader";
 
 interface AdminInventoryProps {
   activeTab: string;
@@ -322,15 +324,24 @@ export function AdminInventory({
     <div className="flex flex-col gap-6 animate-fade-in w-full">
       {/* 1. TAB QUẢN LÝ SẢN PHẨM */}
       {activeTab === "admin_products" && (
-        <div className="flex flex-col gap-6 w-full">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-bold text-[#331B08] font-['Varela_Round']">🛍️ Quản lý Danh mục Sản phẩm sỉ</h2>
-              <p className="muted text-xs font-semibold">Cập nhật thông tin, giá sỉ và quản lý kho hàng thực tế của đại lý.</p>
+        <div className="admin-dark-dock w-full p-4 sm:p-6 lg:p-7 flex flex-col gap-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#222744] pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
+                <Boxes size={20} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-extrabold text-white tracking-tight">
+                  Product Catalog & ATP Inventory Balances
+                </span>
+                <span className="text-xs text-gray-400 font-medium">
+                  Cập nhật danh mục sản phẩm, biến thể sỉ và tồn kho khả dụng Available-to-Promise
+                </span>
+              </div>
             </div>
             <button
               type="button"
-              className="primary-button text-xs py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl cursor-pointer"
+              className="admin-pill-btn-primary text-xs py-2 px-5"
               onClick={() => {
                 setEditingProduct(null);
                 const nextCode = `PRO-${Date.now().toString().slice(-4)}`;
@@ -373,18 +384,18 @@ export function AdminInventory({
             </button>
           </div>
 
-          <div className="panel p-4 overflow-x-auto w-full">
-            <table className="variant-table w-full">
+          <div className="bg-[#171b30] p-4 rounded-2xl border border-[#272e4e] overflow-x-auto w-full">
+            <table className="w-full text-left text-xs">
               <thead>
-                <tr>
-                  <th>Mã/Ảnh</th>
-                  <th>Tên sản phẩm sỉ</th>
-                  <th>Phân loại</th>
-                  <th>Phân loại & Giá / MOQ / Tồn</th>
-                  <th className="text-right">Thao tác</th>
+                <tr className="border-b border-[#293154] text-[10px] text-gray-400 uppercase font-bold">
+                  <th className="py-2.5 px-2">Mã / Ảnh</th>
+                  <th className="py-2.5 px-2">Tên sản phẩm sỉ</th>
+                  <th className="py-2.5 px-2">Phân loại</th>
+                  <th className="py-2.5 px-2">Quy cách & Giá sỉ / Kho</th>
+                  <th className="py-2.5 px-2 text-right">Thao tác</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-[#232a48]">
                 {allProducts.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="muted text-xs text-center py-8 font-semibold">
@@ -418,9 +429,9 @@ export function AdminInventory({
                                 <strong>{v.label}</strong> ({v.sku})
                               </span>
                               <span className="muted font-bold text-orange-600">
-                                {formatVnd(v.wholesalePrice)}{" "}
+                                {formatVnd(v.wholesalePrice ?? 0)}{" "}
                                 <span className="text-[10px] text-gray-500">
-                                  (MOQ: {v.minOrderQty} · Kho: {v.stock})
+                                  (Sỉ từ: {v.minOrderQty} · Kho: {v.stock})
                                 </span>
                               </span>
                             </div>
@@ -915,29 +926,40 @@ export function AdminInventory({
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Ảnh đại diện sản phẩm (URL):</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    className="text-input text-xs py-2 px-3 flex-1"
-                    placeholder="https://..."
-                    value={formImage}
-                    onChange={(e) => setFormImage(e.target.value)}
-                  />
-                  <div className="relative w-9 h-9 rounded-lg overflow-hidden border bg-white shrink-0 flex items-center justify-center p-0.5">
-                    <Image src={formImage} alt="Preview" fill sizes="36px" className="object-contain p-0.5" />
-                  </div>
-                </div>
+                <label className="text-[10px] font-bold text-orange-950/80 uppercase">
+                  Quản lý Bộ sưu tập Ảnh sản phẩm (Cloudflare R2):
+                </label>
+                <ImageUploader
+                  initialImages={formImages}
+                  initialMainImage={formImage}
+                  productId={editingProduct?.id || formCode}
+                  onChange={(images, mainImage) => {
+                    setFormImages(images);
+                    setFormImage(mainImage);
+                  }}
+                />
               </div>
 
               {/* Form variants list */}
               <div className="border border-orange-100 bg-orange-50/20 p-4 rounded-2xl flex flex-col gap-3">
                 <h4 className="m-0 text-xs font-bold text-[#78350F] border-b border-dashed border-orange-100 pb-1.5">
-                  🎨 Quản lý Phân loại hàng sỉ (Variants)
+                  🎨 Quản lý Phân loại hàng sỉ & Ảnh riêng từng mẫu (Variants)
                 </h4>
-                <div className="flex flex-col gap-2.5 max-h-[160px] overflow-y-auto pr-1">
+                <div className="flex flex-col gap-2.5 max-h-[220px] overflow-y-auto pr-1">
                   {formVariants.map((v, idx) => (
                     <div key={v.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center bg-white p-2.5 rounded-xl border border-orange-100">
+                      <div className="sm:col-span-1 flex flex-col items-center justify-center">
+                        <VariantImageUploader
+                          currentUrl={v.imageUrl}
+                          productId={editingProduct?.id || formCode}
+                          variantId={v.sku || v.id}
+                          onChange={(url) => {
+                            const copy = [...formVariants];
+                            copy[idx].imageUrl = url;
+                            setFormVariants(copy);
+                          }}
+                        />
+                      </div>
                       <div className="sm:col-span-3 flex flex-col gap-0.5">
                         <label className="text-[9px] font-semibold text-gray-500 uppercase">Tên phân loại sỉ</label>
                         <input
@@ -952,11 +974,11 @@ export function AdminInventory({
                           required
                         />
                       </div>
-                      <div className="sm:col-span-3 flex flex-col gap-0.5">
-                        <label className="text-[9px] font-semibold text-gray-500 uppercase">Mã SKU sỉ (Tự động)</label>
+                      <div className="sm:col-span-2 flex flex-col gap-0.5">
+                        <label className="text-[9px] font-semibold text-gray-500 uppercase">Mã SKU (Tự động)</label>
                         <input
                           type="text"
-                          className="text-input text-[11px] py-1 px-2 font-mono bg-gray-50"
+                          className="text-input text-[11px] py-1 px-2 font-mono bg-gray-50 text-[10px]"
                           value={v.sku}
                           disabled
                         />
@@ -976,7 +998,7 @@ export function AdminInventory({
                         />
                       </div>
                       <div className="sm:col-span-1.5 flex flex-col gap-0.5">
-                        <label className="text-[9px] font-semibold text-gray-500 uppercase">MOQ</label>
+                        <label className="text-[9px] font-semibold text-gray-500 uppercase">Sỉ tối thiểu</label>
                         <input
                           type="number"
                           className="text-input text-[11px] py-1 px-2"
@@ -1003,15 +1025,16 @@ export function AdminInventory({
                           required
                         />
                       </div>
-                      <div className="sm:col-span-1 flex justify-center pt-3.5">
+                      <div className="sm:col-span-1 flex justify-center pt-1">
                         <button
                           type="button"
-                          className="w-5 h-5 rounded-full bg-red-50 hover:bg-red-100 flex items-center justify-center text-red-500 hover:text-red-700 text-[10px] font-bold cursor-pointer"
+                          className="w-6 h-6 rounded-full bg-red-50 hover:bg-red-100 flex items-center justify-center text-red-500 hover:text-red-700 text-xs font-bold cursor-pointer"
                           disabled={formVariants.length <= 1}
                           onClick={() => {
                             const copy = formVariants.filter((_, i) => i !== idx);
                             setFormVariants(syncVariantSkus(formCode, copy));
                           }}
+                          title="Xóa phân loại này"
                         >
                           ✕
                         </button>

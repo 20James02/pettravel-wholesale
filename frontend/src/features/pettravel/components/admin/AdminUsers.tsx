@@ -1,6 +1,7 @@
+"use client";
+
 import { useState } from "react";
-import Image from "next/image";
-import { Users } from "lucide-react";
+import { Users, UserPlus, UserCheck, X } from "lucide-react";
 import type { ApiUser } from "../../types";
 import { fullNameSchema, emailSchema, phoneSchema, passwordSchema, shortTextSchema } from "@/lib/validation";
 
@@ -11,7 +12,6 @@ interface AdminUsersProps {
 }
 
 export function AdminUsers({ isAdmin, userList, fetchUsers }: AdminUsersProps) {
-  // Local state for user form
   const [showUserForm, setShowUserForm] = useState(false);
   const [createFullName, setCreateFullName] = useState("");
   const [createEmail, setCreateEmail] = useState("");
@@ -58,195 +58,186 @@ export function AdminUsers({ isAdmin, userList, fetchUsers }: AdminUsersProps) {
       await fetchUsers();
       setShowUserForm(false);
     } catch {
-      alert("Lỗi kết nối.");
+      alert("Lỗi kết nối server.");
     }
   };
 
   if (!isAdmin) return null;
 
   return (
-    <div className="flex flex-col gap-6 animate-fade-in w-full text-xs">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-[#331B08] font-['Varela_Round']">👥 Quản lý thành viên hệ thống</h2>
-          <p className="muted text-xs font-semibold">Quản lý và phân quyền tài khoản của đại lý sỉ, operator, admin và kế toán tài chính.</p>
+    <div className="admin-dark-dock w-full p-4 sm:p-6 lg:p-7 flex flex-col gap-6 animate-fade-in text-xs">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#222744] pb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
+            <Users size={20} />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-extrabold text-white tracking-tight">
+              B2B Accounts & Internal Staff RBAC
+            </span>
+            <span className="text-xs text-gray-400 font-medium">
+              Quản lý đại lý sỉ, hạn mức tín dụng công nợ và phân quyền vận hành hệ thống
+            </span>
+          </div>
         </div>
+
         <button
           type="button"
-          className="tab-button text-xs py-2 px-4 border-orange-200 bg-orange-50/50 hover:bg-orange-100 cursor-pointer font-bold rounded-xl flex items-center gap-1.5"
-          onClick={() => {
-            setCreateFullName("");
-            setCreateEmail("");
-            setCreatePhone("");
-            setCreatePassword("");
-            setCreateCompany("");
-            setCreateRole("customer_owner");
-            setShowUserForm(true);
-          }}
+          className="admin-pill-btn-primary text-xs py-2 px-5 flex items-center gap-1.5"
+          onClick={() => setShowUserForm(true)}
         >
-          + Tạo tài khoản mới
+          <UserPlus size={15} />
+          <span>+ Cấp tài khoản mới</span>
         </button>
       </div>
 
-      {/* Danh sách thành viên rộng 100% */}
-      <div className="panel flex flex-col gap-4 bg-white border border-orange-100 rounded-3xl p-6 w-full">
-        <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2 font-['Varela_Round']">
-          <Users className="text-orange-500" size={20} />
-          Thành viên hệ thống ({userList.length})
-        </h3>
-        <p className="muted text-xs font-semibold">Danh sách toàn bộ tài khoản đại lý sỉ, nhân viên kế toán, tài chính và điều phối viên đang hoạt động.</p>
+      {/* User Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {userList.map((u) => (
+          <div
+            key={u.id}
+            className="bg-[#191e36] hover:bg-[#202644] p-4 rounded-2xl border border-[#283152] transition flex flex-col justify-between gap-3 group"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center font-black text-white text-xs shadow-sm">
+                  {u.name?.charAt(0) || "U"}
+                </div>
+                <div className="flex flex-col">
+                  <span className="font-extrabold text-white text-sm leading-tight">
+                    {u.name}
+                  </span>
+                  <span className="text-[11px] text-indigo-300 font-medium mt-0.5">
+                    {u.email}
+                  </span>
+                </div>
+              </div>
 
-        <div className="overflow-x-auto mt-2">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b-2 border-orange-100 text-[10px] font-extrabold uppercase text-[#78350F] tracking-wider">
-                <th className="py-2.5">Thành viên</th>
-                <th>Số điện thoại</th>
-                <th>Tổ chức sỉ / Vai trò</th>
-                <th>Phân loại</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-orange-50/50">
-              {userList.map((u) => (
-                <tr key={u.id} className="text-xs hover:bg-orange-50/20">
-                  <td className="py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="relative w-8 h-8 rounded-full overflow-hidden bg-orange-50 flex items-center justify-center font-bold text-orange-750 text-xs shrink-0 border border-orange-200">
-                        {u.avatarUrl ? (
-                          <Image src={u.avatarUrl} alt="" fill sizes="32px" className="object-cover" />
-                        ) : (
-                          u.name?.charAt(0) || "U"
-                        )}
-                      </div>
-                      <div className="flex flex-col">
-                        <strong className="text-[#331B08]">{u.name}</strong>
-                        <span className="text-[10px] text-gray-400 font-semibold">{u.email}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="font-semibold text-gray-600">{u.phone || "—"}</td>
-                  <td>
-                    <div className="flex flex-col">
-                      <strong className="text-[#78350F]">{u.company || "Pet Travel Nội bộ"}</strong>
-                      <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">{u.role}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <span className={`status-pill text-[9px] ${u.role.includes("admin") ? "success" : "info"}`}>
-                      {u.role.includes("admin") ? "Nội bộ Admin" : "Đại lý ngoài"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              <span
+                className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                  u.role === "super_admin"
+                    ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
+                    : u.role === "admin_manager"
+                    ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                    : "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
+                }`}
+              >
+                {u.role === "super_admin"
+                  ? "Super Admin"
+                  : u.role === "admin_manager"
+                  ? "Manager"
+                  : u.role === "customer_owner"
+                  ? "Đại lý B2B"
+                  : "Nhân viên"}
+              </span>
+            </div>
+
+            <div className="pt-2 border-t border-[#262e4e] flex items-center justify-between text-[11px] text-gray-400 font-mono">
+              <span>{u.phone || "—"}</span>
+              <span className="text-emerald-400 font-bold flex items-center gap-1">
+                <UserCheck size={13} /> Active
+              </span>
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* Popup Form Modal for creating user */}
+      {/* Modal Cấp tài khoản mới (Dark Glass Theme) */}
       {showUserForm && (
-        <div
-          className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6"
-          onClick={() => setShowUserForm(false)}
-        >
-          <div
-            className="panel max-w-md w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in my-4 sm:my-8"
-            onClick={(e) => e.stopPropagation()}
-            style={{ borderRadius: "1.75rem" }}
-          >
-            <div className="flex justify-between items-center border-b pb-2 border-orange-100">
-              <h3 className="text-base font-bold text-orange-950 m-0 font-['Varela_Round']">Tạo tài khoản thành viên mới</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-[#232a48] pb-3">
+              <div className="flex items-center gap-2">
+                <UserPlus size={18} className="text-indigo-400" />
+                <h3 className="font-extrabold text-white text-base m-0">Cấp tài khoản B2B / Nhân viên</h3>
+              </div>
               <button
                 type="button"
-                className="w-6 h-6 rounded-full bg-orange-50 text-orange-700 flex items-center justify-center text-xs font-bold hover:bg-orange-100 transition cursor-pointer"
+                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-gray-300 cursor-pointer"
                 onClick={() => setShowUserForm(false)}
               >
-                ✕
+                <X size={14} />
               </button>
             </div>
-            <form onSubmit={handleCreateUser} className="flex flex-col gap-4 mt-2">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Họ và Tên</label>
+
+            <form onSubmit={handleCreateUser} className="flex flex-col gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-gray-300">Họ và tên</label>
                 <input
                   type="text"
-                  className="text-input text-xs py-2 px-3"
+                  className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs"
+                  placeholder="Nguyễn Văn A"
                   value={createFullName}
                   onChange={(e) => setCreateFullName(e.target.value)}
                   required
                 />
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Email đăng nhập</label>
+              <div>
+                <label className="text-[11px] font-bold text-gray-300">Email đăng nhập</label>
                 <input
                   type="email"
-                  className="text-input text-xs py-2 px-3"
+                  className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs"
+                  placeholder="daily@doanhnghiep.vn"
                   value={createEmail}
                   onChange={(e) => setCreateEmail(e.target.value)}
                   required
                 />
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Số điện thoại</label>
-                <input
-                  type="tel"
-                  className="text-input text-xs py-2 px-3"
-                  value={createPhone}
-                  onChange={(e) => setCreatePhone(e.target.value)}
-                  required
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-gray-300">Số điện thoại</label>
+                  <input
+                    type="tel"
+                    className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs"
+                    placeholder="0912345678"
+                    value={createPhone}
+                    onChange={(e) => setCreatePhone(e.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-gray-300">Vai trò</label>
+                  <select
+                    className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs"
+                    value={createRole}
+                    onChange={(e) => setCreateRole(e.target.value)}
+                  >
+                    <option value="customer_owner">Đại lý sỉ B2B</option>
+                    <option value="order_operator">Nhân viên chốt đơn</option>
+                    <option value="accountant">Kế toán viên</option>
+                    <option value="warehouse_keeper">Thủ kho</option>
+                    <option value="admin_manager">Quản lý cấp cao</option>
+                  </select>
+                </div>
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Mật khẩu ban đầu</label>
+              <div>
+                <label className="text-[11px] font-bold text-gray-300">Mật khẩu ban đầu (tối thiểu 12 ký tự)</label>
                 <input
                   type="password"
-                  className="text-input text-xs py-2 px-3"
-                  placeholder="Tối thiểu 12 ký tự"
+                  className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs"
+                  placeholder="••••••••••••"
                   value={createPassword}
                   onChange={(e) => setCreatePassword(e.target.value)}
                   required
-                  minLength={12}
-                  autoComplete="new-password"
                 />
-                <span className="text-[9px] text-gray-400">Mật khẩu cần tối thiểu 12 ký tự để đảm bảo an toàn.</span>
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-orange-950/80 uppercase">Vai trò & Quyền</label>
-                <select
-                  className="text-input text-xs py-2 px-3 bg-white border border-orange-200"
-                  value={createRole}
-                  onChange={(e) => setCreateRole(e.target.value)}
+              <div className="flex justify-end gap-2.5 mt-2 border-t border-[#232a48] pt-3">
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded-xl text-gray-300 hover:text-white cursor-pointer"
+                  onClick={() => setShowUserForm(false)}
                 >
-                  <option value="customer_owner">Đại lý sỉ (Customer Owner)</option>
-                  <option value="super_admin">Quản trị cấp cao (Super Admin)</option>
-                  <option value="finance_admin">Tài chính (Finance Admin)</option>
-                  <option value="operator">Nhân viên vận hành (Operator)</option>
-                </select>
+                  Hủy
+                </button>
+                <button type="submit" className="admin-pill-btn-primary text-xs py-2 px-6">
+                  Xác nhận cấp tài khoản
+                </button>
               </div>
-
-              {createRole === "customer_owner" && (
-                <div className="flex flex-col gap-1.5 animate-slide-down">
-                  <label className="text-[10px] font-bold text-orange-950/80 uppercase">Tên Công ty/Cửa hàng</label>
-                  <input
-                    type="text"
-                    className="text-input text-xs py-2 px-3"
-                    placeholder="Ví dụ: Happy Paws Shop"
-                    value={createCompany}
-                    onChange={(e) => setCreateCompany(e.target.value)}
-                    required={createRole === "customer_owner"}
-                  />
-                </div>
-              )}
-
-              <button
-                type="submit"
-                className="primary-button text-xs py-2.5 w-full justify-center font-bold cursor-pointer mt-2 bg-orange-500 text-white rounded-xl"
-              >
-                Tạo tài khoản
-              </button>
             </form>
           </div>
         </div>

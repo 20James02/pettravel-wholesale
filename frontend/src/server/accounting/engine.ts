@@ -2,6 +2,19 @@ export type PaymentIntent = "deposit_cod" | "pay_full";
 export type AdjustmentKind = "discount" | "free_shipping" | "offer" | "shipping_fee";
 export type JournalSide = "debit" | "credit";
 
+export interface VolumeTier {
+  minQty: number;
+  discountBps?: number;
+  fixedPriceVnd?: number;
+}
+
+export interface AllocatedDiscountLine {
+  lineId: string;
+  originalTotalVnd: number;
+  allocatedDiscountVnd: number;
+  netTotalVnd: number;
+}
+
 const BASIS_POINTS = 10_000n;
 const MAX_SAFE_VND = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -398,4 +411,206 @@ export function createCodCollectionEntry(input: CodCollectionInput): JournalEntr
       }
     ]
   });
+}
+
+export function calculateTieredUnitPrice(
+  basePriceVnd: number,
+  volumeTiers?: VolumeTier[] | null,
+  quantity: number = 1,
+  cogsVnd?: number,
+  minMarkupBps: number = 1000
+): number {
+  assertVndAmount(basePriceVnd, "basePriceVnd");
+  ensureInteger(quantity, "quantity");
+  if (quantity <= 0) {
+    throw new AccountingError("quantity must be greater than 0.", "INVALID_QUANTITY");
+  }
+
+  if (!volumeTiers || volumeTiers.length === 0) {
+    return basePriceVnd;
+  }
+
+  const sortedTiers = [...volumeTiers].sort((a, b) => a.minQty - b.minQty);
+  let matchedTier: VolumeTier | null = null;
+  for (const tier of sortedTiers) {
+    if (quantity >= tier.minQty) {
+      matchedTier = tier;
+    }
+  }
+
+  if (!matchedTier) {
+    return basePriceVnd;
+  }
+
+  let rawPrice = basePriceVnd;
+  if (typeof matchedTier.fixedPriceVnd === "number" && matchedTier.fixedPriceVnd > 0) {
+    rawPrice = assertVndAmount(matchedTier.fixedPriceVnd, "fixedPriceVnd");
+  } else if (typeof matchedTier.discountBps === "number" && matchedTier.discountBps > 0) {
+    const bps = assertBasisPoints(matchedTier.discountBps, "discountBps");
+    const multiplier = 10_000n - BigInt(bps);
+    const calculated = (BigInt(basePriceVnd) * multiplier + BASIS_POINTS / 2n) / BASIS_POINTS;
+    rawPrice = toSafeNumber(calculated, "tieredPrice");
+  }
+
+  if (typeof cogsVnd === "number" && cogsVnd > 0) {
+    assertVndAmount(cogsVnd, "cogsVnd");
+    const floorBps = assertBasisPoints(minMarkupBps, "minMarkupBps");
+    const floorMultiplier = 10_000n + BigInt(floorBps);
+    const floorPrice = toSafeNumber(
+      (BigInt(cogsVnd) * floorMultiplier + BASIS_POINTS / 2n) / BASIS_POINTS,
+      "floorPrice"
+    );
+    return Math.max(rawPrice, floorPrice);
+  }
+
+  return rawPrice;
+}
+
+export function allocateProRataDiscount(
+  lines: Array<{ id: string; unitPriceVnd: number; quantity: number }>,
+  totalDiscountVnd: number
+): AllocatedDiscountLine[] {
+  assertVndAmount(totalDiscountVnd, "totalDiscountVnd");
+  if (lines.length === 0) {
+    if (totalDiscountVnd > 0) {
+      throw new AccountingError("Cannot allocate discount to empty quote lines.", "EMPTY_QUOTE_LINES");
+    }
+    return [];
+  }
+
+  const lineTotals = lines.map((l) => ({
+    id: l.id,
+    totalVnd: multiplyVnd(l.unitPriceVnd, l.quantity, `line:${l.id}`)
+  }));
+
+  const subtotal = addVnd(lineTotals.map((l) => l.totalVnd), "subtotalVnd");
+  if (totalDiscountVnd > subtotal) {
+    throw new AccountingError("Discount cannot exceed subtotal.", "DISCOUNT_EXCEEDS_SUBTOTAL");
+  }
+
+  if (totalDiscountVnd === 0 || subtotal === 0) {
+    return lineTotals.map((l) => ({
+      lineId: l.id,
+      originalTotalVnd: l.totalVnd,
+      allocatedDiscountVnd: 0,
+      netTotalVnd: l.totalVnd
+    }));
+  }
+
+  const discountBig = BigInt(totalDiscountVnd);
+  const subtotalBig = BigInt(subtotal);
+
+  const allocations = lineTotals.map((l, index) => {
+    const lineTotalBig = BigInt(l.totalVnd);
+    const numerator = discountBig * lineTotalBig;
+    const baseAllocationBig = numerator / subtotalBig;
+    const remainderBig = numerator % subtotalBig;
+
+    return {
+      index,
+      id: l.id,
+      originalTotalVnd: l.totalVnd,
+      baseAllocation: Number(baseAllocationBig),
+      remainder: remainderBig,
+      finalDiscount: Number(baseAllocationBig)
+    };
+  });
+
+  const sumBase = allocations.reduce((sum, a) => sum + BigInt(a.baseAllocation), 0n);
+  const remainingToDistribute = Number(discountBig - sumBase);
+
+  const sortedAllocations = [...allocations].sort((a, b) => {
+    if (b.remainder !== a.remainder) {
+      return b.remainder > a.remainder ? 1 : -1;
+    }
+    return a.index - b.index;
+  });
+
+  for (let i = 0; i < remainingToDistribute; i++) {
+    sortedAllocations[i].finalDiscount += 1;
+  }
+
+  return allocations.map((a) => {
+    const finalItem = sortedAllocations.find((s) => s.id === a.id)!;
+    return {
+      lineId: a.id,
+      originalTotalVnd: a.originalTotalVnd,
+      allocatedDiscountVnd: finalItem.finalDiscount,
+      netTotalVnd: a.originalTotalVnd - finalItem.finalDiscount
+    };
+  });
+}
+
+export interface UnitRefundResult {
+  originalLineNetVnd: number;
+  originalQuantity: number;
+  unitRefundAmountsVnd: number[];
+  refundForQuantity(returnQuantity: number, previouslyReturnedUnits?: number): {
+    unitAmounts: number[];
+    totalRefundVnd: number;
+    cumulativeReturnedUnits: number;
+    remainingNetVnd: number;
+  };
+}
+
+export function calculateUnitRefunds(
+  originalLineNetVnd: number,
+  originalQuantity: number
+): UnitRefundResult {
+  assertVndAmount(originalLineNetVnd, "originalLineNetVnd");
+  ensureInteger(originalQuantity, "originalQuantity");
+  if (originalQuantity <= 0) {
+    throw new AccountingError("originalQuantity must be greater than 0.", "INVALID_QUANTITY");
+  }
+
+  const netBig = BigInt(originalLineNetVnd);
+  const qtyBig = BigInt(originalQuantity);
+  const baseRefundBig = netBig / qtyBig;
+  const remainderBig = netBig % qtyBig;
+  const remainder = Number(remainderBig);
+
+  const unitRefundAmountsVnd: number[] = [];
+  for (let i = 0; i < originalQuantity; i++) {
+    const amount = Number(baseRefundBig) + (i < remainder ? 1 : 0);
+    unitRefundAmountsVnd.push(amount);
+  }
+
+  return {
+    originalLineNetVnd,
+    originalQuantity,
+    unitRefundAmountsVnd,
+    refundForQuantity(returnQuantity: number, previouslyReturnedUnits: number = 0) {
+      ensureInteger(returnQuantity, "returnQuantity");
+      ensureInteger(previouslyReturnedUnits, "previouslyReturnedUnits");
+
+      if (returnQuantity <= 0) {
+        throw new AccountingError("returnQuantity must be greater than 0.", "INVALID_QUANTITY");
+      }
+      if (previouslyReturnedUnits < 0) {
+        throw new AccountingError("previouslyReturnedUnits cannot be negative.", "INVALID_QUANTITY");
+      }
+      if (previouslyReturnedUnits + returnQuantity > originalQuantity) {
+        throw new AccountingError(
+          `Cannot return more units than original quantity (${previouslyReturnedUnits + returnQuantity} > ${originalQuantity}).`,
+          "RETURN_EXCEEDS_QUANTITY"
+        );
+      }
+
+      const startIndex = previouslyReturnedUnits;
+      const endIndex = startIndex + returnQuantity;
+      const slice = unitRefundAmountsVnd.slice(startIndex, endIndex);
+      const totalRefundVnd = slice.reduce((sum, val) => sum + val, 0);
+      const cumulativeReturnedUnits = endIndex;
+
+      const remainingSlice = unitRefundAmountsVnd.slice(endIndex);
+      const remainingNetVnd = remainingSlice.reduce((sum, val) => sum + val, 0);
+
+      return {
+        unitAmounts: slice,
+        totalRefundVnd,
+        cumulativeReturnedUnits,
+        remainingNetVnd
+      };
+    }
+  };
 }

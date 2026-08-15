@@ -140,8 +140,8 @@ async function buildCustomerItems(
       variantSku: variant.sku,
       variantLabel: variant.label,
       quantity: item.quantity,
-      unitPriceSnapshot: variant.wholesalePrice,
-      supplierId: variant.supplierId
+      unitPriceSnapshot: variant.wholesalePrice ?? 0,
+      supplierId: variant.supplierId || "sup_pettravel"
     };
   });
 }

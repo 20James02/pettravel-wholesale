@@ -87,7 +87,7 @@ async def list_products(db: AsyncSession, role: str) -> list[dict[str, Any]]:
             },
         )
 
-        if role == "guest" or not row["variant_id"] or row["supplier_id"] is None:
+        if not row["variant_id"]:
             continue
 
         variant_key = (product_id, str(row["variant_id"]))
@@ -97,19 +97,26 @@ async def list_products(db: AsyncSession, role: str) -> list[dict[str, Any]]:
         if variant_key in seen_variants:
             continue
         seen_variants.add(variant_key)
-        product["variants"].append(
-            {
-                "id": str(row["variant_id"]),
-                "sku": row["sku"],
-                "label": row["label"],
-                "barcode": row["barcode"],
-                "wholesalePrice": int(row["wholesale_price"]),
-                "minOrderQty": int(row["min_order_qty"]),
-                "stock": int(row["stock_qty"]),
-                "supplierId": row["supplier_id"] if role == "admin" else "sup_pettravel",
-                "imageUrl": row["variant_image_url"] or "/product-food.svg",
-            }
-        )
+        variant_dict: dict[str, Any] = {
+            "id": str(row["variant_id"]),
+            "sku": row["sku"],
+            "label": row["label"],
+            "barcode": row["barcode"],
+            "stock": int(row["stock_qty"] or 0),
+            "imageUrl": row["variant_image_url"] or "/product-food.svg",
+        }
+
+        if role == "admin":
+            variant_dict["wholesalePrice"] = int(row["wholesale_price"] or 0)
+            variant_dict["minOrderQty"] = int(row["min_order_qty"] or 1)
+            variant_dict["supplierId"] = str(row["supplier_id"]) if row["supplier_id"] else "sup_pettravel"
+        elif role == "customer":
+            variant_dict["wholesalePrice"] = int(row["wholesale_price"] or 0)
+            variant_dict["minOrderQty"] = int(row["min_order_qty"] or 1)
+            variant_dict["supplierId"] = "sup_pettravel"
+        # For role == 'guest', wholesalePrice, minOrderQty, and supplierId are strictly omitted.
+
+        product["variants"].append(variant_dict)
 
     return list(products_by_id.values())
 

@@ -1,7 +1,8 @@
-import { BarChart3, AlertTriangle, RefreshCw } from "lucide-react";
+"use client";
+
+import { BarChart3, AlertTriangle, RefreshCw, Sparkles } from "lucide-react";
 import type { AdminReportsOverview } from "@/lib/domain";
 import { formatVnd } from "@/lib/money";
-import { StatusPill } from "../ui/StatusPill";
 
 interface AdminReportsProps {
   isAdmin: boolean;
@@ -21,408 +22,154 @@ export function AdminReports({
   if (!isAdmin) return null;
 
   return (
-    <div className="flex flex-col gap-6 animate-fade-in w-full text-xs">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <BarChart3 size={22} className="text-orange-600" />
-            <h2 className="text-xl font-bold text-[#331B08] font-['Varela_Round']">Báo cáo quản trị B2B</h2>
+    <div className="flex flex-col gap-6 w-full animate-fade-in text-xs">
+      {/* Dark Dock Header */}
+      <div className="admin-dark-dock w-full p-4 sm:p-6 lg:p-7 flex flex-col gap-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#222744] pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
+              <BarChart3 size={20} />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-extrabold text-white tracking-tight">
+                Financial Analytics & Operational Intelligence
+              </span>
+              <span className="text-xs text-gray-400 font-medium">
+                Tổng hợp doanh thu, AR aging, kiểm tra cân đối số dư và báo cáo tồn kho tự động
+              </span>
+            </div>
           </div>
-          <p className="muted text-xs font-semibold">
-            Tổng hợp doanh thu, thanh toán, tồn kho, hàng lỗi, bút toán và cảnh báo đối soát. Các số liệu kế toán chỉ được xem là
-            chính thức khi lấy từ bút toán đã post và đối soát xong.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="tab-button text-xs py-2 px-4 border-orange-200 bg-white hover:bg-orange-50 cursor-pointer font-bold rounded-xl flex items-center gap-1.5"
-          onClick={fetchReportsOverview}
-          disabled={isReportsLoading}
-        >
-          <RefreshCw size={14} className={isReportsLoading ? "animate-spin" : ""} />
-          {isReportsLoading ? "Đang tải..." : "Làm mới báo cáo"}
-        </button>
-      </div>
 
-      {reportsError && (
-        <div className="p-4 border border-red-200 bg-red-50 rounded-2xl flex items-start gap-3">
-          <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
-          <div>
-            <strong className="text-sm text-red-950 block">Không tải được báo cáo</strong>
-            <p className="text-xs text-red-800 m-0 mt-1">{reportsError}</p>
+          <button
+            type="button"
+            className="bg-[#191e36] hover:bg-[#222846] text-gray-200 border border-[#2b3356] font-bold text-xs py-2 px-4 rounded-full flex items-center gap-2 cursor-pointer transition"
+            onClick={fetchReportsOverview}
+            disabled={isReportsLoading}
+          >
+            <RefreshCw size={14} className={isReportsLoading ? "animate-spin" : ""} />
+            <span>{isReportsLoading ? "Đang tải..." : "Refresh Report"}</span>
+          </button>
+        </div>
+
+        {reportsError && (
+          <div className="p-4 border border-rose-500/30 bg-rose-500/10 text-rose-300 rounded-2xl flex items-start gap-3">
+            <AlertTriangle size={18} className="text-rose-400 shrink-0 mt-0.5" />
+            <div>
+              <strong className="text-sm text-white block">Không tải được báo cáo</strong>
+              <p className="text-xs text-rose-300 m-0 mt-1">{reportsError}</p>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {reportsOverview && (
-        <>
-          <div className="panel p-4 border-orange-100 bg-orange-50/30">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
-              <div>
-                <strong className="text-sm text-[#331B08]">
+        {reportsOverview && (
+          <div className="flex flex-col gap-5">
+            {/* Basis Banner */}
+            <div className="p-3.5 bg-[#171b32] rounded-2xl border border-[#262e4e] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Sparkles size={16} className="text-indigo-400" />
+                <span className="text-gray-300 font-semibold">
                   Cơ sở số liệu:{" "}
-                  {reportsOverview.basis === "posted_only" ? "Bút toán đã hạch toán" : "Ước tính vận hành + sổ đã hạch toán"}
-                </strong>
-                <p className="text-[11px] muted m-0 mt-1 font-semibold">
-                  Sinh lúc {new Date(reportsOverview.generatedAt).toLocaleString("vi-VN")}. Báo cáo này cố ý tách rõ số liệu chính thức
-                  và số liệu ước tính để tránh khóa sổ sai lệch.
-                </p>
+                  <strong className="text-white">
+                    {reportsOverview.basis === "posted_only" ? "Sổ cái đã hạch toán" : "Ước tính vận hành & sổ cái"}
+                  </strong>
+                </span>
               </div>
-              <StatusPill tone={reportsOverview.kpis.trialBalanceDifferenceVnd === 0 ? "success" : "warning"}>
-                Trial balance lệch: {formatVnd(reportsOverview.kpis.trialBalanceDifferenceVnd)}
-              </StatusPill>
+
+              <div className="text-xs text-indigo-300 font-mono font-bold">
+                Lệch Trial Balance: {formatVnd(reportsOverview.kpis.trialBalanceDifferenceVnd)}
+              </div>
+            </div>
+
+            {/* 12-Cell Metrics Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3.5">
+              <div className="bg-[#191e36] p-3.5 rounded-2xl border border-[#283152]">
+                <span className="text-[10px] font-bold text-gray-400 uppercase">Đơn hàng B2B</span>
+                <div className="text-lg font-black text-white font-mono mt-1">
+                  {reportsOverview.kpis.totalOrders}
+                </div>
+                <span className="text-[10px] text-gray-400">Đã chốt: {reportsOverview.kpis.acceptedOrders}</span>
+              </div>
+
+              <div className="bg-[#191e36] p-3.5 rounded-2xl border border-[#283152]">
+                <span className="text-[10px] font-bold text-emerald-400 uppercase">Doanh thu ước tính</span>
+                <div className="text-lg font-black text-emerald-400 font-mono mt-1">
+                  {formatVnd(reportsOverview.kpis.estimatedSalesVnd)}
+                </div>
+                <span className="text-[10px] text-gray-400">Gross: {formatVnd(reportsOverview.kpis.estimatedGrossSalesVnd)}</span>
+              </div>
+
+              <div className="bg-[#191e36] p-3.5 rounded-2xl border border-[#283152]">
+                <span className="text-[10px] font-bold text-indigo-400 uppercase">Đã xác nhận thanh toán</span>
+                <div className="text-lg font-black text-indigo-300 font-mono mt-1">
+                  {formatVnd(reportsOverview.kpis.paymentConfirmedVnd)}
+                </div>
+                <span className="text-[10px] text-gray-400">Chờ proof: {formatVnd(reportsOverview.kpis.paymentPendingProofVnd)}</span>
+              </div>
+
+              <div className="bg-[#191e36] p-3.5 rounded-2xl border border-[#283152]">
+                <span className="text-[10px] font-bold text-rose-400 uppercase">Phải thu đại lý (AR)</span>
+                <div className="text-lg font-black text-rose-300 font-mono mt-1">
+                  {formatVnd(reportsOverview.kpis.receivableOpenVnd)}
+                </div>
+                <span className="text-[10px] text-rose-400 font-bold">Quá hạn: {formatVnd(reportsOverview.kpis.receivableOverdueVnd)}</span>
+              </div>
+            </div>
+
+            {/* Breakdown Tables Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-2">
+              <div className="bg-[#171b30] p-4 rounded-2xl border border-[#272e4e] overflow-x-auto">
+                <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-3">
+                  Doanh thu theo trạng thái đơn
+                </h4>
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-[#293154] text-[10px] text-gray-400 uppercase font-bold">
+                      <th className="py-2">Trạng thái</th>
+                      <th className="py-2">Số đơn</th>
+                      <th className="py-2 text-right">Giá trị</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#232a48]">
+                    {reportsOverview.salesByStatus.map((row) => (
+                      <tr key={row.key} className="hover:bg-[#1f2542] transition">
+                        <td className="py-2 text-gray-300 font-semibold">{row.label}</td>
+                        <td className="py-2 font-mono text-gray-400">{row.quantity || 0}</td>
+                        <td className="py-2 text-right font-mono font-bold text-white">
+                          {formatVnd(row.amountVnd)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-[#171b30] p-4 rounded-2xl border border-[#272e4e] overflow-x-auto">
+                <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-3">
+                  Tồn kho theo phân loại SKU
+                </h4>
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-[#293154] text-[10px] text-gray-400 uppercase font-bold">
+                      <th className="py-2">SKU / Mặt hàng</th>
+                      <th className="py-2 text-right">Số lượng</th>
+                      <th className="py-2 text-right">Giá trị tồn</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#232a48]">
+                    {reportsOverview.inventoryBySku.map((item) => (
+                      <tr key={item.key} className="hover:bg-[#1f2542] transition">
+                        <td className="py-2 font-mono font-bold text-indigo-300">{item.label}</td>
+                        <td className="py-2 text-right font-mono text-emerald-400 font-bold">{item.quantity || 0}</td>
+                        <td className="py-2 text-right font-mono text-sky-400 font-bold">{formatVnd(item.amountVnd)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-
-          <div className="metrics-grid">
-            <div className="metric">
-              <span className="muted text-sm font-semibold">Đơn B2B</span>
-              <strong className="text-[#331B08]">{reportsOverview.kpis.totalOrders}</strong>
-              <span className="text-[10px] muted">
-                Đang xử lý: {reportsOverview.kpis.activeOrders} · Đã chốt: {reportsOverview.kpis.acceptedOrders}
-              </span>
-            </div>
-            <div className="metric">
-              <span className="muted text-sm font-semibold">Doanh thu ước tính</span>
-              <strong className="text-green-700">{formatVnd(reportsOverview.kpis.estimatedSalesVnd)}</strong>
-              <span className="text-[10px] muted">Gross: {formatVnd(reportsOverview.kpis.estimatedGrossSalesVnd)}</span>
-            </div>
-            <div className="metric">
-              <span className="muted text-sm font-semibold">Ưu đãi/chiết khấu</span>
-              <strong className="text-amber-700">{formatVnd(reportsOverview.kpis.discountAndOfferVnd)}</strong>
-              <span className="text-[10px] muted">Tính từ giá gross trừ báo giá cuối cùng.</span>
-            </div>
-            <div className="metric">
-              <span className="muted text-sm font-semibold">Thanh toán đã xác nhận</span>
-              <strong className="text-blue-700">{formatVnd(reportsOverview.kpis.paymentConfirmedVnd)}</strong>
-              <span className="text-[10px] muted">Chờ proof: {formatVnd(reportsOverview.kpis.paymentPendingProofVnd)}</span>
-            </div>
-            <div className="metric">
-              <span className="muted text-sm font-semibold">Phải thu đại lý</span>
-              <strong className={reportsOverview.kpis.receivableOverdueVnd > 0 ? "text-red-700" : "text-blue-700"}>
-                {formatVnd(reportsOverview.kpis.receivableOpenVnd)}
-              </strong>
-              <span className="text-[10px] muted font-semibold">Quá hạn: {formatVnd(reportsOverview.kpis.receivableOverdueVnd)}</span>
-            </div>
-            <div className="metric">
-              <span className="muted text-sm font-semibold">Phải trả đối tác</span>
-              <strong className={reportsOverview.kpis.payableOverdueVnd > 0 ? "text-amber-700" : "text-[#331B08]"}>
-                {formatVnd(reportsOverview.kpis.payableOpenVnd)}
-              </strong>
-              <span className="text-[10px] muted font-semibold">Quá hạn: {formatVnd(reportsOverview.kpis.payableOverdueVnd)}</span>
-            </div>
-            <div className="metric">
-              <span className="muted text-sm font-semibold">Đối soát đã khớp</span>
-              <strong className="text-green-700">{formatVnd(reportsOverview.kpis.reconciliationMatchedVnd)}</strong>
-              <span className="text-[10px] muted">Batch mở: {reportsOverview.kpis.openReconciliationBatches}</span>
-            </div>
-            <div className="metric">
-              <span className="muted text-sm font-semibold">Chưa khớp sao kê</span>
-              <strong className={reportsOverview.kpis.reconciliationUnmatchedVnd > 0 ? "text-red-700" : "text-green-700"}>
-                {formatVnd(reportsOverview.kpis.reconciliationUnmatchedVnd)}
-              </strong>
-              <span className="text-[10px] muted">GD chưa khớp: {reportsOverview.kpis.unmatchedBankTransactions}</span>
-            </div>
-            <div className="metric">
-              <span className="muted text-sm font-semibold">Giá trị tồn kho</span>
-              <strong className="text-[#331B08]">{formatVnd(reportsOverview.kpis.inventoryValueVnd)}</strong>
-              <span className="text-[10px] muted">
-                Sẵn bán: {reportsOverview.kpis.availableQty} / Tồn thực: {reportsOverview.kpis.onHandQty}
-              </span>
-            </div>
-            <div className="metric">
-              <span className="muted text-sm font-semibold">Hàng đang giữ</span>
-              <strong className="text-blue-700">{reportsOverview.kpis.reservationOpenQty}</strong>
-              <span className="text-[10px] muted">Giữ quá hạn: {reportsOverview.kpis.reservationExpiredQty}</span>
-            </div>
-            <div className="metric">
-              <span className="muted text-sm font-semibold">Hàng lỗi</span>
-              <strong className={reportsOverview.kpis.defectiveQty > 0 ? "text-red-700" : "text-green-700"}>
-                {reportsOverview.kpis.defectiveQty}
-              </strong>
-              <span className="text-[10px] muted">Cần luồng trả NCC hoặc chốt giảm kho.</span>
-            </div>
-            <div className="metric">
-              <span className="muted text-sm font-semibold">Bút toán đã hạch toán</span>
-              <strong className="text-[#331B08]">{reportsOverview.kpis.postedJournalEntries}</strong>
-              <span className="text-[10px] muted">Bút toán nháp: {reportsOverview.kpis.draftJournalEntries}</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
-            <div className="panel p-4 overflow-x-auto w-full">
-              <h3 className="text-sm font-bold text-[#331B08] mb-3">Doanh thu theo trạng thái đơn</h3>
-              <table className="variant-table w-full">
-                <thead>
-                  <tr>
-                    <th>Trạng thái</th>
-                    <th>Số đơn</th>
-                    <th className="text-right">Giá trị</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportsOverview.salesByStatus.length ? (
-                    reportsOverview.salesByStatus.map((row) => (
-                      <tr key={row.key}>
-                        <td className="text-xs font-bold text-[#331B08]">{row.label}</td>
-                        <td className="text-xs">{row.quantity ?? 0}</td>
-                        <td className="text-xs text-right font-bold">{formatVnd(row.amountVnd)}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={3} className="py-6 text-center text-xs text-gray-500">
-                        Chưa có dữ liệu đơn hàng.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="panel p-4 overflow-x-auto w-full">
-              <h3 className="text-sm font-bold text-[#331B08] mb-3">Doanh thu gross theo nhà cung cấp</h3>
-              <table className="variant-table w-full">
-                <thead>
-                  <tr>
-                    <th>Nhà cung cấp</th>
-                    <th>Số lượng</th>
-                    <th className="text-right">Giá trị</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportsOverview.salesBySupplier.length ? (
-                    reportsOverview.salesBySupplier.map((row) => (
-                      <tr key={row.key}>
-                        <td className="text-xs font-mono font-bold text-orange-950">{row.label}</td>
-                        <td className="text-xs">{row.quantity ?? 0}</td>
-                        <td className="text-xs text-right font-bold">{formatVnd(row.amountVnd)}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={3} className="py-6 text-center text-xs text-gray-500">
-                        Chưa có dữ liệu bán theo nhà cung cấp.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="panel p-4 overflow-x-auto w-full">
-              <h3 className="text-sm font-bold text-[#331B08] mb-3">Công nợ phải thu theo đại lý</h3>
-              <table className="variant-table w-full">
-                <thead>
-                  <tr>
-                    <th>Đại lý</th>
-                    <th>Số chứng từ</th>
-                    <th className="text-right">Còn phải thu</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportsOverview.receivableByCustomer.length ? (
-                    reportsOverview.receivableByCustomer.map((row) => (
-                      <tr key={row.key}>
-                        <td className="text-xs font-bold text-[#331B08]">{row.label}</td>
-                        <td className="text-xs">{row.quantity ?? 0}</td>
-                        <td className="text-xs text-right font-bold text-blue-700">{formatVnd(row.amountVnd)}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={3} className="py-6 text-center text-xs text-gray-500">
-                        Chưa có sổ công nợ phải thu.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="panel p-4 overflow-x-auto w-full">
-              <h3 className="text-sm font-bold text-[#331B08] mb-3">Công nợ phải trả theo đối tác</h3>
-              <table className="variant-table w-full">
-                <thead>
-                  <tr>
-                    <th>Đối tác/NCC</th>
-                    <th>Số chứng từ</th>
-                    <th className="text-right">Còn phải trả</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportsOverview.payableByPartner.length ? (
-                    reportsOverview.payableByPartner.map((row) => (
-                      <tr key={row.key}>
-                        <td className="text-xs font-bold text-[#331B08]">{row.label}</td>
-                        <td className="text-xs">{row.quantity ?? 0}</td>
-                        <td className="text-xs text-right font-bold text-amber-700">{formatVnd(row.amountVnd)}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={3} className="py-6 text-center text-xs text-gray-500">
-                        Chưa có sổ công nợ phải trả.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="panel p-4 overflow-x-auto w-full">
-              <h3 className="text-sm font-bold text-[#331B08] mb-3">Đối soát theo loại batch</h3>
-              <table className="variant-table w-full">
-                <thead>
-                  <tr>
-                    <th>Loại</th>
-                    <th>Batch</th>
-                    <th className="text-right">Đã khớp</th>
-                    <th className="text-right">Chênh lệch</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportsOverview.reconciliationByType.length ? (
-                    reportsOverview.reconciliationByType.map((row) => (
-                      <tr key={row.key}>
-                        <td className="text-xs font-bold text-[#331B08]">{row.label}</td>
-                        <td className="text-xs">{row.quantity ?? 0}</td>
-                        <td className="text-xs text-right font-bold text-green-700">{formatVnd(row.amountVnd)}</td>
-                        <td className="text-xs text-right font-bold text-red-700">{formatVnd(row.secondaryAmountVnd ?? 0)}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={4} className="py-6 text-center text-xs text-gray-500">
-                        Chưa có batch đối soát.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="panel p-4 overflow-x-auto w-full">
-              <h3 className="text-sm font-bold text-[#331B08] mb-3">Giữ hàng theo SKU</h3>
-              <table className="variant-table w-full">
-                <thead>
-                  <tr>
-                    <th>SKU</th>
-                    <th>Đang giữ</th>
-                    <th>Quá hạn</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportsOverview.reservationsBySku.length ? (
-                    reportsOverview.reservationsBySku.map((row) => (
-                      <tr key={row.key}>
-                        <td className="text-xs font-mono font-bold text-orange-950">{row.label}</td>
-                        <td className="text-xs font-bold text-blue-700">{row.quantity ?? 0}</td>
-                        <td className="text-xs font-bold text-red-700">{row.secondaryAmountVnd ?? 0}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={3} className="py-6 text-center text-xs text-gray-500">
-                        Chưa có giữ hàng theo đơn.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="panel p-4 overflow-x-auto w-full">
-              <h3 className="text-sm font-bold text-[#331B08] mb-3">Top tồn kho theo SKU</h3>
-              <table className="variant-table w-full">
-                <thead>
-                  <tr>
-                    <th>SKU</th>
-                    <th>Sẵn bán</th>
-                    <th>Hàng lỗi</th>
-                    <th className="text-right">Giá trị tồn</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportsOverview.inventoryBySku.length ? (
-                    reportsOverview.inventoryBySku.map((row) => (
-                      <tr key={row.key}>
-                        <td className="text-xs font-mono font-bold text-orange-950">{row.label}</td>
-                        <td className="text-xs">{row.quantity ?? 0}</td>
-                        <td className="text-xs text-red-700 font-semibold">{row.secondaryAmountVnd ?? 0}</td>
-                        <td className="text-xs text-right font-bold">{formatVnd(row.amountVnd)}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={4} className="py-6 text-center text-xs text-gray-500">
-                        Chưa có dữ liệu tồn kho vận hành.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="panel p-4 overflow-x-auto w-full">
-              <h3 className="text-sm font-bold text-[#331B08] mb-3">Trial balance mini theo tài khoản</h3>
-              <table className="variant-table w-full">
-                <thead>
-                  <tr>
-                    <th>Tài khoản</th>
-                    <th className="text-right">Nợ</th>
-                    <th className="text-right">Có</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportsOverview.accountingByAccount.length ? (
-                    reportsOverview.accountingByAccount.map((row) => (
-                      <tr key={row.key}>
-                        <td className="text-xs font-bold text-[#331B08]">{row.label}</td>
-                        <td className="text-xs text-right font-bold">{formatVnd(row.amountVnd)}</td>
-                        <td className="text-xs text-right font-bold">{formatVnd(row.secondaryAmountVnd ?? 0)}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={3} className="py-6 text-center text-xs text-gray-500">
-                        Chưa có bút toán kế toán.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="panel p-4 w-full">
-            <h3 className="text-sm font-bold text-[#331B08] mb-3">Cảnh báo độ chính xác & đối soát</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {reportsOverview.alerts.length ? (
-                reportsOverview.alerts.map((alert, index) => (
-                  <div
-                    key={`${alert.area}-${index}`}
-                    className={`p-3 border rounded-2xl text-xs ${
-                      alert.severity === "critical"
-                        ? "border-red-200 bg-red-50 text-red-900"
-                        : alert.severity === "warning"
-                          ? "border-amber-200 bg-amber-50 text-amber-900"
-                          : "border-blue-200 bg-blue-50 text-blue-900"
-                    }`}
-                  >
-                    <strong className="block uppercase text-[10px] tracking-wide">
-                      {alert.area} · {alert.severity}
-                    </strong>
-                    <span className="font-semibold">{alert.message}</span>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-4 muted text-xs font-semibold col-span-2">Không có cảnh báo bất thường nào.</div>
-              )}
-            </div>
-          </div>
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 }

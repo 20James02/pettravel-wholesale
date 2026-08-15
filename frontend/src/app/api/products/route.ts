@@ -11,13 +11,18 @@ function sanitizeProductsForResponse(products: Product[], role: "guest" | "custo
 
   return products.map((product) => ({
     ...product,
-    variants:
-      role === "guest"
-        ? []
-        : product.variants.map((variant) => ({
-            ...variant,
-            supplierId: "sup_pettravel"
-          }))
+    variants: product.variants.map((variant) => {
+      if (role === "guest") {
+        const copy = { ...variant };
+        delete copy.wholesalePrice;
+        delete copy.supplierId;
+        return copy;
+      }
+      return {
+        ...variant,
+        supplierId: "sup_pettravel"
+      };
+    })
   }));
 }
 
