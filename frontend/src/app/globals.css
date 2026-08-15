@@ -846,7 +846,7 @@ button:active {
 
 @media (max-width: 760px) {
   .main-area {
-    padding: 12px 12px 88px 12px; /* Dành khoảng trống cho Bottom Navigation */
+    padding: 12px 12px 32px 12px;
   }
 
   .topbar {
@@ -873,64 +873,6 @@ button:active {
     overflow-x: auto;
     white-space: nowrap;
   }
-}
-
-/* Mobile Bottom Navigation Bar */
-.mobile-bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 990;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(16px);
-  border-top: 1.5px solid var(--line);
-  box-shadow: 0 -4px 20px rgba(120, 53, 15, 0.08);
-  padding: 6px 12px max(6px, env(safe-area-inset-bottom, 6px)) 12px;
-  display: flex;
-  justify-content: space-around;
-  align-items: center;
-}
-
-.mobile-nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  padding: 4px 8px;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 700;
-  font-family: 'Varela Round', sans-serif;
-  border-radius: 1rem;
-  transition: all 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
-  min-width: 54px;
-  background: transparent;
-  border: 0;
-}
-
-.mobile-nav-item[data-active="true"] {
-  color: var(--primary-strong);
-}
-
-.mobile-nav-item[data-active="true"] .nav-icon-container {
-  background: #FFF7ED;
-  border-color: var(--primary);
-  color: var(--primary);
-  transform: translateY(-2px);
-}
-
-.nav-icon-container {
-  width: 34px;
-  height: 34px;
-  border-radius: 999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1.5px solid transparent;
-  transition: all 0.2s;
-  position: relative;
 }
 
 /* Sticky Bottom Summary Bar */

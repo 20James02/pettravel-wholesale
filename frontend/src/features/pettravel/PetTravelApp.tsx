@@ -36,7 +36,6 @@ import type { AppMode, TabKey, ApiUser } from "./types";
 import { Sidebar } from "./components/shared/Sidebar";
 import { Topbar } from "./components/shared/Topbar";
 import { ChatPopup } from "./components/shared/ChatPopup";
-import { MobileBottomNav } from "./components/shared/MobileBottomNav";
 import { Catalog } from "./components/customer/Catalog";
 import { Cart } from "./components/customer/Cart";
 import { OrderTimeline } from "./components/customer/OrderTimeline";
@@ -1807,20 +1806,6 @@ export function PetTravelApp() {
           </button>
         </form>
       </BottomSheet>
-
-      {/* 6. MOBILE BOTTOM NAVIGATION (Thumb-Zone Navigation) */}
-      <MobileBottomNav
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        cartCount={cartItems.reduce((acc, curr) => acc + curr.quantity, 0)}
-        commentsCount={workingOrder.comments?.length || 0}
-        isLoggedIn={isLoggedIn}
-        isAdmin={isAdmin}
-        mode={mode}
-        setIsSidebarOpen={setIsSidebarOpen}
-        setIsChatOpen={setIsChatOpen}
-        setShowLoginModal={setShowLoginModal}
-      />
     </main>
   );
 }
