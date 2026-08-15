@@ -1132,7 +1132,7 @@ export function PetTravelApp() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") ? "admin-shell-layout" : ""}`}>
       {/* 1. SIDEBAR NAVIGATION */}
       <Sidebar
         isLoggedIn={isLoggedIn}

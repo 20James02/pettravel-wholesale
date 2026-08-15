@@ -963,4 +963,32 @@ button:active {
   background: rgba(255, 255, 255, 0.3);
 }
 
+/* Full-width layout when in admin mode with top-center floating menu */
+.admin-shell-layout {
+  display: block !important;
+  grid-template-columns: 1fr !important;
+  width: 100% !important;
+  background: #f4f6fb !important;
+}
+
+.admin-shell-layout .sidebar {
+  display: none !important;
+}
+
+.admin-shell-layout .main-area {
+  padding: 16px 20px 48px 20px !important;
+  max-width: 1560px !important;
+  margin: 0 auto !important;
+  width: 100% !important;
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 
