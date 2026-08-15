@@ -33,7 +33,6 @@ import { getValidationErrorMessage } from "@/lib/validation";
 import type { AppMode, TabKey, ApiUser } from "./types";
 
 // Import custom subcomponents
-import { Sidebar } from "./components/shared/Sidebar";
 import { Topbar } from "./components/shared/Topbar";
 import { ChatPopup } from "./components/shared/ChatPopup";
 import { Catalog } from "./components/customer/Catalog";
@@ -91,7 +90,6 @@ export function PetTravelApp() {
   // --- CORE APPLICATION STATES ---
   const [mode, setMode] = useState<AppMode>("guest");
   const [activeTab, setActiveTab] = useState<TabKey>("catalog");
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isProductsLoading, setIsProductsLoading] = useState<boolean>(true);
   const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
@@ -532,6 +530,53 @@ export function PetTravelApp() {
       alert("Lỗi kết nối máy chủ khi lưu đơn.");
     }
   }
+
+  // --- REAL BUSINESS METRICS (Calculated accurately from real database orders & inventory) ---
+  const realTotalRevenue = useMemo(() => {
+    if (reportsOverview?.kpis?.estimatedSalesVnd && reportsOverview.kpis.estimatedSalesVnd > 0) {
+      return reportsOverview.kpis.estimatedSalesVnd;
+    }
+    return allOrders.reduce((sum, o) => {
+      const q = o.quoteVersions?.[o.quoteVersions.length - 1];
+      return sum + (q?.finalTotal || 0);
+    }, 0);
+  }, [allOrders, reportsOverview]);
+
+  const realCollectedRevenue = useMemo(() => {
+    if (reportsOverview?.kpis?.paymentConfirmedVnd && reportsOverview.kpis.paymentConfirmedVnd > 0) {
+      return reportsOverview.kpis.paymentConfirmedVnd;
+    }
+    return allOrders.reduce((sum, o) => {
+      const q = o.quoteVersions?.[o.quoteVersions.length - 1];
+      if (!q) return sum;
+      if (o.paymentStatus === "paid" || o.paymentStatus === "full_uploaded") {
+        return sum + q.finalTotal;
+      }
+      if (o.paymentStatus === "deposit_confirmed" || o.paymentStatus === "deposit_uploaded") {
+        return sum + (q.depositAmount || 0);
+      }
+      return sum;
+    }, 0);
+  }, [allOrders, reportsOverview]);
+
+  const realOverdueAmount = useMemo(() => {
+    if (reportsOverview?.kpis?.receivableOpenVnd && reportsOverview.kpis.receivableOpenVnd > 0) {
+      return reportsOverview.kpis.receivableOpenVnd;
+    }
+    return Math.max(0, realTotalRevenue - realCollectedRevenue);
+  }, [realTotalRevenue, realCollectedRevenue, reportsOverview]);
+
+  const realPendingApprovalsCount = useMemo(() => {
+    return allOrders.filter((o) => o.commercialStatus === "submitted" || o.commercialStatus === "admin_review").length;
+  }, [allOrders]);
+
+  const realTotalStockUnits = useMemo(() => {
+    return allProducts.reduce((sum, p) => sum + p.variants.reduce((vSum, v) => vSum + v.stock, 0), 0);
+  }, [allProducts]);
+
+  const realLowStockCount = useMemo(() => {
+    return allProducts.reduce((sum, p) => sum + p.variants.filter((v) => v.stock < 10).length, 0);
+  }, [allProducts]);
 
   // --- ACTIONS & OPERATION HANDLERS ---
 
@@ -1136,31 +1181,8 @@ export function PetTravelApp() {
   }
 
   return (
-    <main className={`app-shell ${isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") ? "admin-shell-layout" : ""}`}>
-      {/* 1. SIDEBAR NAVIGATION (Admin only) */}
-      {isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") && (
-        <Sidebar
-          isLoggedIn={isLoggedIn}
-          activeUser={currentUser}
-          activeTab={activeTab}
-          mode={mode}
-          cartItemsCount={cartItems.length}
-          cartTotalVal={cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0)}
-          isSidebarOpen={isSidebarOpen}
-          setIsSidebarOpen={setIsSidebarOpen}
-          setActiveTab={setActiveTab}
-          handleLogout={handleLogout}
-          setShowLoginModal={setShowLoginModal}
-          fetchUsers={fetchUsers}
-          fetchPromotions={fetchPromotions}
-          fetchReportsOverview={fetchReportsOverview}
-          fetchOperationsOverview={fetchOperationsOverview}
-          fetchAccountingOverview={fetchAccountingOverview}
-          fetchAccountingJournalEntries={fetchAccountingJournalEntries}
-        />
-      )}
-
-      {/* 2. MAIN APPLICATION CONTENT */}
+    <main className="app-shell">
+      {/* MAIN APPLICATION CONTENT */}
       <section className={`main-area ${isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") ? "admin-theme-container p-4 sm:p-6" : ""}`}>
         {/* Top bar header: Finnova Admin Header vs Customer Dynamic Liquid Glass Capsule Nav */}
         {isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") ? (
@@ -1169,21 +1191,12 @@ export function PetTravelApp() {
             setActiveTab={setActiveTab}
             currentUser={currentUser}
             totalOrdersCount={allOrders.length}
-            totalRevenue={
-              allOrders.reduce((sum, o) => {
-                const q = o.quoteVersions?.[o.quoteVersions.length - 1];
-                return sum + (q?.finalTotal || 0);
-              }, 0) || 186540000
-            }
-            overdueAmount={
-              allOrders
-                .filter((o) => o.commercialStatus === "submitted" || o.paymentStatus.includes("requested"))
-                .reduce((sum, o) => {
-                  const q = o.quoteVersions?.[o.quoteVersions.length - 1];
-                  return sum + (q?.finalTotal || 0);
-                }, 0) || 24850000
-            }
-            pendingApprovalsCount={allOrders.filter((o) => o.commercialStatus === "submitted").length}
+            totalRevenue={realTotalRevenue}
+            collectedRevenue={realCollectedRevenue}
+            overdueAmount={realOverdueAmount}
+            pendingApprovalsCount={realPendingApprovalsCount}
+            totalStockUnits={realTotalStockUnits}
+            lowStockCount={realLowStockCount}
             onLogout={handleLogout}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
@@ -1191,9 +1204,13 @@ export function PetTravelApp() {
               if (activeTab === "admin") {
                 setWorkingOrder(EMPTY_ORDER);
                 setSelectedOrderId(null);
+              } else if (activeTab === "admin_products") {
+                setSelectedProduct(null);
+              } else if (activeTab === "admin_users") {
+                fetchUsers();
               }
             }}
-            onBackClick={activeTab !== "admin" ? () => setActiveTab("admin") : undefined}
+            onBackClick={() => setActiveTab("catalog")}
           />
         ) : (
           <Topbar
@@ -1530,6 +1547,8 @@ export function PetTravelApp() {
             isReportsLoading={isReportsLoading}
             reportsError={reportsError}
             fetchReportsOverview={fetchReportsOverview}
+            allOrders={allOrders}
+            allProducts={allProducts}
           />
         )}
 

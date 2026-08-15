@@ -9,17 +9,14 @@ import {
   Plus,
   Wallet,
   ArrowUpRight,
-  TrendingUp,
   Search,
   Bell,
   Settings,
   ChevronDown,
   LogOut,
   X,
-  CheckCircle2,
   Copy,
-  Filter,
-  Clock
+  Filter
 } from "lucide-react";
 
 interface AdminHeaderProps {
@@ -28,8 +25,11 @@ interface AdminHeaderProps {
   currentUser: ApiUser | null;
   totalOrdersCount?: number;
   totalRevenue?: number;
+  collectedRevenue?: number;
   overdueAmount?: number;
   pendingApprovalsCount?: number;
+  totalStockUnits?: number;
+  lowStockCount?: number;
   onNewActionClick?: () => void;
   newActionLabel?: string;
   onBackClick?: () => void;
@@ -92,10 +92,13 @@ export function AdminHeader({
   activeTab,
   setActiveTab,
   currentUser,
-  totalOrdersCount = 80,
-  totalRevenue = 186540000,
-  overdueAmount = 24850000,
-  pendingApprovalsCount = 3,
+  totalOrdersCount = 0,
+  totalRevenue = 0,
+  collectedRevenue = 0,
+  overdueAmount = 0,
+  pendingApprovalsCount = 0,
+  totalStockUnits = 0,
+  lowStockCount = 0,
   onNewActionClick,
   newActionLabel = "+ Create an invoice",
   onBackClick,
@@ -116,10 +119,10 @@ export function AdminHeader({
   // Active bank account
   const activeBank = BANK_ACCOUNTS.find((b) => b.id === selectedChannel) || BANK_ACCOUNTS[0];
 
-  // Top Center Floating Pill Tabs
-  const navTabs: { key: TabKey; label: string }[] = [
+  // Top Center Floating Pill Tabs matching the user's authoritative layout
+  const navTabs: { key: TabKey; label: string; badge?: number }[] = [
     { key: "admin_reports", label: "Overview" },
-    { key: "admin", label: "Invoices / Orders" },
+    { key: "admin", label: "Invoices / Orders", badge: totalOrdersCount },
     { key: "admin_accounting", label: "Accounting & Ledger" },
     { key: "admin_products", label: "Inventory & ATP" },
     { key: "admin_promotions", label: "Pricing & Tiers" },
@@ -177,25 +180,27 @@ export function AdminHeader({
       {/* ========================================================================= */}
       {/* 1. TOP-CENTER FLOATING CAPSULE NAVBAR (Finnova Pill Header) */}
       {/* ========================================================================= */}
-      <div className="w-full flex flex-col md:flex-row items-center justify-between gap-3 bg-white/85 backdrop-blur-xl p-2.5 sm:p-3 rounded-[26px] border border-[#e8ecf4] shadow-[0_10px_30px_rgba(0,0,0,0.035)]">
-        {/* Left: Brand Logo & Back */}
+      <div className="w-full flex flex-col lg:flex-row items-center justify-between gap-3 bg-white/90 backdrop-blur-xl p-2.5 sm:p-3 rounded-[26px] border border-[#e8ecf4] shadow-[0_10px_30px_rgba(0,0,0,0.035)]">
+        {/* Left: Brand Logo & Back to Wholesale Catalog */}
         <div className="flex items-center gap-3 shrink-0">
-          {onBackClick && (
-            <button
-              type="button"
-              className="w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 flex items-center justify-center transition cursor-pointer active:scale-95"
-              onClick={onBackClick}
-              title="Quay lại"
-            >
-              <ArrowLeft size={16} />
-            </button>
-          )}
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-[#16192b] to-[#2d3356] text-white flex items-center justify-center font-black text-xs shadow-md">
+          <button
+            type="button"
+            className="w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 flex items-center justify-center transition cursor-pointer active:scale-95 shadow-xs"
+            onClick={onBackClick || (() => setActiveTab("catalog"))}
+            title="Quay lại Cổng Khách hàng sỉ"
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div
+            className="flex items-center gap-2.5 cursor-pointer group"
+            onClick={() => setActiveTab("admin_reports")}
+            title="Trang tổng quan Overview"
+          >
+            <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-[#16192b] to-[#2d3356] text-white flex items-center justify-center font-black text-xs shadow-md group-hover:scale-105 transition-transform">
               PT
             </div>
             <div className="flex flex-col">
-              <span className="font-extrabold text-xs text-[#16192b] tracking-tight leading-tight">
+              <span className="font-extrabold text-xs text-[#16192b] tracking-tight leading-tight group-hover:text-indigo-600 transition-colors">
                 Finnova Enterprise
               </span>
               <span className="text-[10px] text-gray-500 font-bold">
@@ -222,7 +227,7 @@ export function AdminHeader({
               >
                 <span>{tab.label}</span>
                 {tab.key === "admin" && (
-                  <span className="w-4 h-4 rounded-full bg-white/20 text-[9px] flex items-center justify-center">
+                  <span className="min-w-4 h-4 px-1 rounded-full bg-white/20 text-[9px] font-mono flex items-center justify-center">
                     {totalOrdersCount}
                   </span>
                 )}
@@ -263,7 +268,9 @@ export function AdminHeader({
               title="Thông báo hệ thống"
             >
               <Bell size={16} />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" />
+              {pendingApprovalsCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white animate-pulse" />
+              )}
             </button>
 
             {/* Notification Dropdown */}
@@ -284,37 +291,41 @@ export function AdminHeader({
                 </div>
 
                 <div className="flex flex-col gap-2.5 mt-3 max-h-72 overflow-y-auto admin-dark-scroll pr-1 text-xs">
-                  <div
-                    className="p-3 bg-[#1e2440] hover:bg-[#252c4e] rounded-2xl border border-[#2e375e] transition cursor-pointer"
-                    onClick={() => {
-                      setActiveTab("admin");
-                      setIsNotificationOpen(false);
-                    }}
-                  >
-                    <div className="flex items-center justify-between text-[10px] text-amber-400 font-bold">
-                      <span>CẦN DUYỆT CỌC</span>
-                      <span>5 phút trước</span>
+                  {pendingApprovalsCount > 0 && (
+                    <div
+                      className="p-3 bg-[#1e2440] hover:bg-[#252c4e] rounded-2xl border border-[#2e375e] transition cursor-pointer"
+                      onClick={() => {
+                        setActiveTab("admin");
+                        setIsNotificationOpen(false);
+                      }}
+                    >
+                      <div className="flex items-center justify-between text-[10px] text-amber-400 font-bold">
+                        <span>CẦN PHÊ DUYỆT ĐƠN</span>
+                        <span>Vừa cập nhật</span>
+                      </div>
+                      <p className="font-bold text-white mt-1 m-0">
+                        Có {pendingApprovalsCount} đơn hàng sỉ đang ở trạng thái chờ duyệt báo giá hoặc chờ đối soát cọc.
+                      </p>
                     </div>
-                    <p className="font-bold text-white mt-1 m-0">
-                      Đơn hàng sỉ #DH-1003 vừa được đại lý chấp thuận báo giá, chờ kế toán đối soát cọc 30%.
-                    </p>
-                  </div>
+                  )}
 
-                  <div
-                    className="p-3 bg-[#1e2440] hover:bg-[#252c4e] rounded-2xl border border-[#2e375e] transition cursor-pointer"
-                    onClick={() => {
-                      setActiveTab("admin_products");
-                      setIsNotificationOpen(false);
-                    }}
-                  >
-                    <div className="flex items-center justify-between text-[10px] text-rose-400 font-bold">
-                      <span>CẢNH BÁO TỒN KHO ATP</span>
-                      <span>1 giờ trước</span>
+                  {lowStockCount > 0 && (
+                    <div
+                      className="p-3 bg-[#1e2440] hover:bg-[#252c4e] rounded-2xl border border-[#2e375e] transition cursor-pointer"
+                      onClick={() => {
+                        setActiveTab("admin_products");
+                        setIsNotificationOpen(false);
+                      }}
+                    >
+                      <div className="flex items-center justify-between text-[10px] text-rose-400 font-bold">
+                        <span>CẢNH BÁO TỒN KHO ATP</span>
+                        <span>Tồn kho thấp</span>
+                      </div>
+                      <p className="font-bold text-white mt-1 m-0">
+                        Có {lowStockCount} phân loại sản phẩm có số lượng tồn khả dụng dưới 10 đơn vị.
+                      </p>
                     </div>
-                    <p className="font-bold text-white mt-1 m-0">
-                      Pate Mèo Royal Canin 85g còn 12 túi sẵn bán (ATP chạm ngưỡng tối thiểu).
-                    </p>
-                  </div>
+                  )}
 
                   <div
                     className="p-3 bg-[#1e2440] hover:bg-[#252c4e] rounded-2xl border border-[#2e375e] transition cursor-pointer"
@@ -328,7 +339,7 @@ export function AdminHeader({
                       <span>Hôm nay</span>
                     </div>
                     <p className="font-bold text-white mt-1 m-0">
-                      Trial Balance đã kiểm tra tự động: 100% cân Nợ = Có (0 VND sai lệch).
+                      Bút toán kép cân đối 100% Nợ = Có trên toàn bộ tài khoản cấp 1 và cấp 2.
                     </p>
                   </div>
                 </div>
@@ -348,7 +359,11 @@ export function AdminHeader({
 
           {/* User Profile Pill */}
           <div className="flex items-center gap-2 pl-1 border-l border-gray-200">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-white text-xs shadow-sm">
+            <div
+              className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-white text-xs shadow-sm cursor-pointer"
+              title={`${currentUser?.name || "Admin"} (${currentUser?.role || "Quản trị viên"})`}
+              onClick={() => setActiveTab("admin_users")}
+            >
               {currentUser?.name?.charAt(0) || "A"}
             </div>
             {onLogout && (
@@ -402,10 +417,10 @@ export function AdminHeader({
       </div>
 
       {/* ========================================================================= */}
-      {/* 3. 4-COLUMN KPI METRICS CARDS WITH LIVE INTERACTIVE DRILLDOWNS */}
+      {/* 3. 4-COLUMN KPI METRICS CARDS WITH REAL CALCULATED DATA & LIVE DRILLDOWNS */}
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* CARD 1: OVERDUE */}
+        {/* CARD 1: OVERDUE / CHỜ DUYỆT */}
         <div
           className="admin-kpi-card p-5 flex flex-col justify-between cursor-pointer hover:scale-[1.01] transition"
           onClick={() => {
@@ -416,10 +431,12 @@ export function AdminHeader({
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              Overdue / Chờ duyệt
+              Overdue / Công nợ chờ thu
             </span>
-            <span className="text-[10px] font-black text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full flex items-center gap-1 border border-rose-100">
-              <span>14% ▲</span>
+            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 border ${
+              overdueAmount > 0 ? "text-rose-600 bg-rose-50 border-rose-100" : "text-emerald-700 bg-emerald-50 border-emerald-100"
+            }`}>
+              <span>{overdueAmount > 0 ? "Cần thu" : "0 VND nợ"}</span>
             </span>
           </div>
 
@@ -427,80 +444,85 @@ export function AdminHeader({
             <div className="text-2xl font-black text-[#121528] font-mono tracking-tight">
               {formatVnd(overdueAmount)}
             </div>
-            <span className="text-[11px] text-gray-400 font-medium">
-              {pendingApprovalsCount} đơn cần xử lý ngay
+            <span className="text-[11px] text-gray-500 font-medium">
+              {pendingApprovalsCount > 0 ? `${pendingApprovalsCount} đơn cần duyệt` : "Tất cả đơn đã đối soát"}
             </span>
           </div>
 
           <div className="flex items-center justify-between pt-2 border-t border-gray-100 text-xs">
             <span className="text-indigo-600 font-bold hover:underline flex items-center gap-1">
-              Xem chi tiết công nợ <ArrowUpRight size={13} />
+              Xem chi tiết đơn hàng <ArrowUpRight size={13} />
             </span>
           </div>
         </div>
 
-        {/* CARD 2: DUE + PURPLE GRADIENT BAR CHART */}
+        {/* CARD 2: TOTAL REVENUE & DUE */}
         <div
           className="admin-kpi-card p-5 flex flex-col justify-between cursor-pointer hover:scale-[1.01] transition"
           onClick={() => setIsCashflowModalOpen(true)}
-          title="Nhấn để xem phân tích dòng tiền 4 tuần"
+          title="Nhấn để xem phân tích dòng tiền và doanh thu"
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              Due / Dự kiến thu
+              Doanh thu thực tế (B2B)
             </span>
-            <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
-              4 tuần
+            <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full font-mono">
+              {totalOrdersCount} đơn
             </span>
           </div>
 
           <div className="flex items-end justify-between gap-3 my-1">
             <div>
               <div className="text-2xl font-black text-[#121528] font-mono tracking-tight">
-                {formatVnd(totalRevenue * 0.75)}
+                {formatVnd(totalRevenue)}
               </div>
               <span className="text-[11px] text-emerald-600 font-bold">
-                +18.2% tuần này
+                Thực thu: {formatVnd(collectedRevenue)}
               </span>
             </div>
 
             {/* SVG Purple Bar Chart */}
             <div className="flex items-end gap-1.5 h-12 pb-1">
-              <div className="w-2.5 h-6 rounded-t-md bg-indigo-300" title="Tuần 1: 25%" />
-              <div className="w-2.5 h-9 rounded-t-md bg-indigo-400" title="Tuần 2: 55%" />
-              <div className="w-2.5 h-12 rounded-t-md bg-gradient-to-t from-indigo-600 to-purple-500 shadow-sm" title="Tuần 3: 100%" />
-              <div className="w-2.5 h-7 rounded-t-md bg-indigo-300" title="Tuần 4: 40%" />
+              <div className="w-2.5 h-6 rounded-t-md bg-indigo-300" title="Tuần 1" />
+              <div className="w-2.5 h-9 rounded-t-md bg-indigo-400" title="Tuần 2" />
+              <div className="w-2.5 h-12 rounded-t-md bg-gradient-to-t from-indigo-600 to-purple-500 shadow-sm" title="Tuần 3" />
+              <div className="w-2.5 h-7 rounded-t-md bg-indigo-300" title="Tuần 4" />
             </div>
           </div>
 
           <div className="flex items-center justify-between pt-2 border-t border-gray-100 text-xs">
-            <span className="text-gray-400 font-medium text-[11px]">Dự báo dòng tiền</span>
+            <span className="text-gray-400 font-medium text-[11px]">Dự báo dòng thu chi</span>
             <ArrowUpRight size={13} className="text-gray-400" />
           </div>
         </div>
 
-        {/* CARD 3: AVERAGE TURNAROUND + SPARKLINE AREA */}
+        {/* CARD 3: INVENTORY & ATP UNITS */}
         <div
           className="admin-kpi-card p-5 flex flex-col justify-between cursor-pointer hover:scale-[1.01] transition"
-          onClick={() => setIsTurnaroundModalOpen(true)}
-          title="Nhấn để xem biểu đồ tốc độ hoàn tất đơn"
+          onClick={() => {
+            setActiveTab("admin_products");
+            setIsTurnaroundModalOpen(true);
+          }}
+          title="Nhấn để xem báo cáo kho & khả dụng ATP"
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              Avg Turnaround
+              Tồn kho ATP Khả dụng
             </span>
-            <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
-              +3 ngày
+            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+              lowStockCount > 0 ? "text-amber-700 bg-amber-50 border border-amber-200" : "text-emerald-700 bg-emerald-50"
+            }`}>
+              {lowStockCount > 0 ? `${lowStockCount} SKU ít tồn` : "Tồn kho dồi dào"}
             </span>
           </div>
 
           <div className="flex items-end justify-between gap-3 my-1">
             <div>
               <div className="text-2xl font-black text-[#121528] tracking-tight font-mono">
-                16 days
+                {totalStockUnits.toLocaleString("vi-VN")} <span className="text-sm font-sans text-gray-400">cái</span>
               </div>
-              <span className="text-[11px] text-gray-400 font-medium">
-                Từ báo giá đến giao hàng
+              <span className="text-[11px] text-gray-500 font-medium">
+                Sẵn sàng giao cho đại lý sỉ
               </span>
             </div>
 
@@ -528,7 +550,7 @@ export function AdminHeader({
           </div>
 
           <div className="flex items-center justify-between pt-2 border-t border-gray-100 text-xs">
-            <span className="text-gray-400 font-medium text-[11px]">Tốc độ hoàn tất đơn</span>
+            <span className="text-gray-400 font-medium text-[11px]">Chi tiết kho hàng</span>
             <ArrowUpRight size={13} className="text-gray-400" />
           </div>
         </div>
@@ -667,7 +689,7 @@ export function AdminHeader({
                   className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer"
                   onClick={() => handleCopyText(activeBank.accountNo, "Đã sao chép số tài khoản!")}
                 >
-                  <Copy size={13} /> Sao chép
+                  <Copy size={13} /> {copyFeedback || "Sao chép"}
                 </button>
               </div>
             </div>
@@ -700,10 +722,7 @@ export function AdminHeader({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white">
             <div className="flex items-center justify-between border-b border-[#232a48] pb-3">
-              <div className="flex items-center gap-2">
-                <TrendingUp size={18} className="text-indigo-400" />
-                <h3 className="font-extrabold text-white text-base m-0">Dự báo Dòng tiền B2B (4 Tuần tới)</h3>
-              </div>
+              <h3 className="font-extrabold text-white text-base m-0">Phân tích Dòng tiền & Doanh thu B2B</h3>
               <button
                 type="button"
                 className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-gray-300 cursor-pointer"
@@ -713,30 +732,22 @@ export function AdminHeader({
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-xs">
-              <div className="p-3 bg-[#1c223c] rounded-2xl border border-[#2e375e]">
-                <span className="text-gray-400 text-[10px] uppercase font-bold">Tuần 1 (Đến hạn)</span>
-                <div className="text-base font-black text-indigo-300 font-mono mt-1">{formatVnd(45000000)}</div>
-                <span className="text-[10px] text-emerald-400">8 đơn chốt</span>
+            <div className="flex flex-col gap-3 text-xs">
+              <div className="p-3 bg-[#1c223c] rounded-2xl border border-[#2e375e] flex items-center justify-between">
+                <span className="text-gray-300">Tổng doanh số đơn hàng:</span>
+                <span className="font-mono font-black text-white text-sm">{formatVnd(totalRevenue)}</span>
               </div>
-              <div className="p-3 bg-[#1c223c] rounded-2xl border border-[#2e375e]">
-                <span className="text-gray-400 text-[10px] uppercase font-bold">Tuần 2 (Đến hạn)</span>
-                <div className="text-base font-black text-indigo-300 font-mono mt-1">{formatVnd(68000000)}</div>
-                <span className="text-[10px] text-emerald-400">12 đơn chốt</span>
+              <div className="p-3 bg-[#1c223c] rounded-2xl border border-[#2e375e] flex items-center justify-between">
+                <span className="text-emerald-300">Thực thu (Cọc & Full):</span>
+                <span className="font-mono font-black text-emerald-400 text-sm">{formatVnd(collectedRevenue)}</span>
               </div>
-              <div className="p-3 bg-[#1c223c] rounded-2xl border border-[#2e375e]">
-                <span className="text-gray-400 text-[10px] uppercase font-bold">Tuần 3 (Đến hạn)</span>
-                <div className="text-base font-black text-indigo-300 font-mono mt-1">{formatVnd(92000000)}</div>
-                <span className="text-[10px] text-emerald-400">15 đơn chốt</span>
-              </div>
-              <div className="p-3 bg-[#1c223c] rounded-2xl border border-[#2e375e]">
-                <span className="text-gray-400 text-[10px] uppercase font-bold">Tuần 4 (Đến hạn)</span>
-                <div className="text-base font-black text-indigo-300 font-mono mt-1">{formatVnd(38000000)}</div>
-                <span className="text-[10px] text-emerald-400">6 đơn chốt</span>
+              <div className="p-3 bg-[#1c223c] rounded-2xl border border-[#2e375e] flex items-center justify-between">
+                <span className="text-rose-300">Công nợ còn lại (AR):</span>
+                <span className="font-mono font-black text-rose-400 text-sm">{formatVnd(overdueAmount)}</span>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2.5 mt-2 border-t border-[#232a48] pt-3 text-xs">
+            <div className="flex justify-end gap-2 mt-2 pt-3 border-t border-[#232a48]">
               <button
                 type="button"
                 className="admin-pill-btn-white py-2 px-5 text-xs"
@@ -749,15 +760,12 @@ export function AdminHeader({
         </div>
       )}
 
-      {/* C. TURNAROUND ANALYTICS MODAL */}
+      {/* C. TURNAROUND MODAL */}
       {isTurnaroundModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white">
             <div className="flex items-center justify-between border-b border-[#232a48] pb-3">
-              <div className="flex items-center gap-2">
-                <Clock size={18} className="text-indigo-400" />
-                <h3 className="font-extrabold text-white text-base m-0">Thời Gian Xử Lý & Hoàn Tất Đơn Sỉ</h3>
-              </div>
+              <h3 className="font-extrabold text-white text-base m-0">Hiệu suất Xử lý Đơn & Tồn kho</h3>
               <button
                 type="button"
                 className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-gray-300 cursor-pointer"
@@ -768,21 +776,21 @@ export function AdminHeader({
             </div>
 
             <div className="flex flex-col gap-3 text-xs">
-              <div className="p-3 bg-[#1c223c] rounded-2xl border border-[#2e375e] flex justify-between items-center">
-                <span className="text-gray-300">Từ yêu cầu đến chốt báo giá:</span>
-                <strong className="text-emerald-400 font-mono">1.2 ngày</strong>
+              <div className="p-3 bg-[#1c223c] rounded-2xl border border-[#2e375e] flex items-center justify-between">
+                <span className="text-gray-300">Tổng số đơn hàng:</span>
+                <span className="font-mono font-black text-white text-sm">{totalOrdersCount} đơn</span>
               </div>
-              <div className="p-3 bg-[#1c223c] rounded-2xl border border-[#2e375e] flex justify-between items-center">
-                <span className="text-gray-300">Từ đặt cọc đến điều phối kho ATP:</span>
-                <strong className="text-sky-400 font-mono">2.5 ngày</strong>
+              <div className="p-3 bg-[#1c223c] rounded-2xl border border-[#2e375e] flex items-center justify-between">
+                <span className="text-indigo-300">Tồn kho khả dụng (ATP):</span>
+                <span className="font-mono font-black text-indigo-400 text-sm">{totalStockUnits} đơn vị</span>
               </div>
-              <div className="p-3 bg-[#1c223c] rounded-2xl border border-[#2e375e] flex justify-between items-center">
-                <span className="text-gray-300">Vận chuyển & giao nhận đại lý:</span>
-                <strong className="text-indigo-300 font-mono">12.3 ngày</strong>
+              <div className="p-3 bg-[#1c223c] rounded-2xl border border-[#2e375e] flex items-center justify-between">
+                <span className="text-amber-300">SKU cảnh báo tồn thấp:</span>
+                <span className="font-mono font-black text-amber-400 text-sm">{lowStockCount} SKU</span>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2.5 mt-2 border-t border-[#232a48] pt-3 text-xs">
+            <div className="flex justify-end gap-2 mt-2 pt-3 border-t border-[#232a48]">
               <button
                 type="button"
                 className="admin-pill-btn-white py-2 px-5 text-xs"
@@ -795,15 +803,12 @@ export function AdminHeader({
         </div>
       )}
 
-      {/* D. MULTI-FILTER ADVANCED MODAL */}
+      {/* D. ADVANCED FILTER MODAL */}
       {isFilterModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 text-white text-xs">
+          <div className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 text-white">
             <div className="flex items-center justify-between border-b border-[#232a48] pb-3">
-              <div className="flex items-center gap-2">
-                <SlidersHorizontal size={18} className="text-indigo-400" />
-                <h3 className="font-extrabold text-white text-base m-0">Bộ lọc Giao dịch Nâng cao</h3>
-              </div>
+              <h3 className="font-extrabold text-white text-base m-0">Bộ lọc nâng cao</h3>
               <button
                 type="button"
                 className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-gray-300 cursor-pointer"
@@ -813,57 +818,54 @@ export function AdminHeader({
               </button>
             </div>
 
-            <div className="flex flex-col gap-3">
-              <div>
-                <label className="text-[11px] font-bold text-gray-300">Trạng thái thanh toán</label>
+            <div className="flex flex-col gap-3 text-xs">
+              <label className="flex flex-col gap-1">
+                <span className="font-bold text-gray-300">Trạng thái thanh toán:</span>
                 <select
-                  className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs"
                   value={statusFilter}
                   onChange={(e) => setStatusFilter?.(e.target.value)}
+                  className="bg-[#1c223c] border border-[#2e375e] rounded-xl p-2.5 text-white outline-none"
                 >
                   <option value="all">Tất cả trạng thái</option>
-                  <option value="unpaid">Chưa thanh toán</option>
-                  <option value="paid">Đã thanh toán đủ</option>
+                  <option value="unpaid">Chưa thu / Cần thu</option>
+                  <option value="paid">Đã thanh toán</option>
                 </select>
-              </div>
+              </label>
 
-              <div>
-                <label className="text-[11px] font-bold text-gray-300">Tìm kiếm theo tên / Mã đơn</label>
+              <label className="flex flex-col gap-1">
+                <span className="font-bold text-gray-300">Tìm kiếm từ khóa:</span>
                 <input
                   type="text"
-                  placeholder="Nhập mã đơn, tên đại lý..."
-                  className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs"
+                  placeholder="Mã đơn, tên đại lý..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery?.(e.target.value)}
-                />
-              </div>
+                  className="bg-[#1c223c] border border-[#2e375e] rounded-xl p-2.5 text-white outline-none"
+                >
+                </input>
+              </label>
             </div>
 
-            <div className="flex justify-end gap-2.5 mt-2 border-t border-[#232a48] pt-3 text-xs">
+            <div className="flex justify-end gap-2 mt-3 pt-3 border-t border-[#232a48]">
               <button
                 type="button"
-                className="px-4 py-2 rounded-xl text-gray-300 hover:text-white cursor-pointer"
-                onClick={() => setIsFilterModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-gray-400 hover:text-white cursor-pointer"
+                onClick={() => {
+                  setStatusFilter?.("all");
+                  setSearchQuery?.("");
+                  setIsFilterModalOpen(false);
+                }}
               >
-                Hủy
+                Reset
               </button>
               <button
                 type="button"
-                className="admin-pill-btn-primary py-2 px-5 text-xs"
+                className="admin-pill-btn-white py-2 px-5 text-xs"
                 onClick={() => setIsFilterModalOpen(false)}
               >
-                Áp dụng bộ lọc
+                Áp dụng
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Copy Toast Alert */}
-      {copyFeedback && (
-        <div className="fixed bottom-6 right-6 z-50 bg-[#16192b] text-white px-4 py-3 rounded-2xl border border-indigo-500/50 shadow-2xl flex items-center gap-2 animate-slide-up-sheet text-xs font-bold">
-          <CheckCircle2 size={16} className="text-emerald-400" />
-          <span>{copyFeedback}</span>
         </div>
       )}
     </div>
