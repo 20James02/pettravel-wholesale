@@ -1133,30 +1133,32 @@ export function PetTravelApp() {
 
   return (
     <main className={`app-shell ${isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") ? "admin-shell-layout" : ""}`}>
-      {/* 1. SIDEBAR NAVIGATION */}
-      <Sidebar
-        isLoggedIn={isLoggedIn}
-        activeUser={currentUser}
-        activeTab={activeTab}
-        mode={mode}
-        cartItemsCount={cartItems.length}
-        cartTotalVal={cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0)}
-        isSidebarOpen={isSidebarOpen}
-        setIsSidebarOpen={setIsSidebarOpen}
-        setActiveTab={setActiveTab}
-        handleLogout={handleLogout}
-        setShowLoginModal={setShowLoginModal}
-        fetchUsers={fetchUsers}
-        fetchPromotions={fetchPromotions}
-        fetchReportsOverview={fetchReportsOverview}
-        fetchOperationsOverview={fetchOperationsOverview}
-        fetchAccountingOverview={fetchAccountingOverview}
-        fetchAccountingJournalEntries={fetchAccountingJournalEntries}
-      />
+      {/* 1. SIDEBAR NAVIGATION (Admin only) */}
+      {isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") && (
+        <Sidebar
+          isLoggedIn={isLoggedIn}
+          activeUser={currentUser}
+          activeTab={activeTab}
+          mode={mode}
+          cartItemsCount={cartItems.length}
+          cartTotalVal={cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0)}
+          isSidebarOpen={isSidebarOpen}
+          setIsSidebarOpen={setIsSidebarOpen}
+          setActiveTab={setActiveTab}
+          handleLogout={handleLogout}
+          setShowLoginModal={setShowLoginModal}
+          fetchUsers={fetchUsers}
+          fetchPromotions={fetchPromotions}
+          fetchReportsOverview={fetchReportsOverview}
+          fetchOperationsOverview={fetchOperationsOverview}
+          fetchAccountingOverview={fetchAccountingOverview}
+          fetchAccountingJournalEntries={fetchAccountingJournalEntries}
+        />
+      )}
 
       {/* 2. MAIN APPLICATION CONTENT */}
       <section className={`main-area ${isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") ? "admin-theme-container p-4 sm:p-6" : ""}`}>
-        {/* Top bar header: Finnova Admin Header vs Customer Topbar */}
+        {/* Top bar header: Finnova Admin Header vs Customer Dynamic Liquid Glass Capsule Nav */}
         {isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") ? (
           <AdminHeader
             activeTab={activeTab}
@@ -1193,14 +1195,10 @@ export function PetTravelApp() {
           <Topbar
             isLoggedIn={isLoggedIn}
             activeUser={currentUser}
-            isAdmin={isAdmin}
-            mode={mode}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            cartTotalVal={cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0)}
-            setIsSidebarOpen={setIsSidebarOpen}
-            setShowLoginModal={setShowLoginModal}
+            activeTab={activeTab}
             setActiveTab={setActiveTab}
+            setShowLoginModal={setShowLoginModal}
+            cartItemsCount={cartItems.reduce((sum, item) => sum + item.quantity, 0)}
           />
         )}
 
@@ -1214,6 +1212,7 @@ export function PetTravelApp() {
             categoryFilter={categoryFilter}
             setCategoryFilter={setCategoryFilter}
             searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
             isLoggedIn={isLoggedIn}
             isLoading={isProductsLoading}
             onSelectProduct={(product) => {
