@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 from typing import Any, Union
+import bcrypt
 from passlib.exc import PasswordValueError, UnknownHashError
 from passlib.context import CryptContext
 from app.core.config import settings
@@ -18,13 +19,20 @@ def _base64url_encode(value: bytes) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
+    if not plain_password or not hashed_password:
+        return False
     try:
+        if hashed_password.startswith(("$2b$", "$2a$", "$2y$")):
+            return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
         return pwd_context.verify(plain_password, hashed_password)
-    except (UnknownHashError, PasswordValueError, ValueError):
+    except Exception:
         return False
 
+
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    salt = bcrypt.gensalt(rounds=12)
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+
 
 def create_access_token(
     subject: Union[str, Any], expires_delta: timedelta = None

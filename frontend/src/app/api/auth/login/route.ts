@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { RoleKey } from "@/lib/domain";
 import { encodeSession, requireSameOrigin } from "@/server/auth";
-import { getBackendUrl } from "@/server/backend-client";
+import { getBackendHeaders, getBackendUrl } from "@/server/backend-client";
 import { emailSchema, getValidationErrorMessage, loginPasswordSchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     try {
       res = await fetch(`${BACKEND_URL}/api/v1/auth/login-json`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getBackendHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ email, password })
       });
     } catch {
@@ -57,15 +57,12 @@ export async function POST(request: Request) {
     try {
       data = text ? JSON.parse(text) : {};
     } catch {
-      return NextResponse.json(
-        { error: `Phản hồi từ Backend không đúng định dạng JSON (Mã lỗi HTTP: ${res.status}).` },
-        { status: res.status || 500 }
-      );
+      data = { error: text || `Máy chủ phản hồi lỗi HTTP ${res.status}` };
     }
 
     if (!res.ok) {
       return NextResponse.json(
-        { error: data.detail || data.error || "Sai email hoặc mật khẩu." },
+        { error: data.detail || data.error || "Sai email hoặc mật khẩu đăng nhập." },
         { status: res.status || 401 }
       );
     }
@@ -73,7 +70,7 @@ export async function POST(request: Request) {
     const user = data.user;
     if (!user || !user.id) {
       return NextResponse.json(
-        { error: "Dữ liệu người dùng từ Backend không hợp lệ." },
+        { error: "Dữ liệu người dùng từ máy chủ không hợp lệ." },
         { status: 500 }
       );
     }

@@ -68,6 +68,17 @@ app.add_middleware(
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Máy chủ xử lý yêu cầu gặp sự cố nội bộ. Vui lòng thử lại sau.", "error": str(exc)},
+    )
+
+
 @app.get("/")
 def read_root():
     return {
