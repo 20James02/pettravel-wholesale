@@ -22,7 +22,8 @@ import {
   Trash2,
   Send,
   Search,
-  Filter
+  Filter,
+  CreditCard
 } from "lucide-react";
 import type { CustomerOrder, Supplier, Product, OrderItem } from "@/lib/domain";
 import type { ApiUser } from "../../types";
@@ -32,6 +33,7 @@ interface AdminOrdersProps {
   allOrders: CustomerOrder[];
   workingOrder: CustomerOrder;
   currentUser: ApiUser | null;
+  userList?: ApiUser[];
   suppliers: Supplier[];
   allProducts: Product[];
   allCategories: string[];
@@ -55,8 +57,9 @@ interface AdminOrdersProps {
   selectOrder: (id: string) => void;
   setSelectedOrderId: (id: string | null) => void;
   setWorkingOrder: (order: CustomerOrder) => void;
+  syncOrder?: (order: CustomerOrder) => Promise<boolean>;
   handleAdminQtyChange: (itemId: string, qty: number) => void;
-  handlePublishQuote: () => void;
+  handlePublishQuote: (customNote?: string) => void;
   confirmDeposit: () => void;
   attachShipment: () => void;
   handleStockReservationAction: (action: string) => void;
@@ -68,6 +71,7 @@ export function AdminOrders({
   allOrders,
   workingOrder,
   currentUser,
+  userList = [],
   suppliers = [],
   allProducts,
   allCategories = [],
@@ -83,6 +87,7 @@ export function AdminOrders({
   requiresManagerApproval,
   selectOrder,
   setWorkingOrder,
+  syncOrder,
   handleAdminQtyChange,
   handlePublishQuote,
   confirmDeposit,
@@ -98,7 +103,6 @@ export function AdminOrders({
 
   // Form & filter states
   const [quoteCustomerNote, setQuoteCustomerNote] = useState<string>("");
-  const [selectedStaff, setSelectedStaff] = useState<string>("Nguyễn Văn A (Kinh doanh)");
   const [categoryFilterModal, setCategoryFilterModal] = useState<string>("Tất cả");
   const [supplierFilterModal, setSupplierFilterModal] = useState<string>("Tất cả");
   const [searchModalQuery, setSearchModalQuery] = useState<string>("");
@@ -113,6 +117,42 @@ export function AdminOrders({
     if (workingOrder.id) return workingOrder;
     return allOrders.length > 0 ? allOrders[0] : workingOrder;
   }, [workingOrder, allOrders]);
+
+  // Internal staff list from userList
+  const staffList = useMemo(() => {
+    return (userList || []).filter((u) =>
+      ["super_admin", "admin_manager", "order_operator", "accountant", "warehouse"].includes(u.role)
+    );
+  }, [userList]);
+
+  const getStaffRoleTitle = (role?: string) => {
+    switch (role) {
+      case "super_admin": return "Super Admin";
+      case "admin_manager": return "Quản lý";
+      case "order_operator": return "Kinh doanh";
+      case "accountant": return "Kế toán";
+      case "warehouse": return "Thủ kho";
+      default: return role || "Nhân viên";
+    }
+  };
+
+  const handleStaffSelect = async (staffId: string) => {
+    const staff = staffList.find((s) => s.id === staffId);
+    const updatedOrder: CustomerOrder = {
+      ...activeOrder,
+      assignedStaffId: staffId || undefined,
+      assignedStaffName: staff ? staff.name : undefined
+    };
+    setWorkingOrder(updatedOrder);
+    if (syncOrder) {
+      const ok = await syncOrder(updatedOrder);
+      if (ok) {
+        showToast(staff ? `Đã phân bổ đơn cho: ${staff.name} (${getStaffRoleTitle(staff.role)})` : "Đã hủy phân bổ nhân viên");
+      }
+    } else {
+      showToast(staff ? `Đã chọn: ${staff.name}` : "Đã hủy chọn");
+    }
+  };
 
   // Latest Quote calculation
   const quote = useMemo(() => {
@@ -207,11 +247,7 @@ export function AdminOrders({
 
   // Publish Quote with Customer Note
   const onPublishQuoteWithNote = () => {
-    if (quoteCustomerNote.trim() && addComment) {
-      addComment("customer_visible", quoteCustomerNote.trim());
-    }
-    handlePublishQuote();
-    showToast("Đã gửi báo giá kèm ghi chú đến khách hàng!");
+    handlePublishQuote(quoteCustomerNote.trim() || undefined);
     setQuoteCustomerNote("");
   };
 
@@ -412,14 +448,14 @@ export function AdminOrders({
                 </div>
               </div>
 
-              {/* 2. CUSTOMER DETAILS & ORDER ASSIGNEE STRIP (Cạnh trên chi tiết đơn hàng) */}
-              <div className="bg-[#14182b] p-4 rounded-2xl border border-[#262c4c] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+              {/* 2. CUSTOMER DETAILS & ORDER ASSIGNEE STRIP (Dữ liệu thực từ DB) */}
+              <div className="bg-[#14182b] p-4 rounded-2xl border border-[#262c4c] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 text-xs">
                 <div className="flex flex-col gap-1">
                   <span className="text-[10px] font-bold text-gray-400 uppercase flex items-center gap-1">
                     <MapPin size={12} className="text-indigo-400" /> Địa chỉ giao hàng
                   </span>
-                  <span className="text-white font-medium line-clamp-2">
-                    {activeOrder.recipientAddress || "123 Nguyễn Trãi, P. Bến Thành, Quận 1, TP.HCM"}
+                  <span className="text-white font-medium line-clamp-2" title={activeOrder.recipientAddress || "Chưa có địa chỉ"}>
+                    {activeOrder.recipientAddress || "—"}
                   </span>
                 </div>
 
@@ -428,7 +464,7 @@ export function AdminOrders({
                     <Building size={12} className="text-indigo-400" /> Mã số thuế
                   </span>
                   <span className="text-white font-mono font-bold">
-                    {activeOrder.customerTaxCode || "0317892345"}
+                    {activeOrder.customerTaxCode || (activeOrder as unknown as { taxId?: string }).taxId || "—"}
                   </span>
                 </div>
 
@@ -437,7 +473,17 @@ export function AdminOrders({
                     <Phone size={12} className="text-indigo-400" /> Số điện thoại
                   </span>
                   <span className="text-white font-mono font-bold">
-                    {activeOrder.recipientPhone || "0912 345 678"}
+                    {activeOrder.recipientPhone || "—"}
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-sky-400 uppercase flex items-center gap-1">
+                    <CreditCard size={12} /> Hình thức TT
+                  </span>
+                  <span className="text-sky-200 font-bold leading-tight">
+                    {activeOrder.paymentIntent === "pay_full" ? "Thanh toán 100%" : "Cọc 30% + Thu COD"}
+                    {activeOrder.invoiceRequested ? " (VAT)" : ""}
                   </span>
                 </div>
 
@@ -445,30 +491,59 @@ export function AdminOrders({
                   <span className="text-[10px] font-bold text-amber-400 uppercase flex items-center gap-1">
                     <FileText size={12} /> Note của khách
                   </span>
-                  <span className="text-amber-200/90 font-medium italic line-clamp-2">
-                    {activeOrder.customerNote || "Giao giờ hành chính, gọi trước 30p, kiểm tra bao bì kỹ"}
+                  <span
+                    className="text-amber-200/90 font-medium italic line-clamp-2"
+                    title={
+                      activeOrder.customerNote ||
+                      activeOrder.comments?.find(
+                        (c) => c.audience === "customer_visible" && c.author !== "Hệ thống" && !c.message.startsWith("Nhân viên đã")
+                      )?.message ||
+                      "Không có ghi chú"
+                    }
+                  >
+                    {activeOrder.customerNote ||
+                      activeOrder.comments?.find(
+                        (c) => c.audience === "customer_visible" && c.author !== "Hệ thống" && !c.message.startsWith("Nhân viên đã")
+                      )?.message ||
+                      "—"}
                   </span>
                 </div>
 
                 <div className="flex flex-col gap-1">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase flex items-center gap-1">
-                    <UserCheck size={12} className="text-emerald-400" /> Nhân viên xử lý đơn
+                  <span className="text-[10px] font-bold text-emerald-400 uppercase flex items-center gap-1">
+                    <UserCheck size={12} /> Nhân viên xử lý
                   </span>
                   <select
                     className="w-full bg-[#1e2440] border border-[#303960] rounded-xl py-1.5 px-2 text-white text-xs font-semibold focus:ring-1 focus:ring-indigo-500"
-                    value={selectedStaff}
-                    onChange={(e) => {
-                      setSelectedStaff(e.target.value);
-                      showToast(`Đã gán đơn cho: ${e.target.value}`);
-                    }}
+                    value={activeOrder.assignedStaffId || ""}
+                    onChange={(e) => handleStaffSelect(e.target.value)}
                   >
-                    <option value="Nguyễn Văn A (Kinh doanh)">Nguyễn Văn A (Sales)</option>
-                    <option value="Trần Bích Thủy (Kế toán)">Trần Bích Thủy (Kế toán)</option>
-                    <option value="Lê Hoàng Long (Thủ kho)">Lê Hoàng Long (Thủ kho)</option>
-                    <option value="Phạm Quốc Bảo (Manager)">Phạm Quốc Bảo (Manager)</option>
+                    <option value="">-- Chưa phân bổ --</option>
+                    {staffList.map((staff) => (
+                      <option key={staff.id} value={staff.id}>
+                        {staff.name} ({getStaffRoleTitle(staff.role)})
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
+
+              {/* Order Modification Alert & Re-quote Action Banner */}
+              {isOrderModified && (
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-amber-500/20 via-indigo-500/20 to-purple-500/20 border border-amber-500/50 rounded-2xl animate-fade-in shadow-lg">
+                  <div className="flex items-center gap-2.5 text-amber-300 font-bold text-xs">
+                    <div className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shrink-0" />
+                    <span>Đơn hàng đã được điều chỉnh số lượng/sản phẩm. Vui lòng bấm nút để gửi lại báo giá cho khách duyệt!</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onPublishQuoteWithNote}
+                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-600 hover:to-indigo-700 text-white font-black rounded-xl shadow flex items-center gap-2 cursor-pointer transition text-xs whitespace-nowrap"
+                  >
+                    <Send size={14} /> Gửi xác nhận lại khách (Báo giá mới)
+                  </button>
+                </div>
+              )}
 
               {/* 3. PRODUCT ITEMS LIST (Mã, Tên SP, Phân loại, Đơn giá, SL, Tổng tiền) */}
               <div className="flex flex-col gap-3">
@@ -543,17 +618,28 @@ export function AdminOrders({
                                 {formatVnd(item.unitPriceSnapshot)}
                               </td>
                               <td className="py-3 px-3 text-center">
-                                <div className="inline-flex items-center gap-1.5 bg-[#1d2340] border border-[#2f375e] rounded-xl px-2 py-1">
+                                <div className="inline-flex items-center gap-1 bg-[#1d2340] border border-[#2f375e] rounded-xl p-1">
                                   <button
                                     type="button"
-                                    className="w-5 h-5 rounded bg-white/10 hover:bg-white/20 text-white flex items-center justify-center font-bold cursor-pointer transition"
+                                    className="w-5 h-5 rounded bg-white/10 hover:bg-white/20 text-white flex items-center justify-center font-bold cursor-pointer transition disabled:opacity-30"
                                     onClick={() => handleAdminQtyChange(item.id, Math.max(1, item.quantity - 1))}
+                                    disabled={item.quantity <= 1}
                                   >
                                     -
                                   </button>
-                                  <span className="font-mono font-black text-white px-1.5 text-xs">
-                                    {item.quantity}
-                                  </span>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="10000"
+                                    className="w-12 text-center bg-transparent font-mono font-black text-white px-1 text-xs focus:outline-none focus:bg-white/10 rounded"
+                                    value={item.quantity}
+                                    onChange={(e) => {
+                                      const val = parseInt(e.target.value, 10);
+                                      if (!isNaN(val) && val > 0) {
+                                        handleAdminQtyChange(item.id, val);
+                                      }
+                                    }}
+                                  />
                                   <button
                                     type="button"
                                     className="w-5 h-5 rounded bg-white/10 hover:bg-white/20 text-white flex items-center justify-center font-bold cursor-pointer transition"

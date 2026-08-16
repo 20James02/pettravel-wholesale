@@ -73,7 +73,9 @@ async def get_user_permissions(db: AsyncSession, user_id: str) -> list[str]:
 
 
 async def list_users(db: AsyncSession) -> list[dict[str, Any]]:
-    result = await db.execute(text(f"{_USER_PROJECTION} order by u.created_at desc, u.id"))
+    result = await db.execute(
+        text(f"{_USER_PROJECTION} where u.status != 'disabled' order by u.created_at desc, u.id")
+    )
     return [dict(row) for row in result.mappings().all()]
 
 

@@ -141,3 +141,42 @@ async def get_user_by_id(user_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản đang hoạt động.")
     permissions = await get_user_permissions(db, user_id)
     return _user_response(user, permissions)
+
+
+@router.delete("/{user_id}", response_model=Dict[str, Any])
+async def delete_app_user(user_id: str, db: AsyncSession = Depends(get_db)):
+    user = await find_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Tài khoản không tồn tại.")
+
+    # Không cho phép xóa Super Admin
+    if user.get("role") == "super_admin":
+        raise HTTPException(
+            status_code=400,
+            detail="Không thể xóa tài khoản Quản trị viên cấp cao nhất (Super Admin)."
+        )
+
+    # 1. Thu hồi toàn bộ vai trò của user
+    await db.execute(text("delete from user_roles where user_id = :user_id"), {"user_id": user_id})
+
+    # 2. Thử xóa hoàn toàn, nếu có ràng buộc khóa ngoại (lịch sử đơn hàng, kế toán) thì chuyển sang soft-delete
+    try:
+        async with db.begin_nested():
+            await db.execute(text("delete from app_users where id = :user_id"), {"user_id": user_id})
+        await db.commit()
+        return {"status": "success", "message": f"Đã xóa vĩnh viễn tài khoản {user['full_name']}."}
+    except Exception:
+        random_suffix = uuid.uuid4().hex[:8]
+        anonymized_email = f"deleted_{random_suffix}_{user['email']}"
+        await db.execute(
+            text("""update app_users set
+                status = 'disabled',
+                email = :email,
+                phone = null,
+                password_hash = 'disabled'
+                where id = :user_id"""),
+            {"user_id": user_id, "email": anonymized_email},
+        )
+        await db.commit()
+        return {"status": "success", "message": f"Đã thu hồi quyền và xóa tài khoản {user['full_name']} khỏi hệ thống."}
+

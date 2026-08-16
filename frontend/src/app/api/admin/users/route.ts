@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requirePermission, requireSameOrigin } from "@/server/auth";
-import { createAppUser, getAppUsers } from "@/server/db";
+import { createAppUser, deleteAppUser, getAppUsers } from "@/server/db";
 import {
   emailSchema,
   fullNameSchema,
@@ -81,3 +81,41 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
+
+export async function DELETE(request: Request) {
+  let currentUser;
+  try {
+    requireSameOrigin(request);
+    currentUser = await requirePermission("rbac.write");
+  } catch (resp) {
+    if (resp instanceof Response) return resp;
+    return NextResponse.json({ error: "Lỗi xác thực." }, { status: 403 });
+  }
+
+  // Chỉ cho phép Super Admin (quyền cao nhất) thực hiện xóa tài khoản
+  if (currentUser.role !== "super_admin") {
+    return NextResponse.json(
+      { error: "Chỉ tài khoản Quản trị viên cấp cao nhất (Super Admin) mới có quyền xóa tài khoản." },
+      { status: 403 }
+    );
+  }
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get("id");
+    if (!userId) {
+      return NextResponse.json({ error: "Thiếu mã định danh tài khoản (id)." }, { status: 400 });
+    }
+
+    if (userId === currentUser.id) {
+      return NextResponse.json({ error: "Không thể xóa tài khoản của chính bạn." }, { status: 400 });
+    }
+
+    const res = await deleteAppUser(userId);
+    return NextResponse.json({ success: true, message: res.message || "Đã xóa tài khoản thành công." });
+  } catch (error) {
+    const msg = getValidationErrorMessage(error, "Không thể xóa tài khoản.");
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
+}
+

@@ -152,3 +152,10 @@ export async function updateUserProfile(
     })
   });
 }
+
+export async function deleteAppUser(id: string): Promise<{ status: string; message: string }> {
+  return backendFetch(`/api/v1/users/${id}`, {
+    method: "DELETE"
+  });
+}
+

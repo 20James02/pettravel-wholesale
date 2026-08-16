@@ -61,54 +61,54 @@ const customerOrderUpdateSchema = z.object({
 });
 
 const adminOrderItemSchema = z.object({
-  id: idSchema,
-  productCode: z.string().trim().min(1, "Thiếu mã sản phẩm.").max(80, "Mã sản phẩm quá dài."),
-  productName: shortTextSchema("Tên sản phẩm", 1, 180),
+  id: z.string().trim().min(1),
+  productCode: z.string().trim().min(1, "Thiếu mã sản phẩm.").max(80, "Mã sản phẩm quá dài.").nullish(),
+  productName: z.string().trim().nullish(),
   variantSku: z.string().trim().min(1, "Thiếu SKU phân loại.").max(120, "SKU phân loại quá dài."),
-  variantLabel: shortTextSchema("Tên phân loại", 1, 120),
+  variantLabel: z.string().trim().nullish(),
   quantity: z.number().int("Số lượng phải là số nguyên.").positive("Số lượng phải lớn hơn 0.").max(10_000),
-  unitPriceSnapshot: vndAmountSchema("Đơn giá"),
-  supplierId: idSchema
+  unitPriceSnapshot: z.number().int().nonnegative("Đơn giá phải là số không âm."),
+  supplierId: z.string().nullish()
 });
 
 const adminQuoteAdjustmentSchema = z.object({
-  id: idSchema,
+  id: z.string().trim().min(1),
   type: z.enum(["discount", "free_shipping", "offer", "shipping_fee"]),
-  label: shortTextSchema("Tên điều chỉnh", 1, 160),
+  label: z.string().trim().min(1).max(160),
   amount: z.number().int("Số tiền điều chỉnh phải là số nguyên VND.").min(-10_000_000_000).max(10_000_000_000),
   requiresApproval: z.boolean(),
-  approvedBy: idSchema.optional()
+  approvedBy: z.string().nullish()
 });
 
 const adminQuoteSchema = z.object({
-  id: idSchema,
+  id: z.string().trim().min(1),
   version: z.number().int().positive(),
   status: z.enum(["draft", "published", "accepted", "superseded"]),
-  subtotal: vndAmountSchema("Tạm tính"),
+  subtotal: z.number().int().nonnegative(),
   adjustments: z.array(adminQuoteAdjustmentSchema).max(50, "Tối đa 50 điều chỉnh trên một báo giá."),
-  finalTotal: vndAmountSchema("Tổng cuối"),
-  depositAmount: vndAmountSchema("Số tiền cọc"),
-  codRemaining: vndAmountSchema("COD còn lại"),
-  shippingFeeOption: z.enum(["included", "separate_cod"]).optional(),
+  finalTotal: z.number().int().nonnegative(),
+  depositAmount: z.number().int().nonnegative(),
+  codRemaining: z.number().int().nonnegative(),
+  shippingFeeOption: z.enum(["included", "separate_cod"]).nullish(),
   expiresAt: z.string().min(1, "Thiếu hạn báo giá.")
 });
 
 const adminOrderSchema = z.object({
-  id: idSchema,
+  id: z.string().trim().min(1),
   number: z.string().trim().min(1, "Thiếu số đơn hàng.").max(80, "Số đơn hàng quá dài."),
-  customerName: shortTextSchema("Tên khách hàng", 1, 120),
-  customerCompany: shortTextSchema("Tên công ty", 1, 160),
-  customerId: idSchema,
-  assignedStaffId: idSchema.optional(),
-  assignedStaffName: shortTextSchema("Tên nhân viên", 1, 120).optional(),
+  customerName: z.string().trim().nullish(),
+  customerCompany: z.string().trim().nullish(),
+  customerId: z.string().trim().min(1),
+  assignedStaffId: z.string().nullish(),
+  assignedStaffName: z.string().nullish(),
   commercialStatus: z.enum(["draft", "submitted", "admin_review", "quoted", "customer_accepted", "locked", "cancelled"]),
   paymentStatus: z.enum(["unrequested", "deposit_requested", "deposit_uploaded", "deposit_confirmed", "full_requested", "full_uploaded", "paid", "cod_remaining", "refunded"]),
   fulfillmentStatus: z.enum(["not_started", "supplier_checking", "supplier_confirmed", "packing", "ready_to_ship", "shipped", "delivered"]),
   paymentIntent: z.enum(["deposit_cod", "pay_full"]),
-  invoiceRequested: z.boolean(),
-  recipientName: recipientSchema.shape.recipientName.optional().or(z.literal("")),
-  recipientPhone: phoneSchema.optional().or(z.literal("")),
-  recipientAddress: recipientSchema.shape.recipientAddress.optional().or(z.literal("")),
+  invoiceRequested: z.boolean().default(false),
+  recipientName: z.string().nullish(),
+  recipientPhone: z.string().nullish(),
+  recipientAddress: z.string().nullish(),
   items: z.array(adminOrderItemSchema).min(1, "Đơn hàng phải có ít nhất 1 sản phẩm.").max(200, "Đơn hàng tối đa 200 dòng sản phẩm."),
   quoteVersions: z.array(adminQuoteSchema).max(50, "Tối đa 50 phiên bản báo giá."),
   paymentRequests: z.array(z.unknown()).max(50),

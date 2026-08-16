@@ -566,7 +566,7 @@ export function PetTravelApp() {
   };
 
   // Sync mutated order state back to server database
-  async function syncOrder(updatedOrder: CustomerOrder) {
+  async function syncOrder(updatedOrder: CustomerOrder): Promise<boolean> {
     try {
       const res = await fetch(`/api/orders?id=${updatedOrder.id}`, {
         method: "PUT",
@@ -576,12 +576,17 @@ export function PetTravelApp() {
       if (res.ok) {
         const data = (await res.json()) as { order: CustomerOrder };
         setWorkingOrder(data.order);
+        setAdminOrderItems(data.order.items || []);
         setAllOrders((prev) => prev.map((o) => (o.id === data.order.id ? data.order : o)));
+        return true;
       } else {
-        alert("Không thể lưu trạng thái đơn hàng vào cơ sở dữ liệu.");
+        const errData = (await res.json().catch(() => ({}))) as { error?: string };
+        alert(errData.error || "Không thể lưu trạng thái đơn hàng vào cơ sở dữ liệu.");
+        return false;
       }
     } catch {
       alert("Lỗi kết nối máy chủ khi lưu đơn.");
+      return false;
     }
   }
 
@@ -710,14 +715,16 @@ export function PetTravelApp() {
       .map((item) => (item.id === itemId ? { ...item, quantity: cleanQty } : item))
       .filter((item) => item.quantity > 0);
     setAdminOrderItems(nextItems);
+    setWorkingOrder((prev) => ({ ...prev, items: nextItems }));
     setIsOrderModified(true);
   }
 
   // Publish quote to customer for acceptance
-  async function handlePublishQuote() {
+  async function handlePublishQuote(customNote?: string) {
     if (!workingOrder?.id) return;
     try {
-      const subtotal = adminOrderItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
+      const itemsToQuote = adminOrderItems.length > 0 ? adminOrderItems : (workingOrder.items || []);
+      const subtotal = itemsToQuote.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
       const adjustments = [];
       if (adminDiscount > 0) {
         adjustments.push({
@@ -757,28 +764,39 @@ export function PetTravelApp() {
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
       };
 
+      const newComments = [...workingOrder.comments];
+      if (customNote && customNote.trim()) {
+        newComments.unshift({
+          id: `c_pub_note_${Date.now()}`,
+          author: currentUser?.name || "Admin",
+          audience: "customer_visible",
+          message: customNote.trim(),
+          createdAt: new Date().toISOString()
+        });
+      }
+      newComments.unshift({
+        id: `c_pub_${Date.now()}`,
+        author: currentUser?.name || "Operator",
+        audience: "customer_visible",
+        message: `Nhân viên đã thẩm định chi phí sỉ. Bản báo giá số ${nextVersion} đã phát hành: Giá sỉ ${formatVnd(subtotal)}, giảm giá ${formatVnd(adminDiscount)}, phí ship ${formatVnd(shippingFeeOption === "included" ? adminShippingFee : 0)}. Tổng giá trị đơn: ${formatVnd(finalTotal)}. Tiền cọc tối thiểu: ${formatVnd(depositAmount)}.`,
+        createdAt: new Date().toISOString()
+      });
+
       const updatedOrder: CustomerOrder = {
         ...workingOrder,
         commercialStatus: "quoted",
-        items: adminOrderItems.map((item) => ({ ...item })),
+        items: itemsToQuote.map((item) => ({ ...item })),
         quoteVersions: [...workingOrder.quoteVersions.map((q) => ({ ...q, status: "superseded" as const })), newQuote],
-        comments: [
-          {
-            id: `c_pub_${Date.now()}`,
-            author: currentUser?.name || "Operator",
-            audience: "customer_visible",
-            message: `Nhân viên đã thẩm định chi phí sỉ. Bản báo giá số ${nextVersion} đã phát hành: Giá sỉ ${formatVnd(subtotal)}, giảm giá ${formatVnd(adminDiscount)}, phí ship ${formatVnd(shippingFeeOption === "included" ? adminShippingFee : 0)}. Tổng giá trị đơn: ${formatVnd(finalTotal)}. Tiền cọc tối thiểu: ${formatVnd(depositAmount)}.`,
-            createdAt: new Date().toISOString()
-          },
-          ...workingOrder.comments
-        ],
+        comments: newComments,
         updatedAt: new Date().toISOString()
       };
 
-      await syncOrder(updatedOrder);
-      setIsOrderModified(false);
-      setIsManagerApproved(false);
-      alert("Đã phát hành báo giá chính thức cho đại lý!");
+      const success = await syncOrder(updatedOrder);
+      if (success) {
+        setIsOrderModified(false);
+        setIsManagerApproved(false);
+        alert("Đã phát hành báo giá chính thức cho đại lý!");
+      }
     } catch {
       alert("Không thể phát hành báo giá.");
     }
@@ -1481,6 +1499,7 @@ export function PetTravelApp() {
             allOrders={allOrders}
             workingOrder={workingOrder}
             currentUser={currentUser}
+            userList={userList}
             suppliers={suppliers}
             allProducts={allProducts}
             allCategories={allCategories}
@@ -1504,6 +1523,7 @@ export function PetTravelApp() {
             selectOrder={selectOrder}
             setSelectedOrderId={setSelectedOrderId}
             setWorkingOrder={setWorkingOrder}
+            syncOrder={syncOrder}
             handleAdminQtyChange={handleAdminQtyChange}
             handlePublishQuote={handlePublishQuote}
             confirmDeposit={confirmDeposit}
@@ -1572,7 +1592,7 @@ export function PetTravelApp() {
         )}
 
         {activeTab === "admin_users" && isAdmin && (
-          <AdminUsers isAdmin={isAdmin} userList={userList} fetchUsers={fetchUsers} />
+          <AdminUsers isAdmin={isAdmin} currentUser={currentUser} userList={userList} fetchUsers={fetchUsers} />
         )}
       </section>
 

@@ -9,6 +9,7 @@ export function getMissingOrderPermissions(
   after: CustomerOrder,
   user: UserAccount
 ): PermissionKey[] {
+  if (user.role === "super_admin") return [];
   const required = new Set<PermissionKey>();
 
   if (
