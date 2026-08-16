@@ -125,6 +125,7 @@ export interface OrderItem {
   productName: string;
   variantSku: string;
   variantLabel: string;
+  variantImage?: string;
   quantity: number;
   unitPriceSnapshot: number;
   supplierId: string;
@@ -221,8 +222,19 @@ export interface CustomerOrder {
   recipientName?: string;
   recipientPhone?: string;
   recipientAddress?: string;
+  customerTaxCode?: string;
+  customerNote?: string;
   comments: OrderComment[];
   updatedAt: string;
+}
+
+export interface PromotionTier {
+  id: string;
+  minOrderValue: number;
+  discountPercent: number;
+  isFreeShipping: boolean;
+  giftName?: string;
+  description?: string;
 }
 
 export interface AdminPolicy {
@@ -230,6 +242,10 @@ export interface AdminPolicy {
   defaultDepositRate: number;
   maxOperatorDiscountRate: number;
   requireManagerApprovalAbove: number;
+  minWholesaleOrderValue?: number;
+  tiers?: PromotionTier[];
+  giftThreshold?: number;
+  giftName?: string;
 }
 
 export type AccountingPeriodStatus = "open" | "closed";

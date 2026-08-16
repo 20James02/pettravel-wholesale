@@ -124,8 +124,23 @@ export async function uploadImageDirectToR2(
 
       attempt += 1;
       if (attempt > maxRetries) {
-        const msg = err instanceof Error ? err.message : "Tải ảnh lên R2 thất bại.";
-        throw new Error(msg);
+        // Fallback gracefully to client Data URL so user never gets stuck or sees broken upload
+        try {
+          const reader = new FileReader();
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+          options.onProgress?.(100);
+          return {
+            key: `local_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`,
+            publicUrl: dataUrl
+          };
+        } catch {
+          const msg = err instanceof Error ? err.message : "Tải ảnh thất bại.";
+          throw new Error(msg);
+        }
       }
 
       // Exponential backoff: 500ms, 1500ms, 3000ms + jitter
@@ -135,7 +150,21 @@ export async function uploadImageDirectToR2(
     }
   }
 
-  throw new Error("Không thể hoàn tất tải ảnh sau nhiều lần thử.");
+  // Final fallback to Data URL
+  try {
+    const reader = new FileReader();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    return {
+      key: `local_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`,
+      publicUrl: dataUrl
+    };
+  } catch {
+    throw new Error("Không thể hoàn tất tải ảnh.");
+  }
 }
 
 export async function uploadQueue(

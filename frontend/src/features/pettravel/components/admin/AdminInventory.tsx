@@ -1,6 +1,18 @@
 import { useState } from "react";
 import Image from "next/image";
-import { AlertTriangle, Boxes, PackageCheck, RefreshCw, WalletCards } from "lucide-react";
+import {
+  AlertTriangle,
+  Boxes,
+  PackageCheck,
+  RefreshCw,
+  WalletCards,
+  Check,
+  CheckSquare,
+  Square,
+  Trash2,
+  Ban,
+  Edit2
+} from "lucide-react";
 import type { Product, Supplier, OperationsOverview, ProductVariant, OperationsDocumentType } from "@/lib/domain";
 import { formatVnd } from "@/lib/money";
 import { StatusPill } from "../ui/StatusPill";
@@ -92,6 +104,117 @@ export function AdminInventory({
       stock_adjustment: "Kiểm kê / điều chỉnh"
     };
     return labels[type];
+  };
+
+  // --- BULK SELECTION & INLINE STOCK EDITING STATES ---
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  const [tempVariantStock, setTempVariantStock] = useState<Record<string, number>>({});
+  const [isSavingStock, setIsSavingStock] = useState<Record<string, boolean>>({});
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3000);
+  };
+
+  const handleSaveVariantStock = async (product: Product, variantId: string) => {
+    const newStock = tempVariantStock[variantId];
+    if (newStock === undefined || newStock < 0) return;
+
+    setIsSavingStock((prev) => ({ ...prev, [variantId]: true }));
+    try {
+      const updatedVariants = product.variants.map((v) =>
+        v.id === variantId ? { ...v, stock: newStock } : v
+      );
+      const res = await fetch("/api/products", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...product, variants: updatedVariants })
+      });
+      if (res.ok) {
+        await fetchProducts();
+        setTempVariantStock((prev) => {
+          const next = { ...prev };
+          delete next[variantId];
+          return next;
+        });
+        showToast("Đã lưu tồn kho thành công!");
+      } else {
+        alert("Lỗi khi lưu tồn kho.");
+      }
+    } catch {
+      alert("Lỗi kết nối máy chủ.");
+    } finally {
+      setIsSavingStock((prev) => ({ ...prev, [variantId]: false }));
+    }
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedProductIds.size === allProducts.length) {
+      setSelectedProductIds(new Set());
+    } else {
+      setSelectedProductIds(new Set(allProducts.map((p) => p.id)));
+    }
+  };
+
+  const handleToggleSelectProduct = (id: string) => {
+    setSelectedProductIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkOutOfStock = async () => {
+    if (selectedProductIds.size === 0) return;
+    if (!confirm(`Bạn có chắc chắn muốn chuyển ${selectedProductIds.size} sản phẩm đã chọn sang trạng thái "Tạm hết hàng" (tồn kho = 0)?`)) return;
+
+    for (const prodId of selectedProductIds) {
+      const prod = allProducts.find((p) => p.id === prodId);
+      if (!prod) continue;
+      const zeroVariants = prod.variants.map((v) => ({ ...v, stock: 0 }));
+      await fetch("/api/products", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...prod, variants: zeroVariants })
+      });
+    }
+    await fetchProducts();
+    setSelectedProductIds(new Set());
+    showToast("Đã chuyển các sản phẩm đã chọn sang Tạm hết hàng!");
+  };
+
+  const handleBulkInStock = async () => {
+    if (selectedProductIds.size === 0) return;
+    for (const prodId of selectedProductIds) {
+      const prod = allProducts.find((p) => p.id === prodId);
+      if (!prod) continue;
+      const refilledVariants = prod.variants.map((v) => ({ ...v, stock: v.stock > 0 ? v.stock : 50 }));
+      await fetch("/api/products", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...prod, variants: refilledVariants })
+      });
+    }
+    await fetchProducts();
+    setSelectedProductIds(new Set());
+    showToast("Đã bổ sung tồn kho cho các sản phẩm đã chọn!");
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedProductIds.size === 0) return;
+    if (!confirm(`CẢNH BÁO: Bạn có chắc chắn muốn xóa vĩnh viễn ${selectedProductIds.size} sản phẩm đã chọn?`)) return;
+
+    for (const prodId of selectedProductIds) {
+      await fetch(`/api/products?id=${prodId}`, { method: "DELETE" });
+    }
+    await fetchProducts();
+    setSelectedProductIds(new Set());
+    showToast("Đã xóa các sản phẩm đã chọn!");
   };
 
   // --- LOGIC HANDLERS ---
@@ -384,103 +507,261 @@ export function AdminInventory({
             </button>
           </div>
 
+          {/* Toast Notification */}
+          {toastMsg && (
+            <div className="fixed bottom-5 right-5 z-50 bg-emerald-600 text-white px-4 py-2.5 rounded-2xl shadow-xl font-bold text-xs flex items-center gap-2 animate-fade-in">
+              <Check size={16} />
+              <span>{toastMsg}</span>
+            </div>
+          )}
+
+          {/* Bulk Action Toolbar */}
+          {selectedProductIds.size > 0 && (
+            <div className="bg-[#1f2648] border border-indigo-500/40 p-3 rounded-2xl flex flex-wrap items-center justify-between gap-3 animate-fade-in shadow-lg">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-black flex items-center justify-center">
+                  {selectedProductIds.size}
+                </span>
+                <span className="text-xs font-bold text-white">
+                  Đã chọn {selectedProductIds.size} sản phẩm
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleBulkOutOfStock}
+                  className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition"
+                >
+                  <Ban size={14} />
+                  <span>Tạm hết hàng</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleBulkInStock}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition"
+                >
+                  <PackageCheck size={14} />
+                  <span>Còn hàng (+50)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleBulkDelete}
+                  className="px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition"
+                >
+                  <Trash2 size={14} />
+                  <span>Xóa đã chọn</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="bg-[#171b30] p-4 rounded-2xl border border-[#272e4e] overflow-x-auto w-full">
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-[#293154] text-[10px] text-gray-400 uppercase font-bold">
-                  <th className="py-2.5 px-2">Mã / Ảnh</th>
-                  <th className="py-2.5 px-2">Tên sản phẩm sỉ</th>
-                  <th className="py-2.5 px-2">Phân loại</th>
-                  <th className="py-2.5 px-2">Quy cách & Giá sỉ / Kho</th>
-                  <th className="py-2.5 px-2 text-right">Thao tác</th>
+                  <th className="py-2.5 px-2 w-10 text-center">
+                    <button
+                      type="button"
+                      onClick={handleToggleSelectAll}
+                      className="cursor-pointer text-gray-400 hover:text-white flex items-center justify-center"
+                    >
+                      {selectedProductIds.size === allProducts.length && allProducts.length > 0 ? (
+                        <CheckSquare size={16} className="text-indigo-400" />
+                      ) : (
+                        <Square size={16} />
+                      )}
+                    </button>
+                  </th>
+                  <th className="py-2.5 px-2 w-20">Mã</th>
+                  <th className="py-2.5 px-2 w-20">Ảnh chính</th>
+                  <th className="py-2.5 px-2">Tên sản phẩm sỉ & Danh mục</th>
+                  <th className="py-2.5 px-2">Phân loại (Ảnh · Giá · Tồn kho)</th>
+                  <th className="py-2.5 px-2 text-right w-24">Thao tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#232a48]">
                 {allProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="muted text-xs text-center py-8 font-semibold">
+                    <td colSpan={6} className="muted text-xs text-center py-8 font-semibold">
                       Chưa có sản phẩm nào được tạo.
                     </td>
                   </tr>
                 ) : (
-                  allProducts.map((p) => (
-                    <tr key={p.id}>
-                      <td className="w-16">
-                        <div className="relative w-12 h-12 rounded-xl overflow-hidden border bg-orange-50 flex items-center justify-center p-1 shrink-0">
-                          <Image src={p.imageUrl} alt={p.name} fill sizes="48px" className="object-contain p-1" />
-                        </div>
-                        <span className="text-[10px] font-mono font-bold text-orange-950 block mt-1 text-center">{p.code}</span>
-                      </td>
-                      <td>
-                        <strong className="text-sm font-bold text-[#331B08]">{p.name}</strong>
-                        <span className="block text-[10px] bg-orange-100 text-orange-800 rounded-full px-2 py-0.5 w-max font-bold mt-1">
-                          {p.category}
-                        </span>
-                      </td>
-                      <td className="text-xs font-semibold text-[#78350F]">{p.variants.length} phân loại</td>
-                      <td>
-                        <div className="flex flex-col gap-1.5">
-                          {p.variants.map((v) => (
-                            <div
-                              key={v.id}
-                              className="text-xs bg-[#FFFDF9] border border-orange-100 rounded-xl p-1.5 flex justify-between gap-4"
+                  allProducts.map((p) => {
+                    const isSelected = selectedProductIds.has(p.id);
+                    const totalStock = p.variants.reduce((sum, v) => sum + v.stock, 0);
+
+                    return (
+                      <tr key={p.id} className={`hover:bg-[#1d2340]/60 transition ${isSelected ? "bg-[#22294e]/50" : ""}`}>
+                        {/* 1. Checkbox */}
+                        <td className="py-3 px-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSelectProduct(p.id)}
+                            className="cursor-pointer text-gray-400 hover:text-white flex items-center justify-center mx-auto"
+                          >
+                            {isSelected ? (
+                              <CheckSquare size={16} className="text-indigo-400" />
+                            ) : (
+                              <Square size={16} />
+                            )}
+                          </button>
+                        </td>
+
+                        {/* 2. Mã sản phẩm */}
+                        <td className="py-3 px-2 font-mono font-bold text-indigo-300 text-xs">
+                          {p.code}
+                        </td>
+
+                        {/* 3. Ảnh chính */}
+                        <td className="py-3 px-2">
+                          <div className="relative w-12 h-12 rounded-xl overflow-hidden border border-[#313b63] bg-[#111425] flex items-center justify-center shrink-0 group">
+                            <Image src={p.imageUrl || "/product-food.svg"} alt={p.name} fill sizes="48px" className="object-contain p-1" />
+                          </div>
+                        </td>
+
+                        {/* 4. Tên sản phẩm & Danh mục */}
+                        <td className="py-3 px-2">
+                          <strong className="text-xs font-bold text-white block leading-snug">{p.name}</strong>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full px-2 py-0.5 font-bold">
+                              {p.category}
+                            </span>
+                            {totalStock === 0 ? (
+                              <span className="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-full px-2 py-0.5 font-bold">
+                                Tạm hết hàng
+                              </span>
+                            ) : (
+                              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full px-2 py-0.5 font-bold">
+                                Còn {totalStock} sp
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* 5. Phân loại & Chỉnh sửa tồn kho trực tiếp */}
+                        <td className="py-3 px-2">
+                          <div className="flex flex-col gap-1.5">
+                            {p.variants.map((v) => {
+                              const draftStock = tempVariantStock[v.id];
+                              const isEdited = draftStock !== undefined && draftStock !== v.stock;
+                              const isSaving = isSavingStock[v.id];
+
+                              return (
+                                <div
+                                  key={v.id}
+                                  className="text-xs bg-[#121528] border border-[#262e4e] rounded-xl p-2 flex flex-wrap items-center justify-between gap-3"
+                                >
+                                  {/* Left: Variant Image + Label & SKU */}
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div className="relative w-8 h-8 rounded-lg overflow-hidden border border-[#2b3558] bg-[#1a1f38] shrink-0">
+                                      <Image
+                                        src={v.imageUrl || p.imageUrl || "/product-food.svg"}
+                                        alt={v.label}
+                                        fill
+                                        sizes="32px"
+                                        className="object-contain p-0.5"
+                                      />
+                                    </div>
+                                    <div className="flex flex-col min-w-0">
+                                      <span className="font-bold text-gray-200 truncate">{v.label}</span>
+                                      <span className="text-[10px] text-gray-400 font-mono">{v.sku}</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Right: Price & Inline Stock Editor */}
+                                  <div className="flex items-center gap-3">
+                                    <div className="text-right">
+                                      <span className="font-black text-xs font-mono text-emerald-400 block">
+                                        {formatVnd(v.wholesalePrice ?? 0)}
+                                      </span>
+                                      <span className="text-[10px] text-gray-400">
+                                        Sỉ từ: {v.minOrderQty}
+                                      </span>
+                                    </div>
+
+                                    {/* Inline Stock Input with instant confirmation button */}
+                                    <div className="flex items-center gap-1.5 bg-[#191e36] px-2 py-1 rounded-xl border border-[#2f3962]">
+                                      <span className="text-[10px] text-gray-400 font-bold">Kho:</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        className="w-14 bg-[#0e1122] text-white font-mono font-bold text-xs px-1.5 py-0.5 rounded border border-[#3b4776] text-center focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                                        value={draftStock !== undefined ? draftStock : v.stock}
+                                        onChange={(e) => {
+                                          const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                                          setTempVariantStock((prev) => ({ ...prev, [v.id]: val }));
+                                        }}
+                                      />
+                                      {isEdited && (
+                                        <button
+                                          type="button"
+                                          disabled={isSaving}
+                                          onClick={() => handleSaveVariantStock(p, v.id)}
+                                          className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] flex items-center gap-1 cursor-pointer transition shadow-md animate-pulse shrink-0"
+                                          title="Nhấp để xác nhận cập nhật số lượng tồn kho"
+                                        >
+                                          {isSaving ? "..." : "✓ Lưu"}
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </td>
+
+                        {/* 6. Thao tác */}
+                        <td className="py-3 px-2 text-right">
+                          <div className="flex justify-end gap-1.5">
+                            <button
+                              type="button"
+                              className="px-2.5 py-1 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                              onClick={() => {
+                                setEditingProduct(p);
+                                setFormCode(p.code);
+                                setFormName(p.name);
+                                setFormCategory(p.category);
+                                setFormProductSupplier(p.variants[0]?.supplierId || "");
+                                setFormImage(p.imageUrl);
+                                setFormImages(p.images ?? [p.imageUrl]);
+                                setFormDimensions(p.dimensions ?? "");
+                                setFormWeight(p.weight ?? 0);
+                                setFormDescription(p.description ?? "");
+                                setFormTags(p.tags.join(", "));
+                                setFormVariants(syncVariantSkus(p.code, p.variants.map((v) => ({ ...v }))));
+                                setShowProductForm(true);
+                              }}
                             >
-                              <span>
-                                <strong>{v.label}</strong> ({v.sku})
-                              </span>
-                              <span className="muted font-bold text-orange-600">
-                                {formatVnd(v.wholesalePrice ?? 0)}{" "}
-                                <span className="text-[10px] text-gray-500">
-                                  (Sỉ từ: {v.minOrderQty} · Kho: {v.stock})
-                                </span>
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            className="tab-button text-xs py-1 px-3 border-orange-200 bg-orange-50/50 hover:bg-orange-100 cursor-pointer"
-                            onClick={() => {
-                              setEditingProduct(p);
-                              setFormCode(p.code);
-                              setFormName(p.name);
-                              setFormCategory(p.category);
-                              setFormProductSupplier(p.variants[0]?.supplierId || "");
-                              setFormImage(p.imageUrl);
-                              setFormImages(p.images ?? [p.imageUrl]);
-                              setFormDimensions(p.dimensions ?? "");
-                              setFormWeight(p.weight ?? 0);
-                              setFormDescription(p.description ?? "");
-                              setFormTags(p.tags.join(", "));
-                              setFormVariants(syncVariantSkus(p.code, p.variants.map((v) => ({ ...v }))));
-                              setShowProductForm(true);
-                            }}
-                          >
-                            Sửa
-                          </button>
-                          <button
-                            type="button"
-                            className="tab-button text-xs py-1 px-3 text-red-600 border-red-200 bg-red-50/30 hover:bg-red-50 cursor-pointer"
-                            onClick={async () => {
-                              if (confirm(`Bạn có chắc chắn muốn xóa sản phẩm ${p.name}?`)) {
-                                const res = await fetch(`/api/products?id=${p.id}`, { method: "DELETE" });
-                                if (res.ok) {
-                                  await fetchProducts();
-                                } else {
-                                  alert("Lỗi khi xóa sản phẩm.");
+                              <Edit2 size={12} />
+                              <span>Sửa</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="px-2.5 py-1 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                              onClick={async () => {
+                                if (confirm(`Bạn có chắc chắn muốn xóa sản phẩm ${p.name}?`)) {
+                                  const res = await fetch(`/api/products?id=${p.id}`, { method: "DELETE" });
+                                  if (res.ok) {
+                                    await fetchProducts();
+                                  } else {
+                                    alert("Lỗi khi xóa sản phẩm.");
+                                  }
                                 }
-                              }
-                            }}
-                          >
-                            Xóa
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                              }}
+                            >
+                              <Trash2 size={12} />
+                              <span>Xóa</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

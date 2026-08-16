@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Users, UserPlus, UserCheck, X } from "lucide-react";
+import { Users, UserPlus, UserCheck, X, ShieldCheck } from "lucide-react";
 import type { ApiUser } from "../../types";
 import { fullNameSchema, emailSchema, phoneSchema, passwordSchema, shortTextSchema } from "@/lib/validation";
 
@@ -141,6 +141,130 @@ export function AdminUsers({ isAdmin, userList, fetchUsers }: AdminUsersProps) {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* RBAC PERMISSION MATRIX TABLE */}
+      <div className="flex flex-col gap-3 mt-4">
+        <div className="flex items-center gap-2 border-b border-[#222744] pb-3">
+          <ShieldCheck size={18} className="text-indigo-400" />
+          <div className="flex flex-col">
+            <span className="font-extrabold text-sm text-white">Bảng Ma Trận Luật Phân Quyền Theo Cấp Bậc Tài Khoản (RBAC)</span>
+            <span className="text-xs text-gray-400 font-medium">Chi tiết quyền hạn vận hành và phê duyệt trên 7 cấp độ tài khoản</span>
+          </div>
+        </div>
+
+        <div className="bg-[#171b30] p-4 rounded-2xl border border-[#272e4e] overflow-x-auto w-full">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-[#293154] text-[10px] text-gray-400 uppercase font-bold">
+                <th className="py-3 px-3 min-w-[200px]">Nhóm Quyền Hạn</th>
+                <th className="py-3 px-2 text-center text-rose-300">Super Admin</th>
+                <th className="py-3 px-2 text-center text-amber-300">Quản lý (Manager)</th>
+                <th className="py-3 px-2 text-center text-indigo-300">Nhân viên chốt đơn</th>
+                <th className="py-3 px-2 text-center text-emerald-300">Kế toán viên</th>
+                <th className="py-3 px-2 text-center text-sky-300">Thủ kho</th>
+                <th className="py-3 px-2 text-center text-purple-300">Chủ đại lý B2B</th>
+                <th className="py-3 px-2 text-center text-gray-400">NV Đại lý</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#232a48]">
+              {/* 1. Kho & Sản phẩm */}
+              <tr className="hover:bg-[#1d2340]/60">
+                <td className="py-3 px-3 font-bold text-white">
+                  📦 Xem danh mục & Giá sỉ
+                </td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xem giá sỉ</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xem giá vốn/sỉ</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xem tồn kho</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xem giá sỉ</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xem giá sỉ</td>
+              </tr>
+
+              <tr className="hover:bg-[#1d2340]/60">
+                <td className="py-3 px-3 font-bold text-white">
+                  ✏️ Tạo, sửa, xóa Sản phẩm & Tồn kho
+                </td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-indigo-400 font-bold">✓ Nhập/Xuất kho</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+              </tr>
+
+              {/* 2. Đơn hàng & Chiết khấu */}
+              <tr className="hover:bg-[#1d2340]/60">
+                <td className="py-3 px-3 font-bold text-white">
+                  📑 Lên đơn sỉ & Chốt báo giá
+                </td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Duyệt mọi đơn</td>
+                <td className="py-3 px-2 text-center text-indigo-400 font-bold">✓ Chốt đơn sỉ</td>
+                <td className="py-3 px-2 text-center text-gray-400">Xem đơn</td>
+                <td className="py-3 px-2 text-center text-gray-400">Xem đóng gói</td>
+                <td className="py-3 px-2 text-center text-purple-400 font-bold">✓ Đặt đơn sỉ</td>
+                <td className="py-3 px-2 text-center text-gray-400">Tạo giỏ hàng</td>
+              </tr>
+
+              <tr className="hover:bg-[#1d2340]/60">
+                <td className="py-3 px-3 font-bold text-white">
+                  ⚡ Giảm giá & Duyệt chiết khấu lớn (&gt;8%)
+                </td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Phê duyệt tối cao</td>
+                <td className="py-3 px-2 text-center text-amber-400 font-bold">⚡ Duyệt đến 15%</td>
+                <td className="py-3 px-2 text-center text-indigo-400 font-bold">Tối đa 8% (500k)</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+              </tr>
+
+              {/* 3. Kế toán & Sổ cái */}
+              <tr className="hover:bg-[#1d2340]/60">
+                <td className="py-3 px-3 font-bold text-white">
+                  💰 Xác nhận tiền cọc & Thu đủ
+                </td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xác nhận cọc</td>
+                <td className="py-3 px-2 text-center text-indigo-400 font-bold">Nhận ủy nhiệm chi</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xác nhận tiền về</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-purple-400">Tải bill chuyển khoản</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+              </tr>
+
+              <tr className="hover:bg-[#1d2340]/60">
+                <td className="py-3 px-3 font-bold text-white">
+                  📊 Hạch toán Sổ cái (112, 131, 511, 632)
+                </td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xem & Kiểm tra</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Hạch toán & Khóa sổ</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+              </tr>
+
+              {/* 4. Cấu hình & Quản trị */}
+              <tr className="hover:bg-[#1d2340]/60">
+                <td className="py-3 px-3 font-bold text-white">
+                  ⚙️ Cấu hình Bảng giá, Chiết khấu & RBAC
+                </td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
+                <td className="py-3 px-2 text-center text-amber-400 font-bold">Xem & Đề xuất</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Modal Cấp tài khoản mới (Dark Glass Theme) */}

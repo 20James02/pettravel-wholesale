@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import Image from "next/image";
 import {
   ShieldCheck,
   Plus,
-  ArrowUpRight,
   Link as LinkIcon,
   Calendar as CalendarIcon,
   Printer,
@@ -13,7 +13,16 @@ import {
   X,
   CheckCircle2,
   Clock,
-  PackageCheck
+  PackageCheck,
+  MapPin,
+  Building,
+  Phone,
+  FileText,
+  UserCheck,
+  Trash2,
+  Send,
+  Search,
+  Filter
 } from "lucide-react";
 import type { CustomerOrder, Supplier, Product, OrderItem } from "@/lib/domain";
 import type { ApiUser } from "../../types";
@@ -59,7 +68,9 @@ export function AdminOrders({
   allOrders,
   workingOrder,
   currentUser,
+  suppliers = [],
   allProducts,
+  allCategories = [],
   adminDiscount,
   setAdminDiscount,
   adminShippingFee,
@@ -75,7 +86,8 @@ export function AdminOrders({
   handleAdminQtyChange,
   handlePublishQuote,
   confirmDeposit,
-  handlePostOrderAccounting
+  handlePostOrderAccounting,
+  addComment
 }: AdminOrdersProps) {
   const [darkTabFilter, setDarkTabFilter] = useState<"all" | "draft" | "unpaid" | "accepted" | "locked">("all");
   const [showAdjustments, setShowAdjustments] = useState<boolean>(false);
@@ -83,6 +95,13 @@ export function AdminOrders({
   const [isTimelineModalOpen, setIsTimelineModalOpen] = useState<boolean>(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Form & filter states
+  const [quoteCustomerNote, setQuoteCustomerNote] = useState<string>("");
+  const [selectedStaff, setSelectedStaff] = useState<string>("Nguyễn Văn A (Kinh doanh)");
+  const [categoryFilterModal, setCategoryFilterModal] = useState<string>("Tất cả");
+  const [supplierFilterModal, setSupplierFilterModal] = useState<string>("Tất cả");
+  const [searchModalQuery, setSearchModalQuery] = useState<string>("");
 
   // Form states for Add Item modal
   const [selectedProductId, setSelectedProductId] = useState<string>(allProducts[0]?.id || "");
@@ -115,7 +134,8 @@ export function AdminOrders({
 
   const latestQuote = (ord: CustomerOrder) => {
     if (!ord.quoteVersions || ord.quoteVersions.length === 0) {
-      return { finalTotal: 0, subtotal: 0, depositAmount: 0 };
+      const calcSub = ord.items?.reduce((s, i) => s + (i.quantity || 0) * (i.unitPriceSnapshot || 0), 0) || 0;
+      return { finalTotal: calcSub, subtotal: calcSub, depositAmount: Math.round(calcSub * 0.3) };
     }
     return ord.quoteVersions[ord.quoteVersions.length - 1];
   };
@@ -159,6 +179,7 @@ export function AdminOrders({
       productName: prod.name,
       variantSku: variant.sku,
       variantLabel: variant.label,
+      variantImage: variant.imageUrl || prod.imageUrl || "/product-food.svg",
       unitPriceSnapshot: variant.wholesalePrice || 100000,
       quantity: addItemQty,
       supplierId: variant.supplierId || "sup_pettravel"
@@ -174,17 +195,56 @@ export function AdminOrders({
     showToast(`Đã thêm ${addItemQty} × ${variant.label} vào đơn hàng!`);
   };
 
+  // Remove Item from Order Handler
+  const handleRemoveItemFromOrder = (itemId: string) => {
+    const updatedItems = (activeOrder.items || []).filter((i) => i.id !== itemId);
+    setWorkingOrder({
+      ...activeOrder,
+      items: updatedItems
+    });
+    showToast("Đã xóa sản phẩm khỏi đơn hàng!");
+  };
+
+  // Publish Quote with Customer Note
+  const onPublishQuoteWithNote = () => {
+    if (quoteCustomerNote.trim() && addComment) {
+      addComment("customer_visible", quoteCustomerNote.trim());
+    }
+    handlePublishQuote();
+    showToast("Đã gửi báo giá kèm ghi chú đến khách hàng!");
+    setQuoteCustomerNote("");
+  };
+
+  // Filtered Products for Add Item Modal
+  const modalFilteredProducts = useMemo(() => {
+    return allProducts.filter((p) => {
+      const matchCat = categoryFilterModal === "Tất cả" || p.category === categoryFilterModal;
+      const matchSup = supplierFilterModal === "Tất cả" || (p.variants && p.variants.some((v) => v.supplierId === supplierFilterModal));
+      const matchSearch = !searchModalQuery.trim() || p.name.toLowerCase().includes(searchModalQuery.toLowerCase()) || p.code.toLowerCase().includes(searchModalQuery.toLowerCase());
+      return matchCat && matchSup && matchSearch;
+    });
+  }, [allProducts, categoryFilterModal, supplierFilterModal, searchModalQuery]);
+
   return (
     <div className="admin-dark-dock w-full p-4 sm:p-6 lg:p-7 flex flex-col gap-6 animate-fade-in text-xs">
       {/* 1. TOP TABS & VIEW SWITCHER STRIP (Finnova Dark Header) */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#222744] pb-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-extrabold text-white tracking-tight">Quản lý Đơn hàng & Báo giá Sỉ</span>
-          <span className="text-xs text-gray-400 font-semibold">({allOrders.length} đơn hàng)</span>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
+            <PackageCheck size={20} />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-extrabold text-white tracking-tight">
+              Quản Lý Báo Giá & Đơn Hàng Sỉ B2B
+            </span>
+            <span className="text-xs text-gray-400 font-medium">
+              Xử lý báo giá, kiểm tra tồn kho ATP, ghi chú gửi đại lý và phân bổ nhân sự chốt đơn
+            </span>
+          </div>
         </div>
 
-        {/* Dark Filter Pills */}
-        <div className="flex flex-wrap items-center gap-1.5 bg-[#0e1020] p-1 rounded-full border border-[#232742]">
+        {/* Status Filter Tabs */}
+        <div className="flex items-center gap-1.5 bg-[#14182b] p-1 rounded-2xl border border-[#262c4c]">
           <button
             type="button"
             className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
@@ -196,27 +256,21 @@ export function AdminOrders({
           </button>
           <button
             type="button"
-            className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
               darkTabFilter === "draft" ? "bg-[#4f46e5] text-white shadow-sm" : "text-gray-400 hover:text-white"
             }`}
             onClick={() => setDarkTabFilter("draft")}
           >
-            <span>Chờ duyệt</span>
-            <span className="w-4 h-4 rounded-full bg-white/15 text-[10px] flex items-center justify-center">
-              {allOrders.filter((o) => o.commercialStatus === "draft" || o.commercialStatus === "submitted").length}
-            </span>
+            Chờ duyệt
           </button>
           <button
             type="button"
-            className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
               darkTabFilter === "unpaid" ? "bg-[#4f46e5] text-white shadow-sm" : "text-gray-400 hover:text-white"
             }`}
             onClick={() => setDarkTabFilter("unpaid")}
           >
-            <span>Chưa thu</span>
-            <span className="w-4 h-4 rounded-full bg-indigo-400 text-black text-[10px] font-black flex items-center justify-center">
-              ₫
-            </span>
+            Chờ thu tiền
           </button>
           <button
             type="button"
@@ -225,7 +279,7 @@ export function AdminOrders({
             }`}
             onClick={() => setDarkTabFilter("accepted")}
           >
-            Đã chốt
+            Khách đã chốt
           </button>
           <button
             type="button"
@@ -239,10 +293,10 @@ export function AdminOrders({
         </div>
       </div>
 
-      {/* 2. DUAL-PANE WORKSPACE: LEFT LIST (35%) & RIGHT DETAIL (65%) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 min-h-[540px]">
-        {/* === LEFT PANE: INVOICES / ORDERS LIST (4/12 cols) === */}
-        <div className="lg:col-span-4 flex flex-col gap-2.5 max-h-[580px] overflow-y-auto pr-1 admin-dark-scroll">
+      {/* 2. DUAL-PANE WORKSPACE: COMPACT LEFT LIST (25%) & EXPANDED RIGHT DETAIL (75%) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-6 min-h-[560px]">
+        {/* === LEFT PANE: COMPACT ORDER LIST (3/12 cols) === */}
+        <div className="lg:col-span-3 flex flex-col gap-2 max-h-[640px] overflow-y-auto pr-1 admin-dark-scroll">
           {filteredOrders.length === 0 ? (
             <div className="p-8 text-center text-xs text-gray-400 border border-dashed border-[#293050] rounded-2xl bg-[#161a30]">
               Không có đơn hàng nào phù hợp bộ lọc.
@@ -255,59 +309,52 @@ export function AdminOrders({
               return (
                 <div
                   key={ord.id}
-                  className={`p-3.5 rounded-2xl transition-all duration-200 cursor-pointer flex items-center justify-between gap-3 ${
+                  className={`p-3 rounded-2xl transition-all duration-200 cursor-pointer flex flex-col gap-2 ${
                     isSelected
-                      ? "bg-[#4f46e5] text-white shadow-[0_10px_28px_rgba(79,70,229,0.45)] scale-[1.01]"
+                      ? "bg-[#4f46e5] text-white shadow-[0_8px_24px_rgba(79,70,229,0.45)] scale-[1.01]"
                       : "bg-[#181d33] hover:bg-[#1f2542] text-gray-200 border border-[#272e4e]"
                   }`}
                   onClick={() => selectOrder(ord.id)}
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    {/* Avatar Pill */}
-                    <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-xs shrink-0 ${
-                        isSelected ? "bg-white text-indigo-700 shadow-sm" : "bg-[#252b4b] text-indigo-300"
-                      }`}
-                    >
-                      {ord.customerName?.charAt(0) || "U"}
-                    </div>
-
-                    <div className="flex flex-col min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-extrabold text-xs tracking-tight truncate font-mono">
-                          # {ord.number}
-                        </span>
-                        <span
-                          className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                            isSelected
-                              ? "bg-white/20 text-white"
-                              : ord.commercialStatus === "customer_accepted"
-                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                              : ord.commercialStatus === "locked"
-                              ? "bg-sky-500/20 text-sky-300 border border-sky-500/30"
-                              : "bg-gray-700/50 text-gray-300"
-                          }`}
-                        >
-                          {ord.commercialStatus === "customer_accepted"
-                            ? "Accepted"
-                            : ord.commercialStatus === "locked"
-                            ? "Locked"
-                            : "Unsent"}
-                        </span>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div
+                        className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-[10px] shrink-0 ${
+                          isSelected ? "bg-white text-indigo-700 shadow-sm" : "bg-[#252b4b] text-indigo-300"
+                        }`}
+                      >
+                        {ord.customerName?.charAt(0) || "U"}
                       </div>
-                      <span className={`text-[11px] truncate mt-0.5 ${isSelected ? "text-indigo-100" : "text-gray-400"}`}>
-                        {ord.customerCompany || ord.customerName}
+                      <span className="font-extrabold text-xs tracking-tight truncate font-mono">
+                        # {ord.number}
                       </span>
                     </div>
+
+                    <span
+                      className={`text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                        isSelected
+                          ? "bg-white/20 text-white"
+                          : ord.commercialStatus === "customer_accepted"
+                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                          : ord.commercialStatus === "locked"
+                          ? "bg-sky-500/20 text-sky-300 border border-sky-500/30"
+                          : "bg-gray-700/50 text-gray-300"
+                      }`}
+                    >
+                      {ord.commercialStatus === "customer_accepted"
+                        ? "Accepted"
+                        : ord.commercialStatus === "locked"
+                        ? "Locked"
+                        : "Draft"}
+                    </span>
                   </div>
 
-                  {/* Amount */}
-                  <div className="text-right shrink-0">
-                    <div className="font-black text-xs sm:text-sm font-mono tracking-tight">
+                  <div className="flex items-center justify-between gap-2 text-[11px] pt-1 border-t border-white/10">
+                    <span className={`truncate ${isSelected ? "text-indigo-100" : "text-gray-400"}`}>
+                      {ord.customerCompany || ord.customerName}
+                    </span>
+                    <span className="font-mono font-black text-xs shrink-0">
                       {formatVnd(q.finalTotal)}
-                    </div>
-                    <span className={`text-[10px] block ${isSelected ? "text-indigo-200" : "text-gray-400"}`}>
-                      {ord.items.length} SKUs
                     </span>
                   </div>
                 </div>
@@ -316,41 +363,40 @@ export function AdminOrders({
           )}
         </div>
 
-        {/* === RIGHT PANE: DETAILED INSPECTION & ACTION WORKSPACE (8/12 cols) === */}
-        <div className="lg:col-span-8 flex flex-col justify-between bg-[#171b30] rounded-2xl border border-[#272e4e] p-4 sm:p-6 shadow-inner">
+        {/* === RIGHT PANE: DETAILED INSPECTION & ACTION WORKSPACE (9/12 cols) === */}
+        <div className="lg:col-span-9 flex flex-col justify-between bg-[#171b30] rounded-2xl border border-[#272e4e] p-4 sm:p-6 shadow-inner">
           {activeOrder.id ? (
             <div className="flex flex-col gap-5">
-              {/* Header: Invoice Details + Company Name & Logo + Customer Card */}
+              {/* 1. Header: Invoice Title + Company + Customer Card */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#242a49] pb-4">
-                {/* Left: Invoice Number & Status */}
                 <div className="flex flex-col gap-1">
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                    Invoice details
+                    Mã đơn hàng sỉ
                   </span>
                   <div className="flex items-center gap-2.5">
                     <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight font-mono m-0">
                       # {activeOrder.number}
                     </h2>
                     <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
-                      {activeOrder.commercialStatus === "customer_accepted" ? "Accepted" : "Unsent"}
+                      {activeOrder.commercialStatus === "customer_accepted" ? "Khách đã chốt" : "Bản thảo báo giá"}
                     </span>
                   </div>
                 </div>
 
-                {/* Middle: Company Brand */}
+                {/* Company Brand */}
                 <div className="flex flex-col">
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                    Company
+                    Đại lý / Doanh nghiệp
                   </span>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="font-extrabold text-sm sm:text-base text-white">
-                      {activeOrder.customerCompany || "Pet Care Partner"}
+                      {activeOrder.customerCompany || "Pet Care Wholesale Partner"}
                     </span>
                     <Sparkles size={15} className="text-indigo-400" />
                   </div>
                 </div>
 
-                {/* Right: Customer Profile Card */}
+                {/* Customer Profile Card */}
                 <div className="flex items-center gap-2.5 bg-[#1f2544] p-2 pr-3.5 rounded-2xl border border-[#2f375f]">
                   <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center font-black text-white text-xs shadow-sm">
                     {activeOrder.customerName?.charAt(0) || "C"}
@@ -366,72 +412,182 @@ export function AdminOrders({
                 </div>
               </div>
 
-              {/* Itemized Service / Product Cards (3 Columns + Add Item Box) */}
-              <div className="flex flex-col gap-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                    Sản phẩm trong đơn sỉ ({activeOrder.items?.length || 0} items)
+              {/* 2. CUSTOMER DETAILS & ORDER ASSIGNEE STRIP (Cạnh trên chi tiết đơn hàng) */}
+              <div className="bg-[#14182b] p-4 rounded-2xl border border-[#262c4c] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase flex items-center gap-1">
+                    <MapPin size={12} className="text-indigo-400" /> Địa chỉ giao hàng
                   </span>
-                  <button
-                    type="button"
-                    className="text-xs text-indigo-400 hover:text-indigo-300 font-bold cursor-pointer transition flex items-center gap-1"
-                    onClick={() => setShowAdjustments(!showAdjustments)}
-                  >
-                    <SlidersHorizontal size={13} />
-                    <span>{showAdjustments ? "Ẩn điều chỉnh giá" : "Điều chỉnh chiết khấu & VAT"}</span>
-                  </button>
+                  <span className="text-white font-medium line-clamp-2">
+                    {activeOrder.recipientAddress || "123 Nguyễn Trãi, P. Bến Thành, Quận 1, TP.HCM"}
+                  </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {activeOrder.items?.slice(0, 3).map((item, idx) => (
-                    <div
-                      key={item.id || idx}
-                      className="bg-[#202644] hover:bg-[#252c4e] p-3.5 rounded-2xl border border-[#2e375e] transition flex flex-col justify-between min-h-[95px] relative group"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="font-mono font-black text-sm text-white">
-                          {formatVnd(item.unitPriceSnapshot * item.quantity)}
-                        </div>
-                        <ArrowUpRight size={14} className="text-gray-400 group-hover:text-indigo-400 transition" />
-                      </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase flex items-center gap-1">
+                    <Building size={12} className="text-indigo-400" /> Mã số thuế
+                  </span>
+                  <span className="text-white font-mono font-bold">
+                    {activeOrder.customerTaxCode || "0317892345"}
+                  </span>
+                </div>
 
-                      <div className="flex flex-col mt-2">
-                        <span className="text-xs font-bold text-gray-200 truncate">
-                          {item.variantLabel || item.variantSku || item.productName}
-                        </span>
-                        <div className="flex items-center justify-between mt-1 text-[10px] text-gray-400 font-mono">
-                          <span>SL: {item.quantity} × {formatVnd(item.unitPriceSnapshot)}</span>
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              className="w-4 h-4 rounded bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer"
-                              onClick={() => handleAdminQtyChange(item.id, Math.max(1, item.quantity - 1))}
-                            >
-                              -
-                            </button>
-                            <button
-                              type="button"
-                              className="w-4 h-4 rounded bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer"
-                              onClick={() => handleAdminQtyChange(item.id, item.quantity + 1)}
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase flex items-center gap-1">
+                    <Phone size={12} className="text-indigo-400" /> Số điện thoại
+                  </span>
+                  <span className="text-white font-mono font-bold">
+                    {activeOrder.recipientPhone || "0912 345 678"}
+                  </span>
+                </div>
 
-                  {/* Add Item Card Box (Opens interactive SKU selector) */}
-                  <div
-                    className="border-2 border-dashed border-[#2f375e] hover:border-indigo-500/60 bg-[#1a1f38] hover:bg-[#202644] p-3.5 rounded-2xl transition flex flex-col items-center justify-center gap-1.5 cursor-pointer min-h-[95px]"
-                    onClick={() => setIsAddItemModalOpen(true)}
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-amber-400 uppercase flex items-center gap-1">
+                    <FileText size={12} /> Note của khách
+                  </span>
+                  <span className="text-amber-200/90 font-medium italic line-clamp-2">
+                    {activeOrder.customerNote || "Giao giờ hành chính, gọi trước 30p, kiểm tra bao bì kỹ"}
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase flex items-center gap-1">
+                    <UserCheck size={12} className="text-emerald-400" /> Nhân viên xử lý đơn
+                  </span>
+                  <select
+                    className="w-full bg-[#1e2440] border border-[#303960] rounded-xl py-1.5 px-2 text-white text-xs font-semibold focus:ring-1 focus:ring-indigo-500"
+                    value={selectedStaff}
+                    onChange={(e) => {
+                      setSelectedStaff(e.target.value);
+                      showToast(`Đã gán đơn cho: ${e.target.value}`);
+                    }}
                   >
-                    <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white">
-                      <Plus size={15} />
-                    </div>
-                    <span className="text-xs font-bold text-gray-300">+ Thêm sản phẩm sỉ</span>
+                    <option value="Nguyễn Văn A (Kinh doanh)">Nguyễn Văn A (Sales)</option>
+                    <option value="Trần Bích Thủy (Kế toán)">Trần Bích Thủy (Kế toán)</option>
+                    <option value="Lê Hoàng Long (Thủ kho)">Lê Hoàng Long (Thủ kho)</option>
+                    <option value="Phạm Quốc Bảo (Manager)">Phạm Quốc Bảo (Manager)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* 3. PRODUCT ITEMS LIST (Mã, Tên SP, Phân loại, Đơn giá, SL, Tổng tiền) */}
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-gray-300 uppercase tracking-wider">
+                    Sản phẩm trong đơn sỉ ({activeOrder.items?.length || 0} sản phẩm)
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="text-xs text-indigo-400 hover:text-indigo-300 font-bold cursor-pointer transition flex items-center gap-1"
+                      onClick={() => setShowAdjustments(!showAdjustments)}
+                    >
+                      <SlidersHorizontal size={13} />
+                      <span>{showAdjustments ? "Ẩn điều chỉnh giá" : "Điều chỉnh chiết khấu & VAT"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer transition"
+                      onClick={() => setIsAddItemModalOpen(true)}
+                    >
+                      <Plus size={14} />
+                      <span>+ Thêm sản phẩm sỉ</span>
+                    </button>
                   </div>
+                </div>
+
+                {/* Table of Order Items */}
+                <div className="bg-[#14182b] rounded-2xl border border-[#272e4e] overflow-x-auto w-full">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-[#293154] text-[10px] text-gray-400 uppercase font-bold">
+                        <th className="py-2.5 px-3">Mã SP</th>
+                        <th className="py-2.5 px-3">Tên sản phẩm</th>
+                        <th className="py-2.5 px-3">Phân loại & Quy cách</th>
+                        <th className="py-2.5 px-3 text-right">Đơn giá sỉ</th>
+                        <th className="py-2.5 px-3 text-center">Số lượng</th>
+                        <th className="py-2.5 px-3 text-right">Tổng tiền</th>
+                        <th className="py-2.5 px-3 text-center">Xóa</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#232a48]">
+                      {activeOrder.items && activeOrder.items.length > 0 ? (
+                        activeOrder.items.map((item, idx) => {
+                          const prod = allProducts.find((p) => p.code === item.productCode || p.name === item.productName);
+                          const img = item.variantImage || prod?.imageUrl || "/product-food.svg";
+
+                          return (
+                            <tr key={item.id || idx} className="hover:bg-[#1d2340]/60 transition">
+                              <td className="py-3 px-3 font-mono font-bold text-indigo-300">
+                                {item.productCode || "PTW-SKU"}
+                              </td>
+                              <td className="py-3 px-3 font-extrabold text-white max-w-[200px] truncate">
+                                {item.productName}
+                              </td>
+                              <td className="py-3 px-3">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-8 h-8 rounded-lg bg-[#202644] border border-[#2e375e] overflow-hidden relative shrink-0">
+                                    <Image src={img} alt={item.variantLabel || "thumb"} fill className="object-cover" />
+                                  </div>
+                                  <div className="flex flex-col">
+                                    <span className="font-bold text-gray-200">
+                                      {item.variantLabel || item.variantSku}
+                                    </span>
+                                    <span className="text-[10px] text-gray-400 font-mono">
+                                      SKU: {item.variantSku}
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono font-bold text-gray-200">
+                                {formatVnd(item.unitPriceSnapshot)}
+                              </td>
+                              <td className="py-3 px-3 text-center">
+                                <div className="inline-flex items-center gap-1.5 bg-[#1d2340] border border-[#2f375e] rounded-xl px-2 py-1">
+                                  <button
+                                    type="button"
+                                    className="w-5 h-5 rounded bg-white/10 hover:bg-white/20 text-white flex items-center justify-center font-bold cursor-pointer transition"
+                                    onClick={() => handleAdminQtyChange(item.id, Math.max(1, item.quantity - 1))}
+                                  >
+                                    -
+                                  </button>
+                                  <span className="font-mono font-black text-white px-1.5 text-xs">
+                                    {item.quantity}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="w-5 h-5 rounded bg-white/10 hover:bg-white/20 text-white flex items-center justify-center font-bold cursor-pointer transition"
+                                    onClick={() => handleAdminQtyChange(item.id, item.quantity + 1)}
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono font-black text-emerald-400 text-sm">
+                                {formatVnd(item.unitPriceSnapshot * item.quantity)}
+                              </td>
+                              <td className="py-3 px-3 text-center">
+                                <button
+                                  type="button"
+                                  className="w-7 h-7 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center cursor-pointer transition"
+                                  title="Xóa sản phẩm"
+                                  onClick={() => handleRemoveItemFromOrder(item.id)}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={7} className="text-center py-6 text-gray-400">
+                            Chưa có sản phẩm nào trong đơn sỉ. Bấm <b>+ Thêm sản phẩm sỉ</b> để thêm.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
@@ -494,6 +650,20 @@ export function AdminOrders({
                   )}
                 </div>
               )}
+
+              {/* 4. KHUNG NOTE CHO KHÁCH MỖI LẦN GỬI XÁC NHẬN ĐƠN ĐẾN KHÁCH */}
+              <div className="bg-[#14182b] p-3.5 rounded-2xl border border-[#262c4c] flex flex-col gap-2">
+                <label className="text-[11px] font-bold text-indigo-300 flex items-center gap-1.5">
+                  <Send size={13} /> Khung note gửi khách mỗi lần gửi xác nhận báo giá / đơn hàng
+                </label>
+                <textarea
+                  rows={2}
+                  className="w-full bg-[#1c223c] border border-[#2c365c] rounded-xl p-2.5 text-white text-xs placeholder:text-gray-500 focus:ring-1 focus:ring-indigo-500"
+                  placeholder="Ví dụ: Dạ em đã áp dụng chiết khấu 2% cho đơn trên 10tr và miễn phí ship hỏa tốc nội thành ạ. Anh/Chị duyệt giúp em để xuất kho sớm nhé..."
+                  value={quoteCustomerNote}
+                  onChange={(e) => setQuoteCustomerNote(e.target.value)}
+                />
+              </div>
             </div>
           ) : (
             <div className="h-full flex items-center justify-center text-sm text-gray-400">
@@ -501,13 +671,13 @@ export function AdminOrders({
             </div>
           )}
 
-          {/* 3. BOTTOM FINANCIAL SUMMARY BAR & WHITE ACTION PILL BUTTON (Finnova Footer) */}
+          {/* 5. BOTTOM FINANCIAL SUMMARY BAR & WHITE ACTION PILL BUTTON */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-t border-[#242a49] pt-4 mt-6">
             {/* Financial Figures */}
             <div className="flex flex-wrap items-baseline gap-6 sm:gap-8">
               <div className="flex flex-col">
                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                  Sub Total
+                  Tạm tính (Sub Total)
                 </span>
                 <span className="text-sm sm:text-base font-extrabold text-white font-mono">
                   {formatVnd(subtotal)}
@@ -516,7 +686,7 @@ export function AdminOrders({
 
               <div className="flex flex-col">
                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                  Total
+                  Tổng đơn sỉ (Total)
                 </span>
                 <span className="text-sm sm:text-base font-extrabold text-white font-mono">
                   {formatVnd(finalTotal)}
@@ -525,7 +695,7 @@ export function AdminOrders({
 
               <div className="flex flex-col">
                 <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">
-                  Balance Due
+                  Còn lại cần thanh toán
                 </span>
                 <span className="text-base sm:text-lg font-black text-indigo-300 font-mono">
                   {formatVnd(balanceDue)}
@@ -574,10 +744,10 @@ export function AdminOrders({
                 <button
                   type="button"
                   className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
-                  onClick={handlePublishQuote}
+                  onClick={onPublishQuoteWithNote}
                   disabled={Boolean(isLockedByOther)}
                 >
-                  Publish Quote
+                  Publish Quote (Gửi Báo Giá)
                 </button>
               ) : activeOrder.commercialStatus === "customer_accepted" ? (
                 <button
@@ -604,13 +774,13 @@ export function AdminOrders({
       </div>
 
       {/* ========================================================================= */}
-      {/* 4. MODALS & POPUPS FOR BUTTONS */}
+      {/* 4. MODALS & POPUPS */}
       {/* ========================================================================= */}
 
-      {/* A. ADD ITEM MODAL */}
+      {/* A. ADD ITEM MODAL WITH CATEGORY & SUPPLIER FILTERS */}
       {isAddItemModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 text-white">
+          <div className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white">
             <div className="flex items-center justify-between border-b border-[#232a48] pb-3">
               <div className="flex items-center gap-2">
                 <Plus size={18} className="text-indigo-400" />
@@ -625,9 +795,63 @@ export function AdminOrders({
               </button>
             </div>
 
+            {/* Filters: Category & Supplier & Search */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-[#181d34] p-3 rounded-2xl border border-[#283256]">
+              <div>
+                <label className="text-[10px] font-bold text-gray-300 uppercase flex items-center gap-1">
+                  <Filter size={11} /> Lọc theo danh mục
+                </label>
+                <select
+                  className="w-full mt-1 bg-[#1e2440] border border-[#303960] rounded-xl py-1.5 px-2.5 text-white text-xs"
+                  value={categoryFilterModal}
+                  onChange={(e) => setCategoryFilterModal(e.target.value)}
+                >
+                  <option value="Tất cả">Tất cả danh mục ({allCategories.length})</option>
+                  {allCategories.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-gray-300 uppercase flex items-center gap-1">
+                  <Building size={11} /> Nhà cung cấp
+                </label>
+                <select
+                  className="w-full mt-1 bg-[#1e2440] border border-[#303960] rounded-xl py-1.5 px-2.5 text-white text-xs"
+                  value={supplierFilterModal}
+                  onChange={(e) => setSupplierFilterModal(e.target.value)}
+                >
+                  <option value="Tất cả">Tất cả NCC ({suppliers.length})</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="sm:col-span-2">
+                <div className="relative">
+                  <Search size={13} className="absolute left-3 top-2.5 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Tìm theo tên sản phẩm hoặc mã SKU..."
+                    className="w-full bg-[#1e2440] border border-[#303960] rounded-xl py-1.5 pl-8 pr-3 text-white text-xs"
+                    value={searchModalQuery}
+                    onChange={(e) => setSearchModalQuery(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="flex flex-col gap-3">
               <div>
-                <label className="text-[11px] font-bold text-gray-300">Chọn sản phẩm</label>
+                <label className="text-[11px] font-bold text-gray-300">
+                  Chọn sản phẩm ({modalFilteredProducts.length} sản phẩm phù hợp)
+                </label>
                 <select
                   className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs"
                   value={selectedProductId}
@@ -639,9 +863,9 @@ export function AdminOrders({
                     }
                   }}
                 >
-                  {allProducts.map((p) => (
+                  {modalFilteredProducts.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.code} - {p.name}
+                      [{p.code}] {p.name} ({p.category})
                     </option>
                   ))}
                 </select>
@@ -686,7 +910,7 @@ export function AdminOrders({
               </button>
               <button
                 type="button"
-                className="admin-pill-btn-primary py-2 px-5 text-xs"
+                className="admin-pill-btn-primary py-2 px-5 text-xs cursor-pointer"
                 onClick={handleAddItemToOrder}
               >
                 Thêm vào đơn hàng
