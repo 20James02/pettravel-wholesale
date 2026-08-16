@@ -7,6 +7,7 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.repositories.order_read import invalidate_orders_cache
 from app.services.order_workflow import execute_stock_command, stock_command_for_transition
 
 
@@ -619,6 +620,7 @@ async def _update_order(
             actor_id=actor_id,
         )
     await db.commit()
+    invalidate_orders_cache()
     return {
         "orderId": order_id,
         "orderNumber": str(current["order_number"]),

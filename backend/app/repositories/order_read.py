@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import time
 from typing import Any, Iterable
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+_orders_cache: dict[tuple[str, bool], tuple[float, list[dict[str, Any]]]] = {}
+ORDERS_CACHE_TTL = 15.0  # 15 seconds
+
+
+def invalidate_orders_cache() -> None:
+    _orders_cache.clear()
 
 
 def _iso(value: Any) -> str | None:
@@ -27,6 +35,12 @@ def _group(rows: Iterable[Any], key: str) -> dict[str, list[Any]]:
 
 
 async def list_orders(db: AsyncSession, *, actor_id: str, is_admin: bool) -> list[dict[str, Any]]:
+    now = time.monotonic()
+    cache_key = (actor_id, is_admin)
+    if cache_key in _orders_cache:
+        cached_time, cached_data = _orders_cache[cache_key]
+        if now - cached_time < ORDERS_CACHE_TTL:
+            return cached_data
     order_rows = (
         await db.execute(
             text("""select
@@ -264,4 +278,5 @@ async def list_orders(db: AsyncSession, *, actor_id: str, is_admin: bool) -> lis
                 ],
             }
         )
+    _orders_cache[cache_key] = (now, output)
     return output

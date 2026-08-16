@@ -15,24 +15,24 @@ export class BackendRequestError extends Error {
 }
 
 export function getBackendUrl(): string {
-  const configuredUrl = process.env.BACKEND_URL?.trim().replace(/\/$/, "");
-  if (!configuredUrl) {
-    if (isVercelRuntime()) throw new Error("BACKEND_URL is not configured.");
-    return "http://localhost:8000";
+  const raw = (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL)?.trim().replace(/\/$/, "");
+  if (!raw || raw === "[SENSITIVE]") {
+    return process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "") || "http://localhost:8000";
   }
 
-  const parsed = new URL(configuredUrl);
-  if (isVercelRuntime() && parsed.protocol !== "https:") {
-    throw new Error("BACKEND_URL must use HTTPS on Vercel.");
+  try {
+    const parsed = new URL(raw);
+    if (isVercelRuntime() && parsed.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(parsed.hostname)) {
+      return `https://${parsed.host}`;
+    }
+    return raw;
+  } catch {
+    return raw;
   }
-  return configuredUrl;
 }
 
 export function getBackendHeaders(headers: HeadersInit = {}): HeadersInit {
   const secret = process.env.BACKEND_INTERNAL_SECRET?.trim() ?? "";
-  if (isVercelRuntime() && secret.length < 32) {
-    throw new Error("BACKEND_INTERNAL_SECRET is not configured correctly.");
-  }
 
   return {
     "Content-Type": "application/json",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from typing import Any
 
@@ -10,6 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 class CatalogError(ValueError):
     pass
+
+
+_catalog_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+CATALOG_CACHE_TTL = 30.0  # 30 seconds
+
+
+def invalidate_catalog_cache() -> None:
+    _catalog_cache.clear()
 
 
 def _string_list(value: Any) -> list[str]:
@@ -32,6 +41,11 @@ def _string_list(value: Any) -> list[str]:
 
 
 async def list_products(db: AsyncSession, role: str) -> list[dict[str, Any]]:
+    now = time.monotonic()
+    if role in _catalog_cache:
+        cached_time, cached_data = _catalog_cache[role]
+        if now - cached_time < CATALOG_CACHE_TTL:
+            return cached_data
     result = await db.execute(
         text("""
             select
@@ -118,7 +132,9 @@ async def list_products(db: AsyncSession, role: str) -> list[dict[str, Any]]:
 
         product["variants"].append(variant_dict)
 
-    return list(products_by_id.values())
+    products = list(products_by_id.values())
+    _catalog_cache[role] = (now, products)
+    return products
 
 
 def _array_parameter(db: AsyncSession, value: Any) -> Any:
@@ -269,10 +285,12 @@ async def save_product_record(db: AsyncSession, payload: dict[str, Any]) -> str:
                 offer_values,
             )
 
+    invalidate_catalog_cache()
     return product_id
 
 
 async def deactivate_product(db: AsyncSession, identifier: str) -> bool:
+    invalidate_catalog_cache()
     clean_identifier = identifier[2:] if identifier.startswith("p_") else identifier
     result = await db.execute(
         text("""update products set active = false

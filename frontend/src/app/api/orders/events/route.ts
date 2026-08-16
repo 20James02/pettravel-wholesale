@@ -4,8 +4,8 @@ import { getOrders } from "@/server/db";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const POLL_INTERVAL_MS = 5_000;
-const STREAM_LIFETIME_MS = 25_000;
+const POLL_INTERVAL_MS = 20_000;
+const STREAM_LIFETIME_MS = 60_000;
 
 export async function GET() {
   let user;
