@@ -85,7 +85,7 @@ export const shortTextSchema = (label: string, min = 1, max = 180) =>
 export const optionalUrlSchema = z
   .string()
   .trim()
-  .max(2_000_000, "Đường dẫn ảnh quá dài.")
+  .max(10_000_000, "Đường dẫn ảnh quá dài.")
   .refine((value) => {
     if (!value) return true;
     if (value.startsWith("/")) return true;
