@@ -366,13 +366,25 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     } catch { /* silent */ }
   }, [selectedOrderId]);
 
+  const lastRevisionRef = useRef<string>("");
+
   useEffect(() => {
     if (!currentUser) return;
     const events = new EventSource("/api/orders/events");
-    const refreshOrders = () => void fetchOrders();
-    events.addEventListener("orders.snapshot", refreshOrders);
+    const handleSnapshot = (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data);
+        if (payload?.revision && payload.revision !== lastRevisionRef.current) {
+          lastRevisionRef.current = payload.revision;
+          void fetchOrders();
+        }
+      } catch {
+        void fetchOrders();
+      }
+    };
+    events.addEventListener("orders.snapshot", handleSnapshot);
     return () => {
-      events.removeEventListener("orders.snapshot", refreshOrders);
+      events.removeEventListener("orders.snapshot", handleSnapshot);
       events.close();
     };
   }, [currentUser, fetchOrders]);

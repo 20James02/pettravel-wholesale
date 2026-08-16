@@ -5,11 +5,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.repositories.orders import OrderConflictError
-from app.repositories.order_read import list_orders as read_orders
+from app.repositories.order_read import get_orders_revision, list_orders as read_orders
 from app.repositories.orders import save_order as write_order
 
 
 router = APIRouter()
+
+
+@router.get("/revision", response_model=Dict[str, str])
+async def get_revision(
+    user_id: str,
+    is_admin: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    revision = await get_orders_revision(db, actor_id=user_id, is_admin=is_admin)
+    return {"revision": revision}
 
 
 @router.get("/list", response_model=List[Dict[str, Any]])

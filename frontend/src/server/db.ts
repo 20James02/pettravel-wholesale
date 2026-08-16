@@ -110,6 +110,17 @@ export async function saveCategories(categories: string[]): Promise<void> {
 
 // ── ORDERS ───────────────────────────────────────────────────
 
+export async function getOrderRevision(user: UserAccount): Promise<string> {
+  try {
+    const data: { revision: string } = await backendFetch(
+      `/api/v1/orders/revision?user_id=${user.id}&is_admin=${user.isAdmin}`
+    );
+    return data.revision || "empty";
+  } catch {
+    return "fallback-" + Date.now();
+  }
+}
+
 export async function getOrders(user: UserAccount): Promise<CustomerOrder[]> {
   return backendFetch(`/api/v1/orders/list?user_id=${user.id}&is_admin=${user.isAdmin}`);
 }
@@ -119,6 +130,7 @@ export async function saveOrder(
   creatorId: string,
   expectedUpdatedAt?: string
 ): Promise<{ orderId: string; orderNumber: string; updatedAt: string }> {
+  invalidateDbCache("orders");
   return backendFetch(`/api/v1/orders/save?creator_id=${creatorId}`, {
     method: "POST",
     body: JSON.stringify({ order, expectedUpdatedAt })

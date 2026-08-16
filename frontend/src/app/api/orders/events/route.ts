@@ -1,10 +1,10 @@
 import { requireAuth } from "@/server/auth";
-import { getOrders } from "@/server/db";
+import { getOrderRevision } from "@/server/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const POLL_INTERVAL_MS = 20_000;
+const POLL_INTERVAL_MS = 15_000;
 const STREAM_LIFETIME_MS = 60_000;
 
 export async function GET() {
@@ -34,12 +34,8 @@ export async function GET() {
         if (closed || polling) return;
         polling = true;
         try {
-          const orders = await getOrders(user);
-          const revision = orders
-            .map((order) => `${order.id}:${order.updatedAt}`)
-            .sort()
-            .join("|");
-          if (revision !== lastRevision) {
+          const revision = await getOrderRevision(user);
+          if (revision && revision !== lastRevision) {
             lastRevision = revision;
             controller.enqueue(
               encoder.encode(

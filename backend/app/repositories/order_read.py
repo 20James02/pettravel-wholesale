@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import hashlib
 import time
 from typing import Any, Iterable
 
@@ -8,11 +9,17 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _orders_cache: dict[tuple[str, bool], tuple[float, list[dict[str, Any]]]] = {}
+_order_detail_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 ORDERS_CACHE_TTL = 15.0  # 15 seconds
+ORDER_DETAIL_CACHE_TTL = 30.0  # 30 seconds
 
 
-def invalidate_orders_cache() -> None:
+def invalidate_orders_cache(order_id: str | None = None) -> None:
     _orders_cache.clear()
+    if order_id and order_id in _order_detail_cache:
+        del _order_detail_cache[order_id]
+    elif not order_id:
+        _order_detail_cache.clear()
 
 
 def _iso(value: Any) -> str | None:
@@ -32,6 +39,26 @@ def _group(rows: Iterable[Any], key: str) -> dict[str, list[Any]]:
     for row in rows:
         grouped[str(row[key])].append(row)
     return grouped
+
+
+async def get_orders_revision(db: AsyncSession, *, actor_id: str, is_admin: bool) -> str:
+    result = await db.execute(
+        text("""
+            select o.id, o.updated_at
+            from customer_orders o
+            where (:is_admin = true or o.organization_id = (
+                select organization_id from app_users where id = :actor_id and status = 'active'
+            ))
+            order by o.updated_at desc, o.id desc
+            limit 50
+        """),
+        {"actor_id": actor_id, "is_admin": is_admin},
+    )
+    rows = result.mappings().all()
+    if not rows:
+        return "empty"
+    rev_string = "|".join(f"{r['id']}:{_iso(r['updated_at'])}" for r in rows)
+    return hashlib.md5(rev_string.encode("utf-8")).hexdigest()
 
 
 async def list_orders(db: AsyncSession, *, actor_id: str, is_admin: bool) -> list[dict[str, Any]]:
