@@ -305,13 +305,15 @@ export function PetTravelApp() {
       const res = await fetch("/api/orders");
       if (!res.ok) return;
       const data = await res.json();
-      setAllOrders(data.orders ?? []);
-      if (data.orders?.length > 0) {
-        const firstOrder = data.orders[0];
-        if (!selectedOrderId) {
-          setSelectedOrderId(firstOrder.id);
-          setWorkingOrder(firstOrder);
-          setCartItems(firstOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
+      const orders: CustomerOrder[] = data.orders ?? [];
+      setAllOrders(orders);
+      if (orders.length > 0) {
+        const targetOrder = (selectedOrderId ? orders.find((o) => o.id === selectedOrderId) : null) || orders[0];
+        if (!selectedOrderId || !orders.some((o) => o.id === selectedOrderId)) {
+          setSelectedOrderId(targetOrder.id);
+          setWorkingOrder(targetOrder);
+          setAdminOrderItems(targetOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
+          setCartItems(targetOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
         }
       }
     } catch { /* silent */ }
@@ -638,11 +640,12 @@ export function PetTravelApp() {
       setCurrentUser(data.user);
       setMode(data.user.isAdmin ? "admin" : "customer");
       setActiveTab(data.user.isAdmin ? "admin" : "catalog");
+      setLoadedTabs(new Set());
       setShowLoginModal(false);
       setLoginEmail("");
       setLoginPassword("");
     } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error("Lá»—i káº¿t ná»‘i mÃ¡y chá»§.");
+      const err = error instanceof Error ? error : new Error("Lỗi kết nối máy chủ.");
       alert(`Lỗi đăng nhập: ${err.message || "Lỗi kết nối máy chủ."}`);
     } finally {
       setIsLoading(false);
@@ -659,6 +662,7 @@ export function PetTravelApp() {
     setCartItems([]);
     setWorkingOrder(EMPTY_ORDER);
     setSelectedOrderId(null);
+    setLoadedTabs(new Set());
     setActiveTab("catalog");
   }
 

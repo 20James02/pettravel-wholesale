@@ -170,20 +170,28 @@ export async function GET() {
     return NextResponse.json({ error: "Vui lòng đăng nhập để xem đơn hàng." }, { status: 401 });
   }
 
-  const orders = await getOrders(user);
-  const safeOrders = user.isAdmin ? orders : orders.map(sanitizeOrderForCustomer);
-  const hasActiveOrder = orders.some(
-    (o) =>
-      o.customerId === user.id &&
-      o.commercialStatus !== "cancelled" &&
-      o.fulfillmentStatus !== "delivered"
-  );
+  try {
+    const orders = await getOrders(user);
+    const safeOrders = user.isAdmin ? orders : orders.map(sanitizeOrderForCustomer);
+    const hasActiveOrder = orders.some(
+      (o) =>
+        o.customerId === user.id &&
+        o.commercialStatus !== "cancelled" &&
+        o.fulfillmentStatus !== "delivered"
+    );
 
-  return NextResponse.json({
-    orders: safeOrders,
-    canCreateOrder: user.isAdmin ? false : !hasActiveOrder,
-    total: safeOrders.length
-  });
+    return NextResponse.json({
+      orders: safeOrders,
+      canCreateOrder: user.isAdmin ? false : !hasActiveOrder,
+      total: safeOrders.length
+    });
+  } catch (err) {
+    console.error("GET /api/orders failed:", err);
+    return NextResponse.json(
+      { error: "Không thể lấy danh sách đơn hàng từ backend.", details: String(err), orders: [] },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(request: Request) {
