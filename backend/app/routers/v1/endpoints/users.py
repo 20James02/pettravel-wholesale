@@ -51,6 +51,8 @@ async def create_app_user(payload: Dict[str, Any], db: AsyncSession = Depends(ge
     password = str(payload.get("password") or "")
     full_name = str(payload.get("fullName") or "").strip()
     role_key = str(payload.get("role") or "customer_owner")
+    if role_key == "warehouse_keeper":
+        role_key = "warehouse"
     if not email or not full_name or len(password) < 12:
         raise HTTPException(status_code=400, detail="Email, họ tên và mật khẩu tối thiểu 12 ký tự là bắt buộc.")
     if await get_user_by_email(db, email):
@@ -64,6 +66,8 @@ async def create_app_user(payload: Dict[str, Any], db: AsyncSession = Depends(ge
 
     organization_id = None
     company = str(payload.get("company") or "").strip()
+    if not company and role_key == "customer_owner":
+        company = f"Đại lý {full_name}"
     if company:
         organization = (
             await db.execute(

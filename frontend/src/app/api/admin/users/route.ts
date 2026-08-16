@@ -24,6 +24,7 @@ const createUserSchema = z.object({
     "order_operator",
     "accountant",
     "warehouse",
+    "warehouse_keeper",
     "customer_owner",
     "customer_staff"
   ]),
@@ -66,13 +67,14 @@ export async function POST(request: Request) {
     }
 
     const payload = parsed.data;
+    const roleNormalized = payload.role === "warehouse_keeper" ? "warehouse" : payload.role;
     await createAppUser({
       email: payload.email,
       fullName: payload.fullName,
       phone: payload.phone,
       passwordRaw: payload.password,
-      role: payload.role,
-      company: payload.company || undefined
+      role: roleNormalized,
+      company: payload.company || (roleNormalized === "customer_owner" ? `Đại lý ${payload.fullName}` : undefined)
     });
 
     return NextResponse.json({ success: true, message: "Tạo tài khoản thành công!" });

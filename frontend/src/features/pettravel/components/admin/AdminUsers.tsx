@@ -1,9 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { Users, UserPlus, UserCheck, X, ShieldCheck, Trash2, AlertTriangle, Loader2 } from "lucide-react";
+import { Users, UserPlus, UserCheck, X, ShieldCheck, Trash2, AlertTriangle, Loader2, Check } from "lucide-react";
 import type { ApiUser } from "../../types";
-import { fullNameSchema, emailSchema, phoneSchema, passwordSchema, shortTextSchema } from "@/lib/validation";
+import {
+  fullNameSchema,
+  emailSchema,
+  phoneSchema,
+  passwordSchema,
+  optionalCompanySchema,
+  getValidationErrorMessage
+} from "@/lib/validation";
 
 interface AdminUsersProps {
   isAdmin: boolean;
@@ -20,6 +27,10 @@ export function AdminUsers({ isAdmin, currentUser, userList, fetchUsers }: Admin
   const [createPassword, setCreatePassword] = useState("");
   const [createRole, setCreateRole] = useState("customer_owner");
   const [createCompany, setCreateCompany] = useState("");
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [serverErrorMsg, setServerErrorMsg] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [toastMsg, setToastMsg] = useState("");
 
   // Delete modal states
   const [userToDelete, setUserToDelete] = useState<ApiUser | null>(null);
@@ -27,25 +38,74 @@ export function AdminUsers({ isAdmin, currentUser, userList, fetchUsers }: Admin
 
   const isSuperAdmin = currentUser?.role === "super_admin";
 
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(""), 4000);
+  };
+
+  const validateUserInputs = (
+    fullName: string,
+    email: string,
+    phone: string,
+    password: string,
+    role: string,
+    company: string
+  ): Record<string, string> => {
+    const errors: Record<string, string> = {};
+
+    const fnRes = fullNameSchema.safeParse(fullName.trim());
+    if (!fnRes.success) {
+      errors.fullName = getValidationErrorMessage(fnRes.error, "Họ và tên không hợp lệ (tối thiểu 2 ký tự).");
+    }
+
+    const emRes = emailSchema.safeParse(email.trim().toLowerCase());
+    if (!emRes.success) {
+      errors.email = getValidationErrorMessage(emRes.error, "Email đăng nhập không đúng định dạng.");
+    }
+
+    const phRes = phoneSchema.safeParse(phone.trim());
+    if (!phRes.success) {
+      errors.phone = "Số điện thoại không hợp lệ (Dùng dạng 0xxxxxxxxx hoặc +84xxxxxxxxx).";
+    }
+
+    const pwRes = passwordSchema.safeParse(password);
+    if (!pwRes.success) {
+      errors.password = getValidationErrorMessage(pwRes.error, "Mật khẩu phải từ 12 ký tự trở lên, gồm cả chữ và số.");
+    }
+
+    if (role === "customer_owner" && company.trim()) {
+      const cpRes = optionalCompanySchema.safeParse(company.trim());
+      if (!cpRes.success) {
+        errors.company = getValidationErrorMessage(cpRes.error, "Tên doanh nghiệp / đại lý không hợp lệ.");
+      }
+    }
+
+    return errors;
+  };
+
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!createFullName.trim() || !createEmail.trim() || !createPhone.trim() || !createPassword) {
-      alert("Vui lòng điền đầy đủ các thông tin bắt buộc!");
+    setServerErrorMsg("");
+
+    const errors = validateUserInputs(createFullName, createEmail, createPhone, createPassword, createRole, createCompany);
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
       return;
     }
-    if (createPassword.length < 12) {
-      alert("Mật khẩu ban đầu phải có ít nhất 12 ký tự. Ví dụ: Hanni@0601PT");
-      return;
-    }
+
+    setFormErrors({});
+    setIsSubmitting(true);
+
     try {
       const payload = {
-        fullName: fullNameSchema.parse(createFullName),
-        email: emailSchema.parse(createEmail),
-        phone: phoneSchema.parse(createPhone),
-        password: passwordSchema.parse(createPassword),
+        fullName: createFullName.trim(),
+        email: createEmail.trim().toLowerCase(),
+        phone: createPhone.trim(),
+        password: createPassword,
         role: createRole,
-        company: createRole === "customer_owner" ? shortTextSchema("Tên tổ chức", 2, 160).parse(createCompany) : undefined
+        company: createRole === "customer_owner" ? createCompany.trim() || undefined : undefined
       };
+
       const res = await fetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -53,19 +113,31 @@ export function AdminUsers({ isAdmin, currentUser, userList, fetchUsers }: Admin
       });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.error || "Lỗi tạo tài khoản.");
+        const errorText = data.error || "Lỗi tạo tài khoản.";
+        setServerErrorMsg(errorText);
+        if (errorText.toLowerCase().includes("email")) {
+          setFormErrors((prev) => ({ ...prev, email: errorText }));
+        } else if (errorText.toLowerCase().includes("số điện thoại") || errorText.toLowerCase().includes("phone")) {
+          setFormErrors((prev) => ({ ...prev, phone: errorText }));
+        }
         return;
       }
-      alert(data.message || "Tạo tài khoản thành công!");
+
+      showToast(data.message || "Tạo tài khoản thành công!");
       setCreateFullName("");
       setCreateEmail("");
       setCreatePhone("");
       setCreatePassword("");
       setCreateCompany("");
+      setFormErrors({});
+      setServerErrorMsg("");
       await fetchUsers();
       setShowUserForm(false);
-    } catch {
-      alert("Lỗi kết nối server.");
+    } catch (err: unknown) {
+      const errorObj = err instanceof Error ? err : new Error("Không thể kết nối máy chủ");
+      setServerErrorMsg(`Lỗi kết nối máy chủ: ${errorObj.message}`);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -81,7 +153,7 @@ export function AdminUsers({ isAdmin, currentUser, userList, fetchUsers }: Admin
         alert(data.error || "Lỗi xóa tài khoản.");
         return;
       }
-      alert(data.message || "Đã xóa tài khoản thành công!");
+      showToast(data.message || "Đã xóa tài khoản thành công!");
       setUserToDelete(null);
       await fetchUsers();
     } catch {
@@ -158,7 +230,11 @@ export function AdminUsers({ isAdmin, currentUser, userList, fetchUsers }: Admin
         <button
           type="button"
           className="admin-pill-btn-primary text-xs py-2 px-5 flex items-center gap-1.5 cursor-pointer"
-          onClick={() => setShowUserForm(true)}
+          onClick={() => {
+            setFormErrors({});
+            setServerErrorMsg("");
+            setShowUserForm(true);
+          }}
         >
           <UserPlus size={15} />
           <span>+ Cấp tài khoản mới</span>
@@ -248,71 +324,32 @@ export function AdminUsers({ isAdmin, currentUser, userList, fetchUsers }: Admin
               {/* 1. Kho & Sản phẩm */}
               <tr className="hover:bg-[#1d2340]/60">
                 <td className="py-3 px-3 font-bold text-white">
-                  📦 Xem danh mục & Giá sỉ
+                  📦 Quản lý Kho & Danh mục Sản phẩm
                 </td>
                 <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
-                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
-                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xem giá sỉ</td>
-                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xem giá vốn/sỉ</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Thêm/Sửa</td>
                 <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xem tồn kho</td>
-                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xem giá sỉ</td>
-                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xem giá sỉ</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xem tồn kho</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Nhập/Xuất kho</td>
+                <td className="py-3 px-2 text-center text-gray-400">Xem giá sỉ</td>
+                <td className="py-3 px-2 text-center text-gray-400">Xem giá sỉ</td>
               </tr>
 
+              {/* 2. Đơn hàng B2B */}
               <tr className="hover:bg-[#1d2340]/60">
                 <td className="py-3 px-3 font-bold text-white">
-                  ✏️ Tạo, sửa, xóa Sản phẩm & Tồn kho
+                  🛒 Đơn hàng & Báo giá Chiết khấu B2B
                 </td>
                 <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
-                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Duyệt báo giá</td>
+                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Tạo/Sửa báo giá</td>
                 <td className="py-3 px-2 text-center text-gray-500">✕</td>
                 <td className="py-3 px-2 text-center text-gray-500">✕</td>
-                <td className="py-3 px-2 text-center text-indigo-400 font-bold">✓ Nhập/Xuất kho</td>
-                <td className="py-3 px-2 text-center text-gray-500">✕</td>
-                <td className="py-3 px-2 text-center text-gray-500">✕</td>
+                <td className="py-3 px-2 text-center text-purple-400 font-bold">Tạo & Duyệt đơn</td>
+                <td className="py-3 px-2 text-center text-purple-300 font-bold">Tạo đơn nháp</td>
               </tr>
 
-              {/* 2. Đơn hàng & Chiết khấu */}
-              <tr className="hover:bg-[#1d2340]/60">
-                <td className="py-3 px-3 font-bold text-white">
-                  📑 Lên đơn sỉ & Chốt báo giá
-                </td>
-                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
-                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Duyệt mọi đơn</td>
-                <td className="py-3 px-2 text-center text-indigo-400 font-bold">✓ Chốt đơn sỉ</td>
-                <td className="py-3 px-2 text-center text-gray-400">Xem đơn</td>
-                <td className="py-3 px-2 text-center text-gray-400">Xem đóng gói</td>
-                <td className="py-3 px-2 text-center text-purple-400 font-bold">✓ Đặt đơn sỉ</td>
-                <td className="py-3 px-2 text-center text-gray-400">Tạo giỏ hàng</td>
-              </tr>
-
-              <tr className="hover:bg-[#1d2340]/60">
-                <td className="py-3 px-3 font-bold text-white">
-                  ⚡ Giảm giá & Duyệt chiết khấu lớn (&gt;8%)
-                </td>
-                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Phê duyệt tối cao</td>
-                <td className="py-3 px-2 text-center text-amber-400 font-bold">⚡ Duyệt đến 15%</td>
-                <td className="py-3 px-2 text-center text-indigo-400 font-bold">Tối đa 8% (500k)</td>
-                <td className="py-3 px-2 text-center text-gray-500">✕</td>
-                <td className="py-3 px-2 text-center text-gray-500">✕</td>
-                <td className="py-3 px-2 text-center text-gray-500">✕</td>
-                <td className="py-3 px-2 text-center text-gray-500">✕</td>
-              </tr>
-
-              {/* 3. Kế toán & Sổ cái */}
-              <tr className="hover:bg-[#1d2340]/60">
-                <td className="py-3 px-3 font-bold text-white">
-                  💰 Xác nhận tiền cọc & Thu đủ
-                </td>
-                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Toàn quyền</td>
-                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xác nhận cọc</td>
-                <td className="py-3 px-2 text-center text-indigo-400 font-bold">Nhận ủy nhiệm chi</td>
-                <td className="py-3 px-2 text-center text-emerald-400 font-bold">✓ Xác nhận tiền về</td>
-                <td className="py-3 px-2 text-center text-gray-500">✕</td>
-                <td className="py-3 px-2 text-center text-purple-400">Tải bill chuyển khoản</td>
-                <td className="py-3 px-2 text-center text-gray-500">✕</td>
-              </tr>
-
+              {/* 3. Kế toán & Thanh toán */}
               <tr className="hover:bg-[#1d2340]/60">
                 <td className="py-3 px-3 font-bold text-white">
                   📊 Hạch toán Sổ cái (112, 131, 511, 632)
@@ -355,54 +392,118 @@ export function AdminUsers({ isAdmin, currentUser, userList, fetchUsers }: Admin
               </div>
               <button
                 type="button"
-                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-gray-300 cursor-pointer"
+                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-gray-300 cursor-pointer transition"
                 onClick={() => setShowUserForm(false)}
               >
                 <X size={14} />
               </button>
             </div>
 
+            {serverErrorMsg && (
+              <div className="bg-rose-500/20 border border-rose-500/40 rounded-2xl p-3 text-rose-300 text-xs flex items-center gap-2 animate-fade-in">
+                <AlertTriangle size={16} className="shrink-0 text-rose-400" />
+                <span>{serverErrorMsg}</span>
+              </div>
+            )}
+
             <form onSubmit={handleCreateUser} className="flex flex-col gap-3">
               <div>
-                <label className="text-[11px] font-bold text-gray-300">Họ và tên</label>
+                <label className="text-[11px] font-bold text-gray-300 flex justify-between">
+                  <span>Họ và tên</span>
+                  <span className="text-rose-400">*</span>
+                </label>
                 <input
                   type="text"
-                  className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs"
-                  placeholder="Nguyễn Văn A"
+                  className={`w-full mt-1 bg-[#1c223c] border transition-all ${
+                    formErrors.fullName ? "border-rose-500 bg-rose-950/20 focus:border-rose-500 focus:ring-1 focus:ring-rose-500" : "border-[#2c365c]"
+                  } rounded-xl py-2 px-3 text-white text-xs outline-hidden`}
+                  placeholder="Ví dụ: Nguyễn Văn A"
                   value={createFullName}
-                  onChange={(e) => setCreateFullName(e.target.value)}
+                  onChange={(e) => {
+                    setCreateFullName(e.target.value);
+                    if (formErrors.fullName) {
+                      setFormErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.fullName;
+                        return next;
+                      });
+                    }
+                  }}
                   required
                 />
+                {formErrors.fullName && (
+                  <span className="text-[10px] text-rose-400 font-semibold mt-1 block animate-fade-in">
+                    ⚠️ {formErrors.fullName}
+                  </span>
+                )}
               </div>
 
               <div>
-                <label className="text-[11px] font-bold text-gray-300">Email đăng nhập</label>
+                <label className="text-[11px] font-bold text-gray-300 flex justify-between">
+                  <span>Email đăng nhập</span>
+                  <span className="text-rose-400">*</span>
+                </label>
                 <input
                   type="email"
-                  className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs"
+                  className={`w-full mt-1 bg-[#1c223c] border transition-all ${
+                    formErrors.email ? "border-rose-500 bg-rose-950/20 focus:border-rose-500 focus:ring-1 focus:ring-rose-500" : "border-[#2c365c]"
+                  } rounded-xl py-2 px-3 text-white text-xs outline-hidden`}
                   placeholder="daily@doanhnghiep.vn"
                   value={createEmail}
-                  onChange={(e) => setCreateEmail(e.target.value)}
+                  onChange={(e) => {
+                    setCreateEmail(e.target.value);
+                    if (formErrors.email) {
+                      setFormErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.email;
+                        return next;
+                      });
+                    }
+                  }}
                   required
                 />
+                {formErrors.email && (
+                  <span className="text-[10px] text-rose-400 font-semibold mt-1 block animate-fade-in">
+                    ⚠️ {formErrors.email}
+                  </span>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[11px] font-bold text-gray-300">Số điện thoại</label>
+                  <label className="text-[11px] font-bold text-gray-300 flex justify-between">
+                    <span>Số điện thoại</span>
+                    <span className="text-rose-400">*</span>
+                  </label>
                   <input
                     type="tel"
-                    className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs"
+                    className={`w-full mt-1 bg-[#1c223c] border transition-all ${
+                      formErrors.phone ? "border-rose-500 bg-rose-950/20 focus:border-rose-500 focus:ring-1 focus:ring-rose-500" : "border-[#2c365c]"
+                    } rounded-xl py-2 px-3 text-white text-xs outline-hidden`}
                     placeholder="0912345678"
                     value={createPhone}
-                    onChange={(e) => setCreatePhone(e.target.value)}
+                    onChange={(e) => {
+                      setCreatePhone(e.target.value);
+                      if (formErrors.phone) {
+                        setFormErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.phone;
+                          return next;
+                        });
+                      }
+                    }}
                     required
                   />
+                  {formErrors.phone && (
+                    <span className="text-[10px] text-rose-400 font-semibold mt-1 block animate-fade-in">
+                      ⚠️ {formErrors.phone}
+                    </span>
+                  )}
                 </div>
                 <div>
                   <label className="text-[11px] font-bold text-gray-300">Vai trò</label>
                   <select
-                    className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs"
+                    className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs outline-hidden"
                     value={createRole}
                     onChange={(e) => setCreateRole(e.target.value)}
                   >
@@ -415,28 +516,84 @@ export function AdminUsers({ isAdmin, currentUser, userList, fetchUsers }: Admin
                 </div>
               </div>
 
+              {createRole === "customer_owner" && (
+                <div className="animate-fade-in">
+                  <label className="text-[11px] font-bold text-gray-300 flex justify-between">
+                    <span>Tên đại lý / Doanh nghiệp (Tùy chọn)</span>
+                  </label>
+                  <input
+                    type="text"
+                    className={`w-full mt-1 bg-[#1c223c] border transition-all ${
+                      formErrors.company ? "border-rose-500 bg-rose-950/20 focus:border-rose-500 focus:ring-1 focus:ring-rose-500" : "border-[#2c365c]"
+                    } rounded-xl py-2 px-3 text-white text-xs outline-hidden`}
+                    placeholder="Ví dụ: Pet Shop Hạnh Phúc, Đại lý Tân Bình..."
+                    value={createCompany}
+                    onChange={(e) => {
+                      setCreateCompany(e.target.value);
+                      if (formErrors.company) {
+                        setFormErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.company;
+                          return next;
+                        });
+                      }
+                    }}
+                  />
+                  {formErrors.company && (
+                    <span className="text-[10px] text-rose-400 font-semibold mt-1 block animate-fade-in">
+                      ⚠️ {formErrors.company}
+                    </span>
+                  )}
+                </div>
+              )}
+
               <div>
-                <label className="text-[11px] font-bold text-gray-300">Mật khẩu ban đầu (tối thiểu 12 ký tự)</label>
+                <label className="text-[11px] font-bold text-gray-300 flex justify-between">
+                  <span>Mật khẩu ban đầu (tối thiểu 12 ký tự)</span>
+                  <span className="text-rose-400">*</span>
+                </label>
                 <input
                   type="password"
-                  className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs"
-                  placeholder="••••••••••••"
+                  className={`w-full mt-1 bg-[#1c223c] border transition-all ${
+                    formErrors.password ? "border-rose-500 bg-rose-950/20 focus:border-rose-500 focus:ring-1 focus:ring-rose-500" : "border-[#2c365c]"
+                  } rounded-xl py-2 px-3 text-white text-xs outline-hidden`}
+                  placeholder="Gồm cả chữ và số (ví dụ: Matkhau@12345)"
                   value={createPassword}
-                  onChange={(e) => setCreatePassword(e.target.value)}
+                  onChange={(e) => {
+                    setCreatePassword(e.target.value);
+                    if (formErrors.password) {
+                      setFormErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.password;
+                        return next;
+                      });
+                    }
+                  }}
                   required
                 />
+                {formErrors.password && (
+                  <span className="text-[10px] text-rose-400 font-semibold mt-1 block animate-fade-in">
+                    ⚠️ {formErrors.password}
+                  </span>
+                )}
               </div>
 
               <div className="flex justify-end gap-2.5 mt-2 border-t border-[#232a48] pt-3">
                 <button
                   type="button"
-                  className="px-4 py-2 rounded-xl text-gray-300 hover:text-white cursor-pointer"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-xl text-gray-300 hover:text-white cursor-pointer transition font-medium"
                   onClick={() => setShowUserForm(false)}
                 >
                   Hủy
                 </button>
-                <button type="submit" className="admin-pill-btn-primary text-xs py-2 px-6 cursor-pointer">
-                  Xác nhận cấp tài khoản
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="admin-pill-btn-primary text-xs py-2 px-6 cursor-pointer flex items-center gap-2"
+                >
+                  {isSubmitting ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
+                  <span>{isSubmitting ? "Đang xử lý..." : "Xác nhận cấp tài khoản"}</span>
                 </button>
               </div>
             </form>
@@ -506,6 +663,14 @@ export function AdminUsers({ isAdmin, currentUser, userList, fetchUsers }: Admin
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div className="fixed bottom-5 right-5 z-50 bg-emerald-600 text-white px-4 py-2.5 rounded-2xl shadow-xl font-bold text-xs flex items-center gap-2 animate-fade-in">
+          <Check size={16} />
+          <span>{toastMsg}</span>
         </div>
       )}
     </div>
