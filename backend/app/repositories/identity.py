@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+_users_list_cache: tuple[float, list[dict[str, Any]]] | None = None
+USERS_LIST_CACHE_TTL = 30.0  # 30 seconds
+
+
+def invalidate_users_cache() -> None:
+    global _users_list_cache
+    _users_list_cache = None
 
 
 _USER_PROJECTION = """
@@ -73,10 +82,19 @@ async def get_user_permissions(db: AsyncSession, user_id: str) -> list[str]:
 
 
 async def list_users(db: AsyncSession) -> list[dict[str, Any]]:
+    global _users_list_cache
+    now = time.monotonic()
+    if _users_list_cache is not None:
+        cached_time, cached_data = _users_list_cache
+        if now - cached_time < USERS_LIST_CACHE_TTL:
+            return cached_data
+
     result = await db.execute(
         text(f"{_USER_PROJECTION} where u.status != 'disabled' order by u.created_at desc, u.id")
     )
-    return [dict(row) for row in result.mappings().all()]
+    users = [dict(row) for row in result.mappings().all()]
+    _users_list_cache = (now, users)
+    return users
 
 
 async def list_role_permissions(db: AsyncSession) -> dict[str, list[str]]:

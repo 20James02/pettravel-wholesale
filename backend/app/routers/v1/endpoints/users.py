@@ -11,6 +11,7 @@ from app.repositories.identity import (
     get_user_by_email,
     get_user_by_id as find_user_by_id,
     get_user_permissions,
+    invalidate_users_cache,
     list_role_permissions,
     list_users,
 )
@@ -96,6 +97,7 @@ async def create_app_user(payload: Dict[str, Any], db: AsyncSession = Depends(ge
         {"user_id": user_id, "role_id": role["id"]},
     )
     await db.commit()
+    invalidate_users_cache()
     return {"status": "success", "userId": user_id, "message": "Tạo tài khoản thành công."}
 
 
@@ -126,6 +128,7 @@ async def update_user_profile(payload: Dict[str, Any], db: AsyncSession = Depend
         },
     )
     await db.commit()
+    invalidate_users_cache()
     return {"status": "success", "message": "Cập nhật hồ sơ thành công."}
 
 
@@ -159,24 +162,46 @@ async def delete_app_user(user_id: str, db: AsyncSession = Depends(get_db)):
     # 1. Thu hồi toàn bộ vai trò của user
     await db.execute(text("delete from user_roles where user_id = :user_id"), {"user_id": user_id})
 
-    # 2. Thử xóa hoàn toàn, nếu có ràng buộc khóa ngoại (lịch sử đơn hàng, kế toán) thì chuyển sang soft-delete
+    # 2. Kiểm tra xem user có dữ liệu liên quan không (đơn hàng, bình luận, nhật ký)
+    has_refs = False
     try:
-        async with db.begin_nested():
-            await db.execute(text("delete from app_users where id = :user_id"), {"user_id": user_id})
-        await db.commit()
-        return {"status": "success", "message": f"Đã xóa vĩnh viễn tài khoản {user['full_name']}."}
-    except Exception:
-        random_suffix = uuid.uuid4().hex[:8]
-        anonymized_email = f"deleted_{random_suffix}_{user['email']}"
-        await db.execute(
-            text("""update app_users set
-                status = 'disabled',
-                email = :email,
-                phone = null,
-                password_hash = 'disabled'
-                where id = :user_id"""),
-            {"user_id": user_id, "email": anonymized_email},
+        res = await db.execute(
+            text("""
+                select (
+                    exists(select 1 from customer_orders where created_by = :uid or assigned_staff_id = :uid)
+                    or exists(select 1 from order_comments where author_id = :uid)
+                    or exists(select 1 from journal_entries where created_by = :uid)
+                    or exists(select 1 from app_users where created_by = :uid)
+                )
+            """),
+            {"uid": user_id},
         )
-        await db.commit()
-        return {"status": "success", "message": f"Đã thu hồi quyền và xóa tài khoản {user['full_name']} khỏi hệ thống."}
+        has_refs = bool(res.scalar())
+    except Exception:
+        has_refs = True
+
+    if not has_refs:
+        try:
+            await db.execute(text("delete from app_users where id = :user_id"), {"user_id": user_id})
+            await db.commit()
+            invalidate_users_cache()
+            return {"status": "success", "message": f"Đã xóa vĩnh viễn tài khoản {user['full_name']}."}
+        except Exception:
+            await db.rollback()
+
+    # Soft-delete an toàn: Vô hiệu hóa và ẩn khỏi danh sách
+    random_suffix = uuid.uuid4().hex[:8]
+    anonymized_email = f"deleted_{random_suffix}_{user['email']}"
+    await db.execute(
+        text("""update app_users set
+            status = 'disabled',
+            email = :email,
+            phone = null,
+            password_hash = 'disabled'
+            where id = :user_id"""),
+        {"user_id": user_id, "email": anonymized_email},
+    )
+    await db.commit()
+    invalidate_users_cache()
+    return {"status": "success", "message": f"Đã thu hồi quyền và xóa tài khoản {user['full_name']} khỏi hệ thống."}
 

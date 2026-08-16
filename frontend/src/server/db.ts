@@ -176,8 +176,13 @@ export interface AppUserRow {
 }
 
 export async function getAppUsers(): Promise<AppUserRow[]> {
-  return backendFetch(`/api/v1/users`);
+  const cached = getCached<AppUserRow[]>("app_users");
+  if (cached) return cached;
+  const data: AppUserRow[] = await backendFetch(`/api/v1/users`);
+  setCached("app_users", data);
+  return data;
 }
+
 export async function createAppUser(input: {
   id?: string;
   email: string;
@@ -187,6 +192,7 @@ export async function createAppUser(input: {
   role: string;
   company?: string;
 }): Promise<void> {
+  invalidateDbCache("app_users");
   await backendFetch(`/api/v1/users`, {
     method: "POST",
     body: JSON.stringify({
@@ -205,6 +211,7 @@ export async function updateUserProfile(
   id: string,
   updates: { fullName?: string; phone?: string; role?: string; company?: string; avatarUrl?: string; newPasswordRaw?: string }
 ): Promise<void> {
+  invalidateDbCache("app_users");
   await backendFetch(`/api/v1/users/profile`, {
     method: "PUT",
     body: JSON.stringify({
@@ -213,14 +220,13 @@ export async function updateUserProfile(
       phone: updates.phone,
       role: updates.role,
       company: updates.company,
+      avatarUrl: updates.avatarUrl,
       password: updates.newPasswordRaw
     })
   });
 }
 
-export async function deleteAppUser(id: string): Promise<{ status: string; message: string }> {
-  return backendFetch(`/api/v1/users/${id}`, {
-    method: "DELETE"
-  });
+export async function deleteAppUser(id: string): Promise<{ message: string }> {
+  invalidateDbCache("app_users");
+  return backendFetch(`/api/v1/users/${id}`, { method: "DELETE" });
 }
-
