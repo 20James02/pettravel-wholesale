@@ -66,6 +66,7 @@ export function AdminInventory({
   const [formDescription, setFormDescription] = useState("");
   const [formTags, setFormTags] = useState("");
   const [formVariants, setFormVariants] = useState<ProductVariant[]>([]);
+  const [productFormErrors, setProductFormErrors] = useState<Record<string, string>>({});
 
   // --- LOCAL STATES FOR CATEGORY ---
   const [showCategoryForm, setShowCategoryForm] = useState(false);
@@ -217,45 +218,109 @@ export function AdminInventory({
     showToast("Đã xóa các sản phẩm đã chọn!");
   };
 
+  // --- INLINE VALIDATION FOR PRODUCT FORM ---
+  const validateProductInputs = (
+    code: string,
+    name: string,
+    category: string,
+    weightVal: number,
+    variants: ProductVariant[]
+  ): Record<string, string> => {
+    const errs: Record<string, string> = {};
+    const cleanCode = code.trim().toUpperCase();
+
+    if (!cleanCode) {
+      errs.code = "Vui lòng nhập mã sản phẩm.";
+    } else if (cleanCode.length < 2) {
+      errs.code = "Mã sản phẩm phải có ít nhất 2 ký tự.";
+    } else if (!/^[A-Z0-9][A-Z0-9_-]{1,39}$/i.test(cleanCode)) {
+      errs.code = "Mã sản phẩm chỉ gồm chữ, số, gạch ngang (-) hoặc gạch dưới (_).";
+    } else if (!editingProduct && allProducts.some((p) => p.code.toUpperCase() === cleanCode)) {
+      errs.code = `Mã sản phẩm "${cleanCode}" đã tồn tại trong kho hàng.`;
+    } else if (editingProduct && allProducts.some((p) => p.id !== editingProduct.id && p.code.toUpperCase() === cleanCode)) {
+      errs.code = `Mã sản phẩm "${cleanCode}" đã trùng với một sản phẩm khác.`;
+    }
+
+    if (!name.trim()) {
+      errs.name = "Vui lòng nhập tên sản phẩm sỉ.";
+    } else if (name.trim().length < 2) {
+      errs.name = "Tên sản phẩm phải có ít nhất 2 ký tự.";
+    } else if (name.trim().length > 180) {
+      errs.name = "Tên sản phẩm tối đa 180 ký tự.";
+    }
+
+    if (!category || !category.trim()) {
+      errs.category = "Vui lòng chọn danh mục cho sản phẩm.";
+    }
+
+    if (isNaN(weightVal) || weightVal < 0) {
+      errs.weight = "Trọng lượng phải là số không âm (≥ 0).";
+    }
+
+    if (!variants || variants.length === 0) {
+      errs.variants = "Sản phẩm phải có ít nhất 1 phân loại hàng sỉ.";
+    } else {
+      variants.forEach((v, idx) => {
+        if (!v.label || !v.label.trim()) {
+          errs[`variant_${idx}_label`] = "Vui lòng nhập tên phân loại.";
+        }
+        const wp = Number(v.wholesalePrice ?? 0);
+        if (isNaN(wp) || wp < 1000) {
+          errs[`variant_${idx}_wholesalePrice`] = "Giá sỉ phải từ 1.000đ trở lên.";
+        }
+        const moq = Number(v.minOrderQty ?? 0);
+        if (isNaN(moq) || moq < 1) {
+          errs[`variant_${idx}_minOrderQty`] = "Số lượng sỉ tối thiểu phải từ 1 trở lên.";
+        }
+        const st = Number(v.stock ?? 0);
+        if (isNaN(st) || st < 0) {
+          errs[`variant_${idx}_stock`] = "Tồn kho không được âm.";
+        }
+      });
+    }
+
+    return errs;
+  };
+
   // --- LOGIC HANDLERS ---
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formCategory) {
-      alert("Vui lòng chọn danh mục sản phẩm!");
+
+    const errors = validateProductInputs(formCode, formName, formCategory, formWeight, formVariants);
+    if (Object.keys(errors).length > 0) {
+      setProductFormErrors(errors);
+      showToast("Vui lòng kiểm tra và hoàn thiện các trường thông tin có viền đỏ!");
       return;
     }
 
-    const cleanCode = formCode.trim().toUpperCase();
-    if (!editingProduct && allProducts.some((p) => p.code.toUpperCase() === cleanCode)) {
-      alert(`Mã sản phẩm "${formCode}" đã tồn tại trong danh sách. Vui lòng nhập mã sản phẩm khác!`);
-      return;
-    }
-    if (editingProduct && allProducts.some((p) => p.id !== editingProduct.id && p.code.toUpperCase() === cleanCode)) {
-      alert(`Mã sản phẩm "${formCode}" đã trùng với một sản phẩm khác. Vui lòng nhập mã sản phẩm khác!`);
-      return;
-    }
+    setProductFormErrors({});
 
     const productData = {
       id: editingProduct?.id || `p_${Date.now()}`,
-      code: formCode,
-      name: formName,
-      category: formCategory,
+      code: formCode.trim().toUpperCase(),
+      name: formName.trim(),
+      category: formCategory.trim(),
       brand: "Pet Travel",
       imageUrl: formImage || "/product-food.svg",
       images: formImages.length > 0 ? formImages : [formImage || "/product-food.svg"],
-      dimensions: formDimensions,
+      dimensions: formDimensions.trim(),
       weight: Number(formWeight) || 0,
-      description: formDescription,
+      description: formDescription.trim(),
       tags: formTags.split(",").map((t) => t.trim()).filter(Boolean),
       variants: formVariants.map((v) => ({
         ...v,
+        label: v.label.trim(),
+        wholesalePrice: Number(v.wholesalePrice) || 0,
+        minOrderQty: Number(v.minOrderQty) || 1,
+        stock: Number(v.stock) || 0,
         supplierId: formProductSupplier || v.supplierId || suppliers[0]?.id || "sup_pettravel"
       }))
     };
 
     const preflight = productSchema.safeParse(productData);
     if (!preflight.success) {
-      alert(getValidationErrorMessage(preflight.error, "Dữ liệu sản phẩm không hợp lệ."));
+      const msg = getValidationErrorMessage(preflight.error, "Dữ liệu sản phẩm không hợp lệ.");
+      showToast(`⚠️ ${msg}`);
       return;
     }
 
@@ -269,13 +334,14 @@ export function AdminInventory({
       if (res.ok) {
         await fetchProducts();
         setShowProductForm(false);
+        showToast(editingProduct ? "Đã cập nhật sản phẩm thành công!" : "Đã thêm sản phẩm mới thành công!");
       } else {
         const errData = await res.json();
-        alert(errData.error || "Lỗi khi lưu sản phẩm.");
+        showToast(`⚠️ ${errData.error || "Lỗi khi lưu sản phẩm."}`);
       }
     } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error("KhÃ´ng thá»ƒ thá»±c hiá»‡n yÃªu cáº§u.");
-      alert(`Lỗi kết nối máy chủ: ${err.message || "Không thể thực hiện yêu cầu."}`);
+      const err = error instanceof Error ? error : new Error("Không thể thực hiện yêu cầu.");
+      showToast(`⚠️ Lỗi kết nối: ${err.message || "Không thể thực hiện yêu cầu."}`);
     }
   };
 
@@ -500,6 +566,7 @@ export function AdminInventory({
                     }
                   ])
                 );
+                setProductFormErrors({});
                 setShowProductForm(true);
               }}
             >
@@ -734,6 +801,7 @@ export function AdminInventory({
                                 setFormDescription(p.description ?? "");
                                 setFormTags(p.tags.join(", "));
                                 setFormVariants(syncVariantSkus(p.code, p.variants.map((v) => ({ ...v }))));
+                                setProductFormErrors({});
                                 setShowProductForm(true);
                               }}
                             >
@@ -1118,44 +1186,107 @@ export function AdminInventory({
             <form onSubmit={handleSaveProduct} className="flex flex-col gap-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-orange-950/80 uppercase">Mã sản phẩm (Product Code):</label>
+                  <label className="text-[10px] font-bold text-orange-950/80 uppercase flex items-center justify-between">
+                    <span>Mã sản phẩm (Product Code):</span>
+                    <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="text"
-                    className="text-input text-xs py-2 px-3 uppercase"
+                    className={`text-input text-xs py-2 px-3 uppercase ${
+                      productFormErrors.code ? "border-red-400 bg-red-50/20 focus:border-red-500 focus:ring-1 focus:ring-red-500" : ""
+                    }`}
                     placeholder="Ví dụ: FOOD-01, SHAM-02..."
                     value={formCode}
-                    onChange={(e) => setFormCode(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormCode(val);
+                      if (productFormErrors.code) {
+                        const next = { ...productFormErrors };
+                        delete next.code;
+                        setProductFormErrors(next);
+                      }
+                    }}
+                    onBlur={() => {
+                      const errs = validateProductInputs(formCode, formName, formCategory, formWeight, formVariants);
+                      if (errs.code) setProductFormErrors((prev) => ({ ...prev, code: errs.code }));
+                    }}
                     required
                   />
+                  {productFormErrors.code && (
+                    <span className="text-[10px] text-red-600 font-semibold flex items-center gap-1 mt-0.5 animate-fade-in">
+                      ⚠️ {productFormErrors.code}
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-1.5 sm:col-span-2">
-                  <label className="text-[10px] font-bold text-orange-950/80 uppercase">Tên sản phẩm sỉ:</label>
+                  <label className="text-[10px] font-bold text-orange-950/80 uppercase flex items-center justify-between">
+                    <span>Tên sản phẩm sỉ:</span>
+                    <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="text"
-                    className="text-input text-xs py-2 px-3"
+                    className={`text-input text-xs py-2 px-3 ${
+                      productFormErrors.name ? "border-red-400 bg-red-50/20 focus:border-red-500 focus:ring-1 focus:ring-red-500" : ""
+                    }`}
                     placeholder="Nhập tên sản phẩm sỉ đầy đủ..."
                     value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormName(val);
+                      if (productFormErrors.name) {
+                        const next = { ...productFormErrors };
+                        delete next.name;
+                        setProductFormErrors(next);
+                      }
+                    }}
+                    onBlur={() => {
+                      const errs = validateProductInputs(formCode, formName, formCategory, formWeight, formVariants);
+                      if (errs.name) setProductFormErrors((prev) => ({ ...prev, name: errs.name }));
+                    }}
                     required
                   />
+                  {productFormErrors.name && (
+                    <span className="text-[10px] text-red-600 font-semibold flex items-center gap-1 mt-0.5 animate-fade-in">
+                      ⚠️ {productFormErrors.name}
+                    </span>
+                  )}
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-orange-950/80 uppercase">Danh mục sỉ:</label>
+                  <label className="text-[10px] font-bold text-orange-950/80 uppercase flex items-center justify-between">
+                    <span>Danh mục sỉ:</span>
+                    <span className="text-red-500">*</span>
+                  </label>
                   <select
-                    className="text-input text-xs py-2 px-3 bg-white border border-orange-200"
+                    className={`text-input text-xs py-2 px-3 bg-white border ${
+                      productFormErrors.category ? "border-red-400 bg-red-50/20 focus:border-red-500" : "border-orange-200"
+                    }`}
                     value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormCategory(val);
+                      if (productFormErrors.category) {
+                        const next = { ...productFormErrors };
+                        delete next.category;
+                        setProductFormErrors(next);
+                      }
+                    }}
                   >
+                    <option value="">-- Chọn danh mục sỉ --</option>
                     {allCategories.map((c) => (
                       <option key={c} value={c}>
                         {c}
                       </option>
                     ))}
                   </select>
+                  {productFormErrors.category && (
+                    <span className="text-[10px] text-red-600 font-semibold flex items-center gap-1 mt-0.5 animate-fade-in">
+                      ⚠️ {productFormErrors.category}
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-1.5">
@@ -1188,11 +1319,28 @@ export function AdminInventory({
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] font-bold text-orange-950/80 uppercase">Trọng lượng (gram):</label>
                   <input
-                    type="number"
-                    className="text-input text-xs py-2 px-3"
-                    value={formWeight}
-                    onChange={(e) => setFormWeight(Number(e.target.value))}
+                    type="text"
+                    inputMode="numeric"
+                    className={`text-input text-xs py-2 px-3 ${
+                      productFormErrors.weight ? "border-red-400 bg-red-50/20 focus:border-red-500" : ""
+                    }`}
+                    placeholder="0"
+                    value={formWeight === 0 ? "" : formWeight}
+                    onChange={(e) => {
+                      const sanitized = e.target.value.replace(/[^0-9]/g, "");
+                      setFormWeight(sanitized === "" ? 0 : Number(sanitized));
+                      if (productFormErrors.weight) {
+                        const next = { ...productFormErrors };
+                        delete next.weight;
+                        setProductFormErrors(next);
+                      }
+                    }}
                   />
+                  {productFormErrors.weight && (
+                    <span className="text-[10px] text-red-600 font-semibold flex items-center gap-1 mt-0.5 animate-fade-in">
+                      ⚠️ {productFormErrors.weight}
+                    </span>
+                  )}
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] font-bold text-orange-950/80 uppercase">Thẻ tags (phân cách bằng dấu phẩy):</label>
@@ -1223,13 +1371,30 @@ export function AdminInventory({
 
               {/* Form variants list */}
               <div className="border border-orange-100 bg-orange-50/20 p-4 rounded-2xl flex flex-col gap-3">
-                <h4 className="m-0 text-xs font-bold text-[#78350F] border-b border-dashed border-orange-100 pb-1.5">
-                  🎨 Quản lý Phân loại hàng sỉ & Ảnh riêng từng mẫu (Variants)
-                </h4>
-                <div className="flex flex-col gap-2.5 max-h-[220px] overflow-y-auto pr-1">
+                <div className="flex justify-between items-center border-b border-dashed border-orange-100 pb-1.5">
+                  <h4 className="m-0 text-xs font-bold text-[#78350F]">
+                    🎨 Quản lý Phân loại hàng sỉ & Ảnh riêng từng mẫu (Variants)
+                  </h4>
+                  {productFormErrors.variants && (
+                    <span className="text-[10px] text-red-600 font-semibold animate-fade-in">
+                      ⚠️ {productFormErrors.variants}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-col gap-2.5 max-h-[260px] overflow-y-auto pr-1">
                   {formVariants.map((v, idx) => (
-                    <div key={v.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center bg-white p-2.5 rounded-xl border border-orange-100">
-                      <div className="sm:col-span-1 flex flex-col items-center justify-center">
+                    <div
+                      key={v.id}
+                      className={`grid grid-cols-1 sm:grid-cols-12 gap-2 items-start bg-white p-2.5 rounded-xl border transition-all ${
+                        productFormErrors[`variant_${idx}_label`] ||
+                        productFormErrors[`variant_${idx}_wholesalePrice`] ||
+                        productFormErrors[`variant_${idx}_minOrderQty`] ||
+                        productFormErrors[`variant_${idx}_stock`]
+                          ? "border-red-300 bg-red-50/10 shadow-xs"
+                          : "border-orange-100"
+                      }`}
+                    >
+                      <div className="sm:col-span-1 flex flex-col items-center justify-center pt-1">
                         <VariantImageUploader
                           currentUrl={v.imageUrl}
                           productId={editingProduct?.id || formCode}
@@ -1242,18 +1407,34 @@ export function AdminInventory({
                         />
                       </div>
                       <div className="sm:col-span-3 flex flex-col gap-0.5">
-                        <label className="text-[9px] font-semibold text-gray-500 uppercase">Tên phân loại sỉ</label>
+                        <label className="text-[9px] font-semibold text-gray-500 uppercase flex justify-between">
+                          <span>Tên phân loại sỉ</span>
+                          <span className="text-red-500">*</span>
+                        </label>
                         <input
                           type="text"
-                          className="text-input text-[11px] py-1 px-2"
+                          className={`text-input text-[11px] py-1 px-2 ${
+                            productFormErrors[`variant_${idx}_label`] ? "border-red-400 bg-red-50/20 focus:border-red-500" : ""
+                          }`}
                           value={v.label}
+                          placeholder="Ví dụ: Túi 1.5kg, Màu đỏ..."
                           onChange={(e) => {
                             const copy = [...formVariants];
                             copy[idx].label = e.target.value;
                             setFormVariants(syncVariantSkus(formCode, copy));
+                            if (productFormErrors[`variant_${idx}_label`]) {
+                              const next = { ...productFormErrors };
+                              delete next[`variant_${idx}_label`];
+                              setProductFormErrors(next);
+                            }
                           }}
                           required
                         />
+                        {productFormErrors[`variant_${idx}_label`] && (
+                          <span className="text-[9px] text-red-600 font-semibold animate-fade-in">
+                            ⚠️ {productFormErrors[`variant_${idx}_label`]}
+                          </span>
+                        )}
                       </div>
                       <div className="sm:col-span-2 flex flex-col gap-0.5">
                         <label className="text-[9px] font-semibold text-gray-500 uppercase">Mã SKU (Tự động)</label>
@@ -1265,51 +1446,108 @@ export function AdminInventory({
                         />
                       </div>
                       <div className="sm:col-span-2 flex flex-col gap-0.5">
-                        <label className="text-[9px] font-semibold text-gray-500 uppercase">Giá sỉ (đ)</label>
+                        <label className="text-[9px] font-semibold text-gray-500 uppercase flex justify-between">
+                          <span>Giá sỉ (đ)</span>
+                          <span className="text-red-500">*</span>
+                        </label>
                         <input
-                          type="number"
-                          className="text-input text-[11px] py-1 px-2"
-                          value={v.wholesalePrice}
+                          type="text"
+                          inputMode="numeric"
+                          className={`text-input text-[11px] py-1 px-2 ${
+                            productFormErrors[`variant_${idx}_wholesalePrice`] ? "border-red-400 bg-red-50/20 focus:border-red-500" : ""
+                          }`}
+                          value={v.wholesalePrice === 0 ? "" : v.wholesalePrice}
+                          placeholder="150000"
                           onChange={(e) => {
+                            const sanitized = e.target.value.replace(/[^0-9]/g, "");
+                            const num = sanitized === "" ? 0 : Number(sanitized);
                             const copy = [...formVariants];
-                            copy[idx].wholesalePrice = Number(e.target.value) || 0;
+                            copy[idx].wholesalePrice = num;
                             setFormVariants(copy);
+                            if (productFormErrors[`variant_${idx}_wholesalePrice`]) {
+                              const next = { ...productFormErrors };
+                              delete next[`variant_${idx}_wholesalePrice`];
+                              setProductFormErrors(next);
+                            }
                           }}
                           required
                         />
+                        {productFormErrors[`variant_${idx}_wholesalePrice`] && (
+                          <span className="text-[9px] text-red-600 font-semibold animate-fade-in">
+                            ⚠️ {productFormErrors[`variant_${idx}_wholesalePrice`]}
+                          </span>
+                        )}
                       </div>
                       <div className="sm:col-span-1.5 flex flex-col gap-0.5">
-                        <label className="text-[9px] font-semibold text-gray-500 uppercase">Sỉ tối thiểu</label>
+                        <label className="text-[9px] font-semibold text-gray-500 uppercase flex justify-between">
+                          <span>Sỉ tối thiểu</span>
+                          <span className="text-red-500">*</span>
+                        </label>
                         <input
-                          type="number"
-                          className="text-input text-[11px] py-1 px-2"
-                          value={v.minOrderQty}
+                          type="text"
+                          inputMode="numeric"
+                          className={`text-input text-[11px] py-1 px-2 ${
+                            productFormErrors[`variant_${idx}_minOrderQty`] ? "border-red-400 bg-red-50/20 focus:border-red-500" : ""
+                          }`}
+                          value={v.minOrderQty === 0 ? "" : v.minOrderQty}
+                          placeholder="1"
                           onChange={(e) => {
+                            const sanitized = e.target.value.replace(/[^0-9]/g, "");
+                            const num = sanitized === "" ? 0 : Number(sanitized);
                             const copy = [...formVariants];
-                            copy[idx].minOrderQty = Number(e.target.value) || 1;
+                            copy[idx].minOrderQty = num;
                             setFormVariants(copy);
+                            if (productFormErrors[`variant_${idx}_minOrderQty`]) {
+                              const next = { ...productFormErrors };
+                              delete next[`variant_${idx}_minOrderQty`];
+                              setProductFormErrors(next);
+                            }
                           }}
                           required
                         />
+                        {productFormErrors[`variant_${idx}_minOrderQty`] && (
+                          <span className="text-[9px] text-red-600 font-semibold animate-fade-in">
+                            ⚠️ {productFormErrors[`variant_${idx}_minOrderQty`]}
+                          </span>
+                        )}
                       </div>
                       <div className="sm:col-span-1.5 flex flex-col gap-0.5">
-                        <label className="text-[9px] font-semibold text-gray-500 uppercase">Tồn kho</label>
+                        <label className="text-[9px] font-semibold text-gray-500 uppercase flex justify-between">
+                          <span>Tồn kho</span>
+                          <span className="text-red-500">*</span>
+                        </label>
                         <input
-                          type="number"
-                          className="text-input text-[11px] py-1 px-2"
-                          value={v.stock}
+                          type="text"
+                          inputMode="numeric"
+                          className={`text-input text-[11px] py-1 px-2 ${
+                            productFormErrors[`variant_${idx}_stock`] ? "border-red-400 bg-red-50/20 focus:border-red-500" : ""
+                          }`}
+                          value={v.stock === 0 && !v.stock ? "0" : v.stock}
+                          placeholder="0"
                           onChange={(e) => {
+                            const sanitized = e.target.value.replace(/[^0-9]/g, "");
+                            const num = sanitized === "" ? 0 : Number(sanitized);
                             const copy = [...formVariants];
-                            copy[idx].stock = Number(e.target.value) || 0;
+                            copy[idx].stock = num;
                             setFormVariants(copy);
+                            if (productFormErrors[`variant_${idx}_stock`]) {
+                              const next = { ...productFormErrors };
+                              delete next[`variant_${idx}_stock`];
+                              setProductFormErrors(next);
+                            }
                           }}
                           required
                         />
+                        {productFormErrors[`variant_${idx}_stock`] && (
+                          <span className="text-[9px] text-red-600 font-semibold animate-fade-in">
+                            ⚠️ {productFormErrors[`variant_${idx}_stock`]}
+                          </span>
+                        )}
                       </div>
-                      <div className="sm:col-span-1 flex justify-center pt-1">
+                      <div className="sm:col-span-1 flex justify-center pt-5">
                         <button
                           type="button"
-                          className="w-6 h-6 rounded-full bg-red-50 hover:bg-red-100 flex items-center justify-center text-red-500 hover:text-red-700 text-xs font-bold cursor-pointer"
+                          className="w-6 h-6 rounded-full bg-red-50 hover:bg-red-100 flex items-center justify-center text-red-500 hover:text-red-700 text-xs font-bold cursor-pointer transition"
                           disabled={formVariants.length <= 1}
                           onClick={() => {
                             const copy = formVariants.filter((_, i) => i !== idx);

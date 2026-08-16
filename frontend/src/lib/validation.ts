@@ -246,7 +246,50 @@ export const accountingOrderPostingSchema = z.object({
 
 export const getValidationErrorMessage = (error: unknown, fallback = "Dữ liệu nhập không hợp lệ."): string => {
   if (error instanceof z.ZodError) {
-    return error.issues[0]?.message ?? fallback;
+    const issue = error.issues[0];
+    if (!issue) return fallback;
+
+    const rawMsg = issue.message || "";
+    if (rawMsg && rawMsg !== "Invalid input" && rawMsg !== "Required" && !rawMsg.startsWith("Expected ")) {
+      return rawMsg;
+    }
+
+    const fieldName = String(issue.path[issue.path.length - 1] ?? "");
+    const fieldTranslations: Record<string, string> = {
+      code: "Mã sản phẩm",
+      name: "Tên sản phẩm",
+      category: "Danh mục",
+      label: "Tên phân loại",
+      wholesalePrice: "Giá sỉ",
+      minOrderQty: "Số lượng sỉ tối thiểu",
+      stock: "Tồn kho",
+      sku: "Mã SKU",
+      imageUrl: "Đường dẫn ảnh",
+      images: "Bộ sưu tập ảnh",
+      weight: "Trọng lượng",
+      dimensions: "Kích thước",
+      description: "Mô tả",
+      tags: "Thẻ tags",
+      variants: "Phân loại sản phẩm",
+      identifier: "Email hoặc số điện thoại",
+      password: "Mật khẩu",
+      recipientName: "Tên người nhận",
+      recipientPhone: "Số điện thoại nhận hàng",
+      recipientAddress: "Địa chỉ nhận hàng"
+    };
+
+    const vnLabel = fieldTranslations[fieldName] || (fieldName ? `Trường "${fieldName}"` : "Dữ liệu");
+
+    if (issue.code === "invalid_type") {
+      if ((issue as unknown as { received?: string }).received === "nan") {
+        return `${vnLabel} phải là số hợp lệ, không chứa ký tự chữ.`;
+      }
+      if (rawMsg === "Required" || (issue as unknown as { received?: string }).received === "undefined") {
+        return `Vui lòng không để trống ${vnLabel.toLowerCase()}.`;
+      }
+    }
+
+    return `${vnLabel} không hợp lệ hoặc chưa đúng định dạng.`;
   }
   if (error instanceof Error && error.message && !error.message.trim().startsWith("[")) {
     return error.message;
