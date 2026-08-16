@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Users, UserPlus, UserCheck, X, ShieldCheck, Trash2, AlertTriangle, Loader2, Check } from "lucide-react";
 import type { ApiUser } from "../../types";
 import {
@@ -20,6 +20,9 @@ interface AdminUsersProps {
 }
 
 export function AdminUsers({ isAdmin, currentUser, userList, fetchUsers }: AdminUsersProps) {
+  const userModalRef = useRef<HTMLDivElement>(null);
+  const deleteModalRef = useRef<HTMLDivElement>(null);
+
   const [showUserForm, setShowUserForm] = useState(false);
   const [createFullName, setCreateFullName] = useState("");
   const [createEmail, setCreateEmail] = useState("");
@@ -37,6 +40,23 @@ export function AdminUsers({ isAdmin, currentUser, userList, fetchUsers }: Admin
   const [isDeleting, setIsDeleting] = useState(false);
 
   const isSuperAdmin = currentUser?.role === "super_admin";
+
+  // Lock body scroll and active scroll to top when popup opens
+  useEffect(() => {
+    if (showUserForm || userToDelete) {
+      const origOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = origOverflow;
+      };
+    }
+  }, [showUserForm, userToDelete]);
+
+  useEffect(() => {
+    if (showUserForm && userModalRef.current) {
+      userModalRef.current.scrollTop = 0;
+    }
+  }, [showUserForm]);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -384,7 +404,7 @@ export function AdminUsers({ isAdmin, currentUser, userList, fetchUsers }: Admin
       {/* Modal Cấp tài khoản mới (Dark Glass Theme) */}
       {showUserForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4">
+          <div ref={userModalRef} className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto admin-dark-scroll">
             <div className="flex items-center justify-between border-b border-[#232a48] pb-3">
               <div className="flex items-center gap-2">
                 <UserPlus size={18} className="text-indigo-400" />

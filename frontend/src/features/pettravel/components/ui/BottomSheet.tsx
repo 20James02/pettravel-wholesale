@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 interface BottomSheetProps {
@@ -13,6 +13,7 @@ interface BottomSheetProps {
   maxWidth?: string;
   showCloseButton?: boolean;
   tone?: "brand" | "dark";
+  closeOnBackdropClick?: boolean;
 }
 
 export function BottomSheet({
@@ -24,13 +25,19 @@ export function BottomSheet({
   footer,
   maxWidth = "max-w-2xl",
   showCloseButton = true,
-  tone = "brand"
+  tone = "brand",
+  closeOnBackdropClick = false
 }: BottomSheetProps) {
-  // Lock body scroll when open
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  // Lock body scroll when open and scroll sheet body to top
   useEffect(() => {
     if (!isOpen) return;
     const originalStyle = window.getComputedStyle(document.body).overflow;
     document.body.style.overflow = "hidden";
+    if (bodyRef.current) {
+      bodyRef.current.scrollTop = 0;
+    }
     return () => {
       document.body.style.overflow = originalStyle;
     };
@@ -42,10 +49,10 @@ export function BottomSheet({
 
   return (
     <div className="fixed inset-0 z-[1000] flex items-end md:items-center justify-center overscroll-contain">
-      {/* Backdrop */}
+      {/* Backdrop (locked by default to prevent accidental closing) */}
       <div
         className="fixed inset-0 bg-black/60 backdrop-blur-sm animate-fade-in transition-opacity"
-        onClick={onClose}
+        onClick={closeOnBackdropClick ? onClose : undefined}
         aria-hidden="true"
       />
 
@@ -61,7 +68,7 @@ export function BottomSheet({
         aria-modal="true"
       >
         {/* Mobile Drag Pill Handle */}
-        <div className="md:hidden w-full flex items-center justify-center pt-3 pb-1 shrink-0" onClick={onClose}>
+        <div className="md:hidden w-full flex items-center justify-center pt-3 pb-1 shrink-0">
           <div className={`w-12 h-1.5 rounded-full ${isDark ? "bg-white/20" : "bg-orange-200"}`} />
         </div>
 
@@ -108,7 +115,7 @@ export function BottomSheet({
         )}
 
         {/* Body Content with smooth internal scroll */}
-        <div className={`p-4 md:p-6 overflow-y-auto overscroll-contain flex-1 ${isDark ? "admin-dark-scroll" : ""}`}>
+        <div ref={bodyRef} className={`p-4 md:p-6 overflow-y-auto overscroll-contain flex-1 ${isDark ? "admin-dark-scroll" : ""}`}>
           {children}
         </div>
 

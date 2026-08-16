@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import {
   AlertTriangle,
@@ -18,8 +18,8 @@ import { formatVnd } from "@/lib/money";
 import { StatusPill } from "../ui/StatusPill";
 import { productSchema, supplierSchema } from "@/lib/validation";
 import { getValidationErrorMessage } from "@/lib/validation";
-import { ImageUploader } from "@/features/pettravel/components/product/ImageUploader";
-import { VariantImageUploader } from "@/features/pettravel/components/product/VariantImageUploader";
+import { ImageUploader } from "../product/ImageUploader";
+import { VariantImageUploader } from "../product/VariantImageUploader";
 
 interface AdminInventoryProps {
   activeTab: string;
@@ -52,6 +52,12 @@ export function AdminInventory({
   fetchOperationsOverview,
   syncVariantSkus
 }: AdminInventoryProps) {
+  // --- MODAL REFS FOR ACTIVE SCROLL ---
+  const productModalRef = useRef<HTMLDivElement>(null);
+  const categoryModalRef = useRef<HTMLDivElement>(null);
+  const supplierModalRef = useRef<HTMLDivElement>(null);
+  const operationsModalRef = useRef<HTMLDivElement>(null);
+
   // --- LOCAL STATES FOR PRODUCT FORM ---
   const [showProductForm, setShowProductForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -88,6 +94,43 @@ export function AdminInventory({
   const [operationPartner, setOperationPartner] = useState("");
   const [operationSku, setOperationSku] = useState("");
   const [operationDescription, setOperationDescription] = useState("");
+
+  // --- BODY SCROLL LOCK & ACTIVE SCROLL TO TOP WHEN POPUP OPENS ---
+  useEffect(() => {
+    const isAnyModalOpen = showProductForm || showCategoryForm || showSupplierForm || showOperationsForm;
+    if (isAnyModalOpen) {
+      const origOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = origOverflow;
+      };
+    }
+  }, [showProductForm, showCategoryForm, showSupplierForm, showOperationsForm]);
+
+  useEffect(() => {
+    if (showProductForm && productModalRef.current) {
+      productModalRef.current.scrollTop = 0;
+    }
+  }, [showProductForm]);
+
+  useEffect(() => {
+    if (showCategoryForm && categoryModalRef.current) {
+      categoryModalRef.current.scrollTop = 0;
+    }
+  }, [showCategoryForm]);
+
+  useEffect(() => {
+    if (showSupplierForm && supplierModalRef.current) {
+      supplierModalRef.current.scrollTop = 0;
+    }
+  }, [showSupplierForm]);
+
+  useEffect(() => {
+    if (showOperationsForm && operationsModalRef.current) {
+      operationsModalRef.current.scrollTop = 0;
+    }
+  }, [showOperationsForm]);
+
   const [operationQuantity, setOperationQuantity] = useState(1);
   const [operationUnitCost, setOperationUnitCost] = useState(0);
   const [operationExpenseCategory, setOperationExpenseCategory] = useState("Chi phí phát sinh");
@@ -1162,12 +1205,11 @@ export function AdminInventory({
       {/* Product Form Modal */}
       {showProductForm && (
         <div
-          className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6"
-          onClick={() => setShowProductForm(false)}
+          ref={productModalRef}
+          className="fixed inset-0 z-1000 overflow-y-auto bg-black/70 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6"
         >
           <div
             className="panel max-w-4xl w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in my-4 sm:my-8 max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
             style={{ borderRadius: "1.75rem" }}
           >
             <div className="flex justify-between items-center border-b pb-2 border-orange-100">
@@ -1618,12 +1660,11 @@ export function AdminInventory({
       {/* Category Add Modal */}
       {showCategoryForm && (
         <div
-          className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6"
-          onClick={() => setShowCategoryForm(false)}
+          ref={categoryModalRef}
+          className="fixed inset-0 z-1000 overflow-y-auto bg-black/70 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6"
         >
           <div
             className="panel max-w-sm w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in my-4 sm:my-8"
-            onClick={(e) => e.stopPropagation()}
             style={{ borderRadius: "1.75rem" }}
           >
             <div className="flex justify-between items-center border-b pb-2 border-orange-100">
@@ -1662,15 +1703,11 @@ export function AdminInventory({
       {/* Supplier Add/Edit Modal */}
       {showSupplierForm && (
         <div
-          className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6"
-          onClick={() => {
-            setShowSupplierForm(false);
-            setEditingSupplier(null);
-          }}
+          ref={supplierModalRef}
+          className="fixed inset-0 z-1000 overflow-y-auto bg-black/70 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6"
         >
           <div
             className="panel max-w-2xl w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in my-4 sm:my-8"
-            onClick={(e) => e.stopPropagation()}
             style={{ borderRadius: "1.75rem" }}
           >
             <div className="flex justify-between items-center border-b pb-2 border-orange-100">
@@ -1755,13 +1792,12 @@ export function AdminInventory({
       {/* Operations Document Form Modal */}
       {showOperationsForm && (
         <div
-          className="fixed inset-0 z-1000 overflow-y-auto bg-black/60 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6"
-          onClick={() => setShowOperationsForm(false)}
+          ref={operationsModalRef}
+          className="fixed inset-0 z-1000 overflow-y-auto bg-black/70 backdrop-filter backdrop-blur-sm animate-fade-in flex items-start justify-center p-4 sm:p-6"
         >
           <form
             onSubmit={handleCreateOperationsDocument}
             className="panel max-w-lg w-full p-6 flex flex-col gap-4 bg-[#FFFDF9] border-2 border-orange-200 animate-scale-in my-4 sm:my-8 text-xs"
-            onClick={(e) => e.stopPropagation()}
             style={{ borderRadius: "1.75rem" }}
           >
             <div className="flex justify-between items-center border-b pb-2 border-orange-100">

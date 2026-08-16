@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   BarChart3,
   AlertTriangle,
@@ -85,11 +85,45 @@ export function AdminReports({
   setActiveTab,
   theme = "light"
 }: AdminReportsProps) {
+  const liquidityModalRef = useRef<HTMLDivElement>(null);
+  const cashflowModalRef = useRef<HTMLDivElement>(null);
+  const turnaroundModalRef = useRef<HTMLDivElement>(null);
+
   const [selectedChannel, setSelectedChannel] = useState<string>("vcb");
   const [isLiquidityModalOpen, setIsLiquidityModalOpen] = useState<boolean>(false);
   const [isCashflowModalOpen, setIsCashflowModalOpen] = useState<boolean>(false);
   const [isTurnaroundModalOpen, setIsTurnaroundModalOpen] = useState<boolean>(false);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+
+  // Lock body scroll and active scroll to top when popup opens
+  useEffect(() => {
+    const isAnyOpen = isLiquidityModalOpen || isCashflowModalOpen || isTurnaroundModalOpen;
+    if (isAnyOpen) {
+      const orig = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = orig;
+      };
+    }
+  }, [isLiquidityModalOpen, isCashflowModalOpen, isTurnaroundModalOpen]);
+
+  useEffect(() => {
+    if (isLiquidityModalOpen && liquidityModalRef.current) {
+      liquidityModalRef.current.scrollTop = 0;
+    }
+  }, [isLiquidityModalOpen]);
+
+  useEffect(() => {
+    if (isCashflowModalOpen && cashflowModalRef.current) {
+      cashflowModalRef.current.scrollTop = 0;
+    }
+  }, [isCashflowModalOpen]);
+
+  useEffect(() => {
+    if (isTurnaroundModalOpen && turnaroundModalRef.current) {
+      turnaroundModalRef.current.scrollTop = 0;
+    }
+  }, [isTurnaroundModalOpen]);
 
   const activeBank = BANK_ACCOUNTS.find((b) => b.id === selectedChannel) || BANK_ACCOUNTS[0];
 
@@ -620,7 +654,7 @@ export function AdminReports({
       {/* LIQUIDITY & BANK TRANSFER MODAL */}
       {isLiquidityModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white">
+          <div ref={liquidityModalRef} className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white max-h-[90vh] overflow-y-auto admin-dark-scroll">
             <div className="flex items-center justify-between border-b border-[#232a48] pb-3">
               <div className="flex items-center gap-2">
                 <Wallet size={18} className="text-emerald-400" />
@@ -679,7 +713,7 @@ export function AdminReports({
       {/* CASHFLOW PROJECTION MODAL */}
       {isCashflowModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white">
+          <div ref={cashflowModalRef} className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white max-h-[90vh] overflow-y-auto admin-dark-scroll">
             <div className="flex items-center justify-between border-b border-[#232a48] pb-3">
               <h3 className="font-extrabold text-white text-base m-0">Phân tích Dòng tiền & Doanh thu B2B</h3>
               <button
@@ -728,7 +762,7 @@ export function AdminReports({
       {/* TURNAROUND & INVENTORY MODAL */}
       {isTurnaroundModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white">
+          <div ref={turnaroundModalRef} className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white max-h-[90vh] overflow-y-auto admin-dark-scroll">
             <div className="flex items-center justify-between border-b border-[#232a48] pb-3">
               <h3 className="font-extrabold text-white text-base m-0">Hiệu suất Xử lý Đơn & Tồn kho ATP</h3>
               <button

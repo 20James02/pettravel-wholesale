@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import Image from "next/image";
 import {
   ShieldCheck,
@@ -93,12 +93,46 @@ export function AdminOrders({
   confirmDeposit,
   handlePostOrderAccounting
 }: AdminOrdersProps) {
+  const addItemModalRef = useRef<HTMLDivElement>(null);
+  const timelineModalRef = useRef<HTMLDivElement>(null);
+  const printModalRef = useRef<HTMLDivElement>(null);
+
   const [darkTabFilter, setDarkTabFilter] = useState<"all" | "draft" | "unpaid" | "accepted" | "locked">("all");
   const [showAdjustments, setShowAdjustments] = useState<boolean>(false);
   const [isAddItemModalOpen, setIsAddItemModalOpen] = useState<boolean>(false);
   const [isTimelineModalOpen, setIsTimelineModalOpen] = useState<boolean>(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Lock body scroll and active scroll to top when popup opens
+  useEffect(() => {
+    const isAnyOpen = isAddItemModalOpen || isTimelineModalOpen || isPrintModalOpen;
+    if (isAnyOpen) {
+      const orig = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = orig;
+      };
+    }
+  }, [isAddItemModalOpen, isTimelineModalOpen, isPrintModalOpen]);
+
+  useEffect(() => {
+    if (isAddItemModalOpen && addItemModalRef.current) {
+      addItemModalRef.current.scrollTop = 0;
+    }
+  }, [isAddItemModalOpen]);
+
+  useEffect(() => {
+    if (isTimelineModalOpen && timelineModalRef.current) {
+      timelineModalRef.current.scrollTop = 0;
+    }
+  }, [isTimelineModalOpen]);
+
+  useEffect(() => {
+    if (isPrintModalOpen && printModalRef.current) {
+      printModalRef.current.scrollTop = 0;
+    }
+  }, [isPrintModalOpen]);
 
   // Form & filter states
   const [quoteCustomerNote, setQuoteCustomerNote] = useState<string>("");
@@ -865,7 +899,7 @@ export function AdminOrders({
       {/* A. ADD ITEM MODAL WITH CATEGORY & SUPPLIER FILTERS */}
       {isAddItemModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white">
+          <div ref={addItemModalRef} className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white max-h-[90vh] overflow-y-auto admin-dark-scroll">
             <div className="flex items-center justify-between border-b border-[#232a48] pb-3">
               <div className="flex items-center gap-2">
                 <Plus size={18} className="text-indigo-400" />
@@ -1008,7 +1042,7 @@ export function AdminOrders({
       {/* B. ORDER AUDIT TIMELINE MODAL */}
       {isTimelineModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white">
+          <div ref={timelineModalRef} className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white max-h-[90vh] overflow-y-auto admin-dark-scroll">
             <div className="flex items-center justify-between border-b border-[#232a48] pb-3">
               <div className="flex items-center gap-2">
                 <Clock size={18} className="text-indigo-400" />
@@ -1059,7 +1093,7 @@ export function AdminOrders({
       {/* C. PRINT PROFORMA INVOICE MODAL */}
       {isPrintModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white text-gray-900 border border-gray-200 rounded-3xl p-6 max-w-xl w-full shadow-2xl flex flex-col gap-4 text-xs">
+          <div ref={printModalRef} className="bg-white text-gray-900 border border-gray-200 rounded-3xl p-6 max-w-xl w-full shadow-2xl flex flex-col gap-4 text-xs max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-gray-200 pb-3">
               <div className="flex items-center gap-2">
                 <Printer size={18} className="text-indigo-600" />

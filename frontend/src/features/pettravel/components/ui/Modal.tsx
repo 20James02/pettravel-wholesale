@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { SpringButton } from "./SpringButton";
 
@@ -7,21 +9,41 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: ReactNode;
+  closeOnBackdropClick?: boolean;
 }
 
-export function Modal({ isOpen, onClose, title, children }: ModalProps) {
+export function Modal({ isOpen, onClose, title, children, closeOnBackdropClick = false }: ModalProps) {
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // Lock body scroll when open and scroll to top of modal
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalStyle = window.getComputedStyle(document.body).overflow;
+    document.body.style.overflow = "hidden";
+    if (contentRef.current) {
+      contentRef.current.scrollTop = 0;
+    }
+    return () => {
+      document.body.style.overflow = originalStyle;
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
-      {/* Overlay */}
+      {/* Overlay (locked by default to prevent accidental form closing) */}
       <div 
         className="absolute inset-0 bg-brand-ink/40 backdrop-blur-sm animate-fade-in" 
-        onClick={onClose}
+        onClick={closeOnBackdropClick ? onClose : undefined}
       />
       
       {/* Modal Content */}
-      <div className="relative w-full max-w-2xl bg-white border-2 border-brand-line rounded-panel shadow-clay-card p-6 animate-scale-in max-h-[90vh] overflow-y-auto">
+      <div 
+        ref={contentRef}
+        className="relative w-full max-w-2xl bg-white border-2 border-brand-line rounded-panel shadow-clay-card p-6 animate-scale-in max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b-2 border-dashed border-brand-line pb-4 mb-4">
           <h3 className="text-xl font-['Varela_Round'] text-brand-ink m-0">{title}</h3>
