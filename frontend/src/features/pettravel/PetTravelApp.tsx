@@ -456,6 +456,7 @@ export function PetTravelApp() {
 
   // Fetch standard public catalog data on start and on auth change
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchProducts();
     fetchCategories();
   }, [fetchProducts, fetchCategories]);
@@ -465,6 +466,7 @@ export function PetTravelApp() {
     if (!isLoggedIn) return;
 
     if (!isAdmin) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       fetchOrders();
       return;
     }
@@ -581,48 +583,10 @@ export function PetTravelApp() {
     }
   }
 
-  // --- REAL BUSINESS METRICS (Calculated accurately from real database orders & inventory) ---
-  const realTotalRevenue = useMemo(() => {
-    if (reportsOverview?.kpis?.estimatedSalesVnd && reportsOverview.kpis.estimatedSalesVnd > 0) {
-      return reportsOverview.kpis.estimatedSalesVnd;
-    }
-    return allOrders.reduce((sum, o) => {
-      const q = o.quoteVersions?.[o.quoteVersions.length - 1];
-      return sum + (q?.finalTotal || 0);
-    }, 0);
-  }, [allOrders, reportsOverview]);
-
-  const realCollectedRevenue = useMemo(() => {
-    if (reportsOverview?.kpis?.paymentConfirmedVnd && reportsOverview.kpis.paymentConfirmedVnd > 0) {
-      return reportsOverview.kpis.paymentConfirmedVnd;
-    }
-    return allOrders.reduce((sum, o) => {
-      const q = o.quoteVersions?.[o.quoteVersions.length - 1];
-      if (!q) return sum;
-      if (o.paymentStatus === "paid" || o.paymentStatus === "full_uploaded") {
-        return sum + q.finalTotal;
-      }
-      if (o.paymentStatus === "deposit_confirmed" || o.paymentStatus === "deposit_uploaded") {
-        return sum + (q.depositAmount || 0);
-      }
-      return sum;
-    }, 0);
-  }, [allOrders, reportsOverview]);
-
-  const realOverdueAmount = useMemo(() => {
-    if (reportsOverview?.kpis?.receivableOpenVnd && reportsOverview.kpis.receivableOpenVnd > 0) {
-      return reportsOverview.kpis.receivableOpenVnd;
-    }
-    return Math.max(0, realTotalRevenue - realCollectedRevenue);
-  }, [realTotalRevenue, realCollectedRevenue, reportsOverview]);
-
+  // --- REAL BUSINESS METRICS (Calculated for Admin Header indicators) ---
   const realPendingApprovalsCount = useMemo(() => {
     return allOrders.filter((o) => o.commercialStatus === "submitted" || o.commercialStatus === "admin_review").length;
   }, [allOrders]);
-
-  const realTotalStockUnits = useMemo(() => {
-    return allProducts.reduce((sum, p) => sum + p.variants.reduce((vSum, v) => vSum + v.stock, 0), 0);
-  }, [allProducts]);
 
   const realLowStockCount = useMemo(() => {
     return allProducts.reduce((sum, p) => sum + p.variants.filter((v) => v.stock < 10).length, 0);
