@@ -906,16 +906,41 @@ button:active {
    ========================================================================== */
 
 .admin-theme-container {
-  background-color: #f4f6fb;
-  color: #111827;
   min-height: 100vh;
   font-family: 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   letter-spacing: -0.01em;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.admin-theme-container.admin-dark {
+  background-color: #0b0e1b !important;
+  color: #f1f5f9 !important;
+}
+
+.admin-theme-container.admin-dark .admin-kpi-card {
+  background-color: #14182b;
+  border-color: #242c4c;
+  color: #ffffff;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+.admin-theme-container.admin-dark .admin-kpi-card:hover {
+  background-color: #191f37;
+  border-color: #35406c;
+}
+
+.admin-theme-container.admin-light {
+  background-color: #f4f6fb !important;
+  color: #111827 !important;
+}
+
+.admin-theme-container.admin-light .admin-kpi-card {
+  background-color: #ffffff;
+  border-color: #eef1f6;
+  color: #111827;
 }
 
 .admin-kpi-card {
-  background-color: #ffffff;
-  border: 1px solid #eef1f6;
   border-radius: 1.5rem; /* 24px */
   padding: 1.35rem 1.5rem;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.035);
@@ -927,6 +952,37 @@ button:active {
 .admin-kpi-card:hover {
   box-shadow: 0 12px 35px rgba(0, 0, 0, 0.06);
   transform: translateY(-2px);
+}
+
+/* Compact Admin Workbench Layout (Minimizes Excessive Whole-Page Scrolling) */
+.admin-workbench {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
+}
+
+.admin-scroll-pane {
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+}
+
+.admin-scroll-pane::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.admin-scroll-pane::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.admin-scroll-pane::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 9999px;
+}
+
+.admin-scroll-pane::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
 }
 
 .admin-dark-dock {

@@ -179,8 +179,8 @@ export function AdminOrders({
       {/* 1. TOP TABS & VIEW SWITCHER STRIP (Finnova Dark Header) */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#222744] pb-4">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-extrabold text-white tracking-tight">Unpaid Invoices</span>
-          <span className="text-xs text-gray-400 font-semibold">({allOrders.length} orders total)</span>
+          <span className="text-sm font-extrabold text-white tracking-tight">Quản lý Đơn hàng & Báo giá Sỉ</span>
+          <span className="text-xs text-gray-400 font-semibold">({allOrders.length} đơn hàng)</span>
         </div>
 
         {/* Dark Filter Pills */}
@@ -192,7 +192,7 @@ export function AdminOrders({
             }`}
             onClick={() => setDarkTabFilter("all")}
           >
-            All Invoices
+            Tất cả ({allOrders.length})
           </button>
           <button
             type="button"
@@ -201,7 +201,7 @@ export function AdminOrders({
             }`}
             onClick={() => setDarkTabFilter("draft")}
           >
-            <span>Draft</span>
+            <span>Chờ duyệt</span>
             <span className="w-4 h-4 rounded-full bg-white/15 text-[10px] flex items-center justify-center">
               {allOrders.filter((o) => o.commercialStatus === "draft" || o.commercialStatus === "submitted").length}
             </span>
@@ -213,9 +213,9 @@ export function AdminOrders({
             }`}
             onClick={() => setDarkTabFilter("unpaid")}
           >
-            <span>Unpaid</span>
+            <span>Chưa thu</span>
             <span className="w-4 h-4 rounded-full bg-indigo-400 text-black text-[10px] font-black flex items-center justify-center">
-              $
+              ₫
             </span>
           </button>
           <button
@@ -225,7 +225,16 @@ export function AdminOrders({
             }`}
             onClick={() => setDarkTabFilter("accepted")}
           >
-            Accepted
+            Đã chốt
+          </button>
+          <button
+            type="button"
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
+              darkTabFilter === "locked" ? "bg-[#4f46e5] text-white shadow-sm" : "text-gray-400 hover:text-white"
+            }`}
+            onClick={() => setDarkTabFilter("locked")}
+          >
+            Đã khóa
           </button>
         </div>
       </div>

@@ -90,6 +90,8 @@ export function PetTravelApp() {
   // --- CORE APPLICATION STATES ---
   const [mode, setMode] = useState<AppMode>("guest");
   const [activeTab, setActiveTab] = useState<TabKey>("catalog");
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isProductsLoading, setIsProductsLoading] = useState<boolean>(true);
   const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
@@ -231,6 +233,13 @@ export function PetTravelApp() {
 
     // Fetch initial user
     async function loadUser() {
+      try {
+        const savedTheme = localStorage.getItem("ptw_admin_theme");
+        if (savedTheme === "dark" || savedTheme === "light") {
+          setTheme(savedTheme);
+        }
+      } catch { /* silent */ }
+
       try {
         const res = await fetch("/api/auth/me");
         if (res.ok) {
@@ -447,27 +456,68 @@ export function PetTravelApp() {
 
   // Fetch standard public catalog data on start and on auth change
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchProducts();
     fetchCategories();
-  }, [fetchProducts, fetchCategories, isLoggedIn, isAdmin]);
+  }, [fetchProducts, fetchCategories]);
 
-  // Fetch admin-level config data when logged in as admin
+  // On-demand lazy loading router per active tab
   useEffect(() => {
-    if (isLoggedIn && isAdmin) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      fetchAdminData();
+    if (!isLoggedIn) return;
+
+    if (!isAdmin) {
       fetchOrders();
-      fetchUsers();
-      fetchPromotions();
+      return;
+    }
+
+    const currentTab = activeTab;
+    if (loadedTabs.has(currentTab)) return;
+
+    // Load only data for the current active tab
+    if (currentTab === "admin_reports") {
+      fetchReportsOverview();
+      fetchOrders();
+      fetchProducts();
+    } else if (currentTab === "admin") {
+      fetchOrders();
+      fetchProducts();
+      fetchCategories();
+    } else if (currentTab === "admin_accounting") {
       fetchAccountingOverview();
       fetchAccountingJournalEntries();
-      fetchReportsOverview();
+    } else if (
+      currentTab === "admin_products" ||
+      currentTab === "admin_suppliers" ||
+      currentTab === "admin_categories" ||
+      currentTab === "admin_operations"
+    ) {
+      fetchProducts();
+      fetchCategories();
+      fetchAdminData();
       fetchOperationsOverview();
-    } else if (isLoggedIn && !isAdmin) {
-      fetchOrders();
+    } else if (currentTab === "admin_promotions" || currentTab === "settings") {
+      fetchPromotions();
+      fetchAdminData();
+    } else if (currentTab === "admin_users") {
+      fetchUsers();
     }
-  }, [isLoggedIn, isAdmin, fetchAdminData, fetchOrders, fetchUsers, fetchPromotions, fetchAccountingOverview, fetchAccountingJournalEntries, fetchReportsOverview, fetchOperationsOverview]);
+
+    setLoadedTabs((prev) => new Set([...prev, currentTab]));
+  }, [
+    activeTab,
+    isLoggedIn,
+    isAdmin,
+    loadedTabs,
+    fetchReportsOverview,
+    fetchOrders,
+    fetchProducts,
+    fetchCategories,
+    fetchAccountingOverview,
+    fetchAccountingJournalEntries,
+    fetchOperationsOverview,
+    fetchPromotions,
+    fetchAdminData,
+    fetchUsers
+  ]);
 
   // Helpers for variant SKU generation
   function buildVariantSku(code: string, label: string, index: number): string {
@@ -579,6 +629,13 @@ export function PetTravelApp() {
   }, [allProducts]);
 
   // --- ACTIONS & OPERATION HANDLERS ---
+
+  const handleThemeChange = (newTheme: "light" | "dark") => {
+    setTheme(newTheme);
+    try {
+      localStorage.setItem("ptw_admin_theme", newTheme);
+    } catch { /* silent */ }
+  };
 
   async function handleCredentialsLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -1183,7 +1240,11 @@ export function PetTravelApp() {
   return (
     <main className="app-shell">
       {/* MAIN APPLICATION CONTENT */}
-      <section className={`main-area ${isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") ? "admin-theme-container p-4 sm:p-6" : ""}`}>
+      <section className={`main-area ${
+        isAdmin && (activeTab.startsWith("admin") || activeTab === "settings")
+          ? `admin-theme-container ${theme === "dark" ? "admin-dark bg-[#0e1120] text-white" : "admin-light bg-[#f4f6fb] text-[#111827]"} p-3 sm:p-5 lg:p-6`
+          : ""
+      }`}>
         {/* Top bar header: Finnova Admin Header vs Customer Dynamic Liquid Glass Capsule Nav */}
         {isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") ? (
           <AdminHeader
@@ -1191,25 +1252,13 @@ export function PetTravelApp() {
             setActiveTab={setActiveTab}
             currentUser={currentUser}
             totalOrdersCount={allOrders.length}
-            totalRevenue={realTotalRevenue}
-            collectedRevenue={realCollectedRevenue}
-            overdueAmount={realOverdueAmount}
             pendingApprovalsCount={realPendingApprovalsCount}
-            totalStockUnits={realTotalStockUnits}
             lowStockCount={realLowStockCount}
             onLogout={handleLogout}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
-            onNewActionClick={() => {
-              if (activeTab === "admin") {
-                setWorkingOrder(EMPTY_ORDER);
-                setSelectedOrderId(null);
-              } else if (activeTab === "admin_products") {
-                setSelectedProduct(null);
-              } else if (activeTab === "admin_users") {
-                fetchUsers();
-              }
-            }}
+            theme={theme}
+            setTheme={handleThemeChange}
             onBackClick={() => setActiveTab("catalog")}
           />
         ) : (
@@ -1549,6 +1598,8 @@ export function PetTravelApp() {
             fetchReportsOverview={fetchReportsOverview}
             allOrders={allOrders}
             allProducts={allProducts}
+            setActiveTab={setActiveTab}
+            theme={theme}
           />
         )}
 
