@@ -3,13 +3,22 @@ import { z } from "zod";
 import type { RoleKey } from "@/lib/domain";
 import { encodeSession, requireSameOrigin } from "@/server/auth";
 import { getBackendHeaders, getBackendUrl } from "@/server/backend-client";
-import { emailSchema, getValidationErrorMessage, loginPasswordSchema } from "@/lib/validation";
+import {
+  emailSchema,
+  loginIdentifierSchema,
+  getValidationErrorMessage,
+  loginPasswordSchema
+} from "@/lib/validation";
 
 export const runtime = "nodejs";
 
 const loginSchema = z.object({
-  email: emailSchema,
+  identifier: loginIdentifierSchema.optional(),
+  email: z.string().optional(),
   password: loginPasswordSchema
+}).refine((data) => Boolean(data.identifier?.trim() || data.email?.trim()), {
+  message: "Vui lòng nhập email hoặc số điện thoại đăng nhập.",
+  path: ["identifier"]
 });
 
 const INTERNAL_ROLE_KEYS: ReadonlySet<RoleKey> = new Set([
@@ -35,7 +44,9 @@ interface BackendLoginResponse {
 export async function POST(request: Request) {
   try {
     requireSameOrigin(request);
-    const { email, password } = loginSchema.parse(await request.json());
+    const body = await request.json();
+    const { identifier, email, password } = loginSchema.parse(body);
+    const loginTarget = (identifier || email || "").trim();
 
     const BACKEND_URL = getBackendUrl();
     let res: Response;
@@ -43,7 +54,7 @@ export async function POST(request: Request) {
       res = await fetch(`${BACKEND_URL}/api/v1/auth/login-json`, {
         method: "POST",
         headers: getBackendHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ identifier: loginTarget, email: loginTarget, password })
       });
     } catch {
       return NextResponse.json(

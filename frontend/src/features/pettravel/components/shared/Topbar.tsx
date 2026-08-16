@@ -2,6 +2,7 @@
 
 import { ShoppingBag, ShoppingCart, Clock, FileText, ShieldCheck } from "lucide-react";
 import type { TabKey, ApiUser } from "../../types";
+import { prefetchRouteData } from "@/lib/prefetch/prefetch-engine";
 
 interface TopbarProps {
   isLoggedIn: boolean;
@@ -33,6 +34,9 @@ export function Topbar({
           type="button"
           className={`liquid-glass-tab ${activeTab === "catalog" ? "active" : ""}`}
           onClick={() => setActiveTab("catalog")}
+          onPointerEnter={() => prefetchRouteData("catalog")}
+          onFocus={() => prefetchRouteData("catalog")}
+          onTouchStart={() => prefetchRouteData("catalog")}
         >
           <ShoppingBag size={15} className="tab-icon-bag" />
           <span>Sản phẩm sỉ</span>
@@ -43,6 +47,9 @@ export function Topbar({
           type="button"
           className={`liquid-glass-tab ${activeTab === "cart" ? "active" : ""}`}
           onClick={() => setActiveTab("cart")}
+          onPointerEnter={() => prefetchRouteData("cart")}
+          onFocus={() => prefetchRouteData("cart")}
+          onTouchStart={() => prefetchRouteData("cart")}
         >
           <ShoppingCart size={15} className="tab-icon-cart" />
           <span>Giỏ hàng & Báo giá</span>
@@ -56,6 +63,9 @@ export function Topbar({
           type="button"
           className={`liquid-glass-tab ${activeTab === "order" ? "active" : ""}`}
           onClick={() => setActiveTab("order")}
+          onPointerEnter={() => prefetchRouteData("order")}
+          onFocus={() => prefetchRouteData("order")}
+          onTouchStart={() => prefetchRouteData("order")}
         >
           <Clock size={15} className="tab-icon-clock" />
           <span>Theo dõi đơn</span>
@@ -74,6 +84,9 @@ export function Topbar({
               setActiveTab("profile");
             }
           }}
+          onPointerEnter={() => prefetchRouteData("profile")}
+          onFocus={() => prefetchRouteData("profile")}
+          onTouchStart={() => prefetchRouteData("profile")}
         >
           <FileText size={15} className="tab-icon-file" />
           <span>{isAdmin ? "Hồ sơ Admin" : "Tài khoản & Lịch sử"}</span>
@@ -85,6 +98,9 @@ export function Topbar({
             type="button"
             className={`liquid-glass-tab font-extrabold ${activeTab.startsWith("admin") || activeTab === "settings" ? "active" : ""}`}
             onClick={() => setActiveTab("admin")}
+            onPointerEnter={() => prefetchRouteData("admin")}
+            onFocus={() => prefetchRouteData("admin")}
+            onTouchStart={() => prefetchRouteData("admin")}
           >
             <ShieldCheck size={15} className="text-orange-600" />
             <span className="text-orange-950 font-bold">Cổng Quản Trị</span>

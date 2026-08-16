@@ -21,6 +21,13 @@ export const emailSchema = z
   .email("Email đăng nhập không hợp lệ.")
   .max(180, "Email không được vượt quá 180 ký tự.");
 
+export const loginIdentifierSchema = z
+  .string()
+  .trim()
+  .min(3, "Vui lòng nhập email hoặc số điện thoại (ít nhất 3 ký tự).")
+  .max(180, "Thông tin đăng nhập không được vượt quá 180 ký tự.")
+  .regex(noControlCharsRegex, "Thông tin đăng nhập chứa ký tự không hợp lệ.");
+
 export const phoneSchema = z
   .string()
   .trim()

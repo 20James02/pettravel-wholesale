@@ -51,13 +51,38 @@ _USER_PROJECTION = """
 """
 
 
-async def get_user_by_email(db: AsyncSession, email: str) -> dict[str, Any] | None:
+async def get_user_by_email_or_phone(db: AsyncSession, identifier: str) -> dict[str, Any] | None:
+    cleaned = identifier.strip()
+    if not cleaned:
+        return None
+
+    # Standardize phone variations (+84 / 0...)
+    digits_only = "".join(ch for ch in cleaned if ch.isdigit())
+    standard_phone = digits_only
+    if digits_only.startswith("84") and len(digits_only) >= 10:
+        standard_phone = "0" + digits_only[2:]
+
     result = await db.execute(
-        text(f"{_USER_PROJECTION} where lower(u.email) = lower(:email) limit 1"),
-        {"email": email.strip()},
+        text(f"""
+            {_USER_PROJECTION}
+            where lower(u.email) = lower(:identifier)
+               or u.phone = :identifier
+               or u.phone = :standard_phone
+               or replace(replace(replace(u.phone, ' ', ''), '-', ''), '.', '') = :digits_only
+            limit 1
+        """),
+        {
+            "identifier": cleaned,
+            "standard_phone": standard_phone or cleaned,
+            "digits_only": digits_only or cleaned,
+        },
     )
     row = result.mappings().first()
     return dict(row) if row else None
+
+
+async def get_user_by_email(db: AsyncSession, email: str) -> dict[str, Any] | None:
+    return await get_user_by_email_or_phone(db, email)
 
 
 async def get_user_by_id(db: AsyncSession, user_id: str) -> dict[str, Any] | None:

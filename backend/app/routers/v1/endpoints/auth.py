@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from app.core.db import get_db
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.core.config import settings
-from app.repositories.identity import get_user_by_email
+from app.repositories.identity import get_user_by_email, get_user_by_email_or_phone
 from app.schemas.wholesale import UserCreate, UserResponse
 from pydantic import BaseModel
 import uuid
@@ -15,7 +15,8 @@ router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
 
 class LoginJsonInput(BaseModel):
-    email: str
+    identifier: str | None = None
+    email: str | None = None
     password: str
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -62,11 +63,11 @@ async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
-    user = await get_user_by_email(db, form_data.username)
+    user = await get_user_by_email_or_phone(db, form_data.username)
     if not user or not verify_password(form_data.password, user.get("password_hash") or ""):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sai email hoặc mật khẩu đăng nhập.",
+            detail="Sai thông tin đăng nhập (email / số điện thoại) hoặc mật khẩu.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
@@ -84,11 +85,17 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
 
 @router.post("/login-json")
 async def login_json(payload: LoginJsonInput, db: AsyncSession = Depends(get_db)):
-    user = await get_user_by_email(db, payload.email)
+    identifier = (payload.identifier or payload.email or "").strip()
+    if not identifier:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vui lòng cung cấp email hoặc số điện thoại đăng nhập."
+        )
+    user = await get_user_by_email_or_phone(db, identifier)
     if not user or not verify_password(payload.password, user.get("password_hash") or ""):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sai email hoặc mật khẩu đăng nhập."
+            detail="Sai thông tin đăng nhập (email / số điện thoại) hoặc mật khẩu."
         )
     
     if user["status"] != "active":

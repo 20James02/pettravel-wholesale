@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { TabKey, ApiUser } from "../../types";
+import { prefetchRouteData } from "@/lib/prefetch/prefetch-engine";
 import {
   ArrowLeft,
   Search,
@@ -119,6 +120,9 @@ export function AdminHeader({
                     : "text-gray-400 hover:text-white hover:bg-white/10"
                 }`}
                 onClick={() => setActiveTab(tab.key)}
+                onPointerEnter={() => prefetchRouteData(tab.key)}
+                onFocus={() => prefetchRouteData(tab.key)}
+                onTouchStart={() => prefetchRouteData(tab.key)}
               >
                 <span>{tab.label}</span>
                 {typeof tab.badge === "number" && (

@@ -171,8 +171,18 @@ async def canonical_db_session() -> AsyncSession:
             ],
         )
 
+    from app.repositories.catalog import invalidate_catalog_cache
+    from app.repositories.order_read import invalidate_orders_cache
+    from app.repositories.identity import invalidate_users_cache
+    invalidate_catalog_cache()
+    invalidate_orders_cache()
+    invalidate_users_cache()
+
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with session_factory() as session:
         yield session
         await session.rollback()
+    invalidate_catalog_cache()
+    invalidate_orders_cache()
+    invalidate_users_cache()
     await engine.dispose()

@@ -121,6 +121,19 @@ export async function getOrderRevision(user: UserAccount): Promise<string> {
   }
 }
 
+export async function getOrdersSummary(
+  user: UserAccount,
+  limit: number = 25,
+  cursorUpdatedAt?: string,
+  cursorId?: string
+): Promise<{ items: unknown[]; hasMore: boolean; nextCursor?: { updatedAt: string; id: string } }> {
+  let url = `/api/v1/orders/summary?user_id=${user.id}&is_admin=${user.isAdmin}&limit=${limit}`;
+  if (cursorUpdatedAt && cursorId) {
+    url += `&cursor_updated_at=${encodeURIComponent(cursorUpdatedAt)}&cursor_id=${encodeURIComponent(cursorId)}`;
+  }
+  return backendFetch(url);
+}
+
 export async function getOrders(user: UserAccount): Promise<CustomerOrder[]> {
   return backendFetch(`/api/v1/orders/list?user_id=${user.id}&is_admin=${user.isAdmin}`);
 }

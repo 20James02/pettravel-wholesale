@@ -5,7 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.repositories.orders import OrderConflictError
-from app.repositories.order_read import get_orders_revision, list_orders as read_orders
+from app.repositories.order_read import (
+    get_orders_revision,
+    list_orders as read_orders,
+    list_orders_summary,
+)
 from app.repositories.orders import save_order as write_order
 
 
@@ -20,6 +24,25 @@ async def get_revision(
 ):
     revision = await get_orders_revision(db, actor_id=user_id, is_admin=is_admin)
     return {"revision": revision}
+
+
+@router.get("/summary", response_model=Dict[str, Any])
+async def get_orders_summary(
+    user_id: str,
+    is_admin: bool = False,
+    limit: int = 25,
+    cursor_updated_at: str | None = None,
+    cursor_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    return await list_orders_summary(
+        db,
+        actor_id=user_id,
+        is_admin=is_admin,
+        limit=min(100, max(1, limit)),
+        cursor_updated_at=cursor_updated_at,
+        cursor_id=cursor_id,
+    )
 
 
 @router.get("/list", response_model=List[Dict[str, Any]])

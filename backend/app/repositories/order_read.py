@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 _orders_cache: dict[tuple[str, bool], tuple[float, list[dict[str, Any]]]] = {}
+_summary_cache: dict[tuple[str, bool, int, str | None, str | None], tuple[float, dict[str, Any]]] = {}
 _order_detail_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 ORDERS_CACHE_TTL = 15.0  # 15 seconds
 ORDER_DETAIL_CACHE_TTL = 30.0  # 30 seconds
@@ -16,6 +17,7 @@ ORDER_DETAIL_CACHE_TTL = 30.0  # 30 seconds
 
 def invalidate_orders_cache(order_id: str | None = None) -> None:
     _orders_cache.clear()
+    _summary_cache.clear()
     if order_id and order_id in _order_detail_cache:
         del _order_detail_cache[order_id]
     elif not order_id:
@@ -59,6 +61,136 @@ async def get_orders_revision(db: AsyncSession, *, actor_id: str, is_admin: bool
         return "empty"
     rev_string = "|".join(f"{r['id']}:{_iso(r['updated_at'])}" for r in rows)
     return hashlib.md5(rev_string.encode("utf-8")).hexdigest()
+
+
+async def list_orders_summary(
+    db: AsyncSession,
+    *,
+    actor_id: str,
+    is_admin: bool,
+    limit: int = 25,
+    cursor_updated_at: str | None = None,
+    cursor_id: str | None = None,
+) -> dict[str, Any]:
+    now = time.monotonic()
+    cache_key = (actor_id, is_admin, limit, cursor_updated_at, cursor_id)
+    if cache_key in _summary_cache:
+        cached_time, cached_data = _summary_cache[cache_key]
+        if now - cached_time < ORDERS_CACHE_TTL:
+            return cached_data
+
+    where_clauses = [
+        "(:is_admin = true or o.organization_id = (select organization_id from app_users where id = :actor_id and status = 'active'))"
+    ]
+    params: dict[str, Any] = {
+        "actor_id": actor_id,
+        "is_admin": is_admin,
+        "limit_val": limit + 1,
+    }
+
+    if cursor_updated_at and cursor_id:
+        where_clauses.append(
+            "(o.updated_at < CAST(:cursor_updated_at AS timestamptz) or (o.updated_at = CAST(:cursor_updated_at AS timestamptz) and o.id < :cursor_id))"
+        )
+        params["cursor_updated_at"] = cursor_updated_at
+        params["cursor_id"] = cursor_id
+
+    where_sql = " and ".join(where_clauses)
+
+    rows = (
+        await db.execute(
+            text(f"""
+                select
+                    o.id,
+                    o.order_number as number,
+                    o.commercial_status,
+                    o.payment_status,
+                    o.fulfillment_status,
+                    o.payment_intent,
+                    o.invoice_requested,
+                    o.recipient_name,
+                    o.recipient_phone,
+                    o.recipient_address,
+                    o.created_at,
+                    o.updated_at,
+                    o.created_by as customer_id,
+                    o.assigned_staff_id,
+                    creator.full_name as customer_name,
+                    org.name as customer_company,
+                    staff.full_name as assigned_staff_name,
+                    (
+                        select final_total
+                        from quote_versions
+                        where order_id = o.id
+                        order by version desc
+                        limit 1
+                    ) as final_total,
+                    (
+                        select deposit_amount
+                        from quote_versions
+                        where order_id = o.id
+                        order by version desc
+                        limit 1
+                    ) as deposit_amount,
+                    (
+                        select count(*)
+                        from order_items
+                        where order_id = o.id
+                    ) as items_count
+                from customer_orders o
+                join app_users creator on creator.id = o.created_by
+                join organizations org on org.id = o.organization_id
+                left join app_users staff on staff.id = o.assigned_staff_id
+                where {where_sql}
+                order by o.updated_at desc, o.id desc
+                limit :limit_val
+            """),
+            params,
+        )
+    ).mappings().all()
+
+    has_more = len(rows) > limit
+    output_rows = rows[:limit]
+
+    items = [
+        {
+            "id": row["id"],
+            "number": row["number"],
+            "customerName": row["customer_name"],
+            "customerCompany": row["customer_company"],
+            "customerId": row["customer_id"],
+            "assignedStaffId": row["assigned_staff_id"],
+            "assignedStaffName": row["assigned_staff_name"],
+            "commercialStatus": row["commercial_status"],
+            "paymentStatus": row["payment_status"],
+            "fulfillmentStatus": row["fulfillment_status"],
+            "paymentIntent": row["payment_intent"],
+            "invoiceRequested": bool(row["invoice_requested"]),
+            "createdAt": _iso(row["created_at"]),
+            "updatedAt": _iso(row["updated_at"]),
+            "finalTotal": int(row["final_total"] or 0),
+            "depositAmount": int(row["deposit_amount"] or 0),
+            "itemsCount": int(row["items_count"] or 0),
+            "revision": hashlib.md5(f"{row['id']}:{_iso(row['updated_at'])}".encode("utf-8")).hexdigest()[:12],
+        }
+        for row in output_rows
+    ]
+
+    next_cursor = None
+    if has_more and output_rows:
+        last = output_rows[-1]
+        next_cursor = {
+            "updatedAt": _iso(last["updated_at"]),
+            "id": str(last["id"]),
+        }
+
+    result = {
+        "items": items,
+        "hasMore": has_more,
+        "nextCursor": next_cursor,
+    }
+    _summary_cache[cache_key] = (now, result)
+    return result
 
 
 async def list_orders(db: AsyncSession, *, actor_id: str, is_admin: bool) -> list[dict[str, Any]]:

@@ -45,4 +45,7 @@ env/
 Thumbs.db
 desktop.ini
 
+# Scratch / temporary scripts
+scratch/
+
 .env*

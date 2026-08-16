@@ -22,6 +22,7 @@ import { formatVnd } from "@/lib/money";
 import {
   fullNameSchema,
   emailSchema,
+  loginIdentifierSchema,
   passwordSchema,
   loginPasswordSchema,
   optionalUrlSchema,
@@ -31,6 +32,9 @@ import {
 import { getValidationErrorMessage } from "@/lib/validation";
 
 import type { AppMode, TabKey, ApiUser } from "./types";
+import { TAB_ROUTE_MAP, ROUTE_TAB_MAP } from "./types";
+import { entityStore } from "@/lib/cache/entity-store";
+import { prefetchRouteData, scheduleIdlePrediction } from "@/lib/prefetch/prefetch-engine";
 
 // Import custom subcomponents
 import { Topbar } from "./components/shared/Topbar";
@@ -86,8 +90,6 @@ interface OrderMutationResponse {
   order: CustomerOrder;
 }
 
-import { TAB_ROUTE_MAP, ROUTE_TAB_MAP } from "./types";
-
 interface PetTravelAppProps {
   initialTab?: TabKey;
 }
@@ -113,6 +115,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
           window.history.pushState(null, "", targetRoute);
         }
       }
+      scheduleIdlePrediction(resolved);
       return resolved;
     });
   }, []);
@@ -334,14 +337,20 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     }
   }, [workingOrder.comments, isChatOpen]);
 
-  // --- API FETCH HELPERS (useCallback to prevent re-creation) ---
+  // --- API FETCH HELPERS (useCallback + SWR entityStore to prevent re-creation and avoid blocking spinners) ---
   const fetchProducts = useCallback(async () => {
     try {
-      setIsProductsLoading(true);
-      const res = await fetch("/api/products");
-      if (!res.ok) return;
-      const data = await res.json();
-      setAllProducts(data.products ?? []);
+      const { data } = await entityStore.swrFetch("products", async () => {
+        const res = await fetch("/api/products");
+        if (!res.ok) throw new Error();
+        const json = await res.json();
+        const list = (json.products ?? []) as Product[];
+        entityStore.setProducts(list);
+        return list;
+      }, (fresh) => {
+        setAllProducts(fresh);
+      });
+      setAllProducts(data);
     } catch { /* silent */ } finally {
       setIsProductsLoading(false);
     }
@@ -349,14 +358,20 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
 
   const fetchOrders = useCallback(async () => {
     try {
-      const res = await fetch("/api/orders");
-      if (!res.ok) return;
-      const data = await res.json();
-      const orders: CustomerOrder[] = data.orders ?? [];
-      setAllOrders(orders);
-      if (orders.length > 0) {
-        const targetOrder = (selectedOrderId ? orders.find((o) => o.id === selectedOrderId) : null) || orders[0];
-        if (!selectedOrderId || !orders.some((o) => o.id === selectedOrderId)) {
+      const { data } = await entityStore.swrFetch("orders", async () => {
+        const res = await fetch("/api/orders");
+        if (!res.ok) throw new Error();
+        const json = await res.json();
+        const list = (json.orders ?? []) as CustomerOrder[];
+        entityStore.setOrders(list);
+        return list;
+      }, (fresh) => {
+        setAllOrders(fresh);
+      });
+      setAllOrders(data);
+      if (data.length > 0) {
+        const targetOrder = (selectedOrderId ? data.find((o) => o.id === selectedOrderId) : null) || data[0];
+        if (!selectedOrderId || !data.some((o) => o.id === selectedOrderId)) {
           setSelectedOrderId(targetOrder.id);
           setWorkingOrder(targetOrder);
           setAdminOrderItems(targetOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
@@ -374,8 +389,13 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     const handleSnapshot = (e: MessageEvent) => {
       try {
         const payload = JSON.parse(e.data);
-        if (payload?.revision && payload.revision !== lastRevisionRef.current) {
+        if (payload?.type === "order.delta" && payload?.orderId && payload?.patch) {
+          // Fine-grained delta patch without full refetch
+          entityStore.patchOrder(payload.orderId, payload.patch);
+          setAllOrders(entityStore.getAllOrders());
+        } else if (payload?.revision && payload.revision !== lastRevisionRef.current) {
           lastRevisionRef.current = payload.revision;
+          entityStore.invalidate("orders");
           void fetchOrders();
         }
       } catch {
@@ -391,38 +411,56 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
 
   const fetchCategories = useCallback(async () => {
     try {
-      const res = await fetch("/api/categories");
-      if (!res.ok) return;
-      const data = await res.json();
-      setAllCategories(data.categories ?? []);
+      const { data } = await entityStore.swrFetch("categories", async () => {
+        const res = await fetch("/api/categories");
+        if (!res.ok) throw new Error();
+        const json = await res.json();
+        return (json.categories ?? []) as string[];
+      }, (fresh) => {
+        setAllCategories(fresh);
+      });
+      setAllCategories(data);
     } catch { /* silent */ }
   }, []);
 
   const fetchAdminData = useCallback(async () => {
     try {
-      const [suppRes, polRes] = await Promise.all([
-        fetch("/api/suppliers"),
-        fetch("/api/admin/policy")
-      ]);
-      if (suppRes.ok) {
-        const suppData = await suppRes.json();
-        setSuppliers(suppData.suppliers ?? []);
-      }
-      if (polRes.ok) {
-        const polData = await polRes.json();
-        setAdminPolicy(polData.adminPolicy ?? DEFAULT_POLICY);
-        setRolePermissions(polData.rolePermissions ?? {} as Record<RoleKey, PermissionKey[]>);
-      }
+      const { data } = await entityStore.swrFetch("admin_data", async () => {
+        const [suppRes, polRes] = await Promise.all([
+          fetch("/api/suppliers"),
+          fetch("/api/admin/policy")
+        ]);
+        const suppData = suppRes.ok ? await suppRes.json() : {};
+        const polData = polRes.ok ? await polRes.json() : {};
+        return {
+          suppliers: (suppData.suppliers ?? []) as Supplier[],
+          adminPolicy: (polData.adminPolicy ?? DEFAULT_POLICY) as AdminPolicy,
+          rolePermissions: (polData.rolePermissions ?? {} as Record<RoleKey, PermissionKey[]>)
+        };
+      }, (fresh) => {
+        setSuppliers(fresh.suppliers);
+        setAdminPolicy(fresh.adminPolicy);
+        setRolePermissions(fresh.rolePermissions);
+      });
+      setSuppliers(data.suppliers);
+      setAdminPolicy(data.adminPolicy);
+      setRolePermissions(data.rolePermissions);
     } catch { /* silent */ }
   }, []);
 
   const fetchUsers = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/users");
-      if (res.ok) {
-        const data = await res.json();
-        setUserList(data.users ?? []);
-      }
+      const { data } = await entityStore.swrFetch("users", async () => {
+        const res = await fetch("/api/admin/users");
+        if (!res.ok) throw new Error();
+        const json = await res.json();
+        const list = (json.users ?? []) as ApiUser[];
+        entityStore.setUsers(list);
+        return list;
+      }, (fresh) => {
+        setUserList(fresh);
+      });
+      setUserList(data);
     } catch { /* silent */ }
   }, []);
 
@@ -673,14 +711,20 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     try {
       const preflight = loginPasswordSchema.safeParse(loginPassword);
       if (!preflight.success) {
-        alert("Mật khẩu không hợp lệ.");
+        alert("Mật khẩu không hợp lệ (tối thiểu 8 ký tự).");
+        setIsLoading(false);
+        return;
+      }
+      const identifierParsed = loginIdentifierSchema.safeParse(loginEmail);
+      if (!identifierParsed.success) {
+        alert("Vui lòng nhập email hoặc số điện thoại hợp lệ.");
         setIsLoading(false);
         return;
       }
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailSchema.parse(loginEmail), password: preflight.data })
+        body: JSON.stringify({ identifier: identifierParsed.data, password: preflight.data })
       });
       const text = await res.text();
       let data: { error?: string; user?: ApiUser } = {};
@@ -1884,14 +1928,14 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       >
         <form onSubmit={handleCredentialsLogin} className="flex flex-col gap-3.5 mt-1 text-xs">
           <div className="flex flex-col gap-1.5 font-semibold">
-            <label className="text-xs font-bold text-orange-950/90">Địa chỉ Email đại lý</label>
+            <label className="text-xs font-bold text-orange-950/90">Email hoặc Số điện thoại</label>
             <input
-              type="email"
+              type="text"
               className="text-input text-sm py-2.5 px-3 rounded-xl border-orange-200"
-              placeholder="ten@doanhnghiep.vn"
+              placeholder="Email hoặc số điện thoại (0987...)"
               value={loginEmail}
               onChange={(e) => setLoginEmail(e.target.value)}
-              autoComplete="email"
+              autoComplete="username"
               required
             />
           </div>
