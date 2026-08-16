@@ -46,7 +46,7 @@ async def vercel_path_rewrite(request: Request, call_next):
             },
         )
 
-    if final_path.startswith(settings.API_V1_STR) and not is_public_api_path(final_path):
+    if final_path.startswith(settings.API_V1_STR) and not is_public_api_path(final_path, request.method):
         try:
             require_internal_request(request)
         except HTTPException as exc:
