@@ -4,7 +4,7 @@ import { getOrderRevision } from "@/server/db";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const POLL_INTERVAL_MS = 15_000;
+const POLL_INTERVAL_MS = 3_000;
 const STREAM_LIFETIME_MS = 60_000;
 
 export async function GET() {

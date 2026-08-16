@@ -17,12 +17,14 @@ import {
   CheckCircle2,
   FileText,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  History
 } from "lucide-react";
 import type { CustomerOrder, Product } from "@/lib/domain";
 import { formatVnd } from "@/lib/money";
 import { StatusPill } from "../ui/StatusPill";
 import { Modal } from "../ui/Modal";
+import { OrderRevisionHistoryModal } from "../shared/OrderRevisionHistoryModal";
 
 interface OrderTimelineProps {
   isLoggedIn: boolean;
@@ -69,6 +71,9 @@ export function OrderTimeline({
   // Modal request change state
   const [isRequestChangeOpen, setIsRequestChangeOpen] = useState(false);
   const [changeReason, setChangeReason] = useState("");
+
+  // Modal order revision history state
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
 
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -179,10 +184,21 @@ export function OrderTimeline({
         <div className="flex flex-col gap-4">
           {/* Step Timeline Card */}
           <div className="panel p-4 sm:p-6 bg-white border-2 border-orange-100 rounded-3xl flex flex-col gap-4 shadow-sm">
-            <div className="section-title flex justify-between items-center pb-3 border-b border-dashed border-orange-100">
-              <h3 className="text-base sm:text-lg font-bold text-[#331B08] font-['Varela_Round'] flex items-center gap-2">
-                <PackageCheck size={20} className="text-orange-500" /> Tiến độ đơn hàng sỉ #{workingOrder.number || "001"}
-              </h3>
+            <div className="section-title flex flex-wrap justify-between items-center pb-3 border-b border-dashed border-orange-100 gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-base sm:text-lg font-bold text-[#331B08] font-['Varela_Round'] flex items-center gap-2">
+                  <PackageCheck size={20} className="text-orange-500" /> Tiến độ đơn hàng sỉ #{workingOrder.number || "001"}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsHistoryModalOpen(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold border border-orange-200 transition-colors cursor-pointer"
+                  title="Xem lịch sử các lần trao đổi, chỉnh sửa báo giá và duyệt đơn"
+                >
+                  <History size={13} className="text-orange-600" />
+                  <span>Lịch sử duyệt đơn</span>
+                </button>
+              </div>
               <StatusPill tone={workingOrder.commercialStatus === "quoted" ? "warning" : workingOrder.commercialStatus === "customer_accepted" ? "success" : "info"}>
                 {workingOrder.commercialStatus === "submitted"
                   ? "Chờ thẩm định giá"
@@ -708,6 +724,15 @@ export function OrderTimeline({
           </div>
         </div>
       </Modal>
+
+      {/* Modal xem lịch sử duyệt đơn hàng */}
+      <OrderRevisionHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        orderId={workingOrder.id}
+        orderNumber={workingOrder.number}
+        allProducts={allProducts}
+      />
     </>
   );
 }

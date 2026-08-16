@@ -9,6 +9,7 @@ from app.repositories.order_read import (
     get_orders_revision,
     list_orders as read_orders,
     list_orders_summary,
+    get_order_revision_history,
 )
 from app.repositories.orders import save_order as write_order
 
@@ -77,3 +78,13 @@ async def save_order(
     except ValueError as exc:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{order_id}/history", response_model=List[Dict[str, Any]])
+async def get_history(
+    order_id: str,
+    user_id: str,
+    is_admin: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_order_revision_history(db, order_id=order_id, actor_id=user_id, is_admin=is_admin)

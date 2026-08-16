@@ -4,7 +4,8 @@ import type {
   Product,
   Supplier,
   CustomerOrder,
-  UserAccount
+  UserAccount,
+  OrderRevisionRecord
 } from "@/lib/domain";
 import { backendFetchJson } from "@/server/backend-client";
 
@@ -148,6 +149,15 @@ export async function saveOrder(
     method: "POST",
     body: JSON.stringify({ order, expectedUpdatedAt })
   });
+}
+
+export async function getOrderRevisionHistory(
+  orderId: string,
+  user: UserAccount
+): Promise<OrderRevisionRecord[]> {
+  return backendFetch(
+    `/api/v1/orders/${orderId}/history?user_id=${user.id}&is_admin=${user.isAdmin}`
+  );
 }
 
 // ── ADMIN SETTINGS & PERMISSIONS ─────────────────────────────

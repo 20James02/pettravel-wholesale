@@ -25,11 +25,13 @@ import {
   Filter,
   CreditCard,
   AlertTriangle,
-  Edit3
+  Edit3,
+  History
 } from "lucide-react";
 import type { CustomerOrder, Supplier, Product, OrderItem } from "@/lib/domain";
 import type { ApiUser } from "../../types";
 import { formatVnd } from "@/lib/money";
+import { OrderRevisionHistoryModal } from "../shared/OrderRevisionHistoryModal";
 
 interface AdminOrdersProps {
   allOrders: CustomerOrder[];
@@ -104,6 +106,7 @@ export function AdminOrders({
   const [isAddItemModalOpen, setIsAddItemModalOpen] = useState<boolean>(false);
   const [isTimelineModalOpen, setIsTimelineModalOpen] = useState<boolean>(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Lock body scroll and active scroll to top when popup opens
@@ -444,13 +447,22 @@ export function AdminOrders({
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
                     Mã đơn hàng sỉ
                   </span>
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-2.5 flex-wrap">
                     <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight font-mono m-0">
                       # {activeOrder.number}
                     </h2>
                     <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
                       {activeOrder.commercialStatus === "customer_accepted" ? "Khách đã chốt" : "Bản thảo báo giá"}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsHistoryModalOpen(true)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-indigo-900/50 hover:bg-indigo-800/70 text-indigo-200 text-xs font-bold border border-indigo-500/40 transition-colors cursor-pointer"
+                      title="Xem lịch sử các lần sửa đổi sản phẩm, báo giá và trao đổi với khách"
+                    >
+                      <History size={13} className="text-indigo-400" />
+                      <span>Lịch sử duyệt đơn</span>
+                    </button>
                   </div>
                 </div>
 
@@ -1218,6 +1230,15 @@ export function AdminOrders({
           <span>{toastMessage}</span>
         </div>
       )}
+
+      {/* Modal Lịch sử duyệt đơn */}
+      <OrderRevisionHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        orderId={activeOrder.id}
+        orderNumber={activeOrder.number}
+        allProducts={allProducts}
+      />
     </div>
   );
 }

@@ -228,6 +228,29 @@ export interface CustomerOrder {
   updatedAt: string;
 }
 
+export interface OrderRevisionRecord {
+  id: string;
+  orderId: string;
+  revisionNo: number;
+  actorId: string;
+  actorName: string;
+  actorRole: "admin" | "customer" | "staff";
+  actionType: "submit_proposal" | "publish_quote" | "accept_quote" | "request_changes" | "update_shipping" | "update_order";
+  fromCommercialStatus?: string;
+  toCommercialStatus: string;
+  itemsSnapshot: OrderItem[];
+  quoteSnapshot?: QuoteVersion[];
+  shippingSnapshot: {
+    recipientName?: string;
+    recipientPhone?: string;
+    recipientAddress?: string;
+    customerTaxCode?: string;
+    customerNote?: string;
+  };
+  note?: string;
+  createdAt: string;
+}
+
 export interface PromotionTier {
   id: string;
   minOrderValue: number;

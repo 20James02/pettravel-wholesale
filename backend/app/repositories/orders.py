@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 from datetime import datetime, timezone
 import uuid
@@ -7,7 +8,7 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.repositories.order_read import invalidate_orders_cache
+from app.repositories.order_read import invalidate_orders_cache, _bound_in
 from app.services.order_workflow import execute_stock_command, stock_command_for_transition
 
 
@@ -37,7 +38,7 @@ async def save_order(
 ) -> dict[str, str]:
     actor = (
         await db.execute(
-            text("""select id, organization_id from app_users
+            text("""select id, organization_id, full_name from app_users
                 where id = :actor_id and status = 'active'"""),
             {"actor_id": actor_id},
         )
@@ -82,10 +83,12 @@ async def save_order(
         text("""insert into customer_orders
             (id, order_number, organization_id, created_by, commercial_status,
              payment_status, fulfillment_status, payment_intent, invoice_requested,
-             recipient_name, recipient_phone, recipient_address, updated_at, created_at)
+             recipient_name, recipient_phone, recipient_address, customer_tax_code,
+             customer_note, updated_at, created_at)
             values (:id, :order_number, :organization_id, :created_by, 'submitted',
                     'unrequested', 'not_started', :payment_intent, :invoice_requested,
-                    :recipient_name, :recipient_phone, :recipient_address, :now, :now)"""),
+                    :recipient_name, :recipient_phone, :recipient_address, :customer_tax_code,
+                    :customer_note, :now, :now)"""),
         {
             "id": order_id,
             "order_number": order_number,
@@ -96,6 +99,8 @@ async def save_order(
             "recipient_name": order.get("recipientName"),
             "recipient_phone": order.get("recipientPhone"),
             "recipient_address": order.get("recipientAddress"),
+            "customer_tax_code": order.get("customerTaxCode"),
+            "customer_note": order.get("customerNote"),
             "now": now,
         },
     )
@@ -123,13 +128,14 @@ async def save_order(
         if quantity < int(catalog["min_order_qty"]) or quantity > int(catalog["stock_qty"]):
             raise ValueError(f"Số lượng SKU {sku} không đáp ứng MOQ hoặc tồn khả dụng.")
         item_id = str(item.get("id") or f"item_{uuid.uuid4().hex}_{index}")
+        variant_image = str(item.get("variantImage") or "")
         await db.execute(
             text("""insert into order_items
                 (id, order_id, product_code_snapshot, product_name_snapshot,
-                 variant_sku_snapshot, variant_label_snapshot, supplier_id,
+                 variant_sku_snapshot, variant_label_snapshot, variant_image, supplier_id,
                  quantity, unit_price_snapshot, locked)
                 values (:id, :order_id, :product_code, :product_name, :sku,
-                        :variant_label, :supplier_id, :quantity, :unit_price, false)"""),
+                        :variant_label, :variant_image, :supplier_id, :quantity, :unit_price, false)"""),
             {
                 "id": item_id,
                 "order_id": order_id,
@@ -137,6 +143,7 @@ async def save_order(
                 "product_name": catalog["name"],
                 "sku": sku,
                 "variant_label": catalog["label"],
+                "variant_image": variant_image,
                 "supplier_id": supplier_id,
                 "quantity": quantity,
                 "unit_price": int(catalog["wholesale_price"]),
@@ -176,6 +183,35 @@ async def save_order(
                 "created_at": now,
             },
         )
+
+    actor_name = str(actor.get("full_name") or "Đại lý")
+    await db.execute(
+        text("""insert into order_revision_history
+            (id, order_id, revision_no, actor_id, actor_name, actor_role,
+             action_type, from_commercial_status, to_commercial_status,
+             items_snapshot, quote_snapshot, shipping_snapshot, note, created_at)
+            values (:id, :order_id, 1, :actor_id, :actor_name, 'customer',
+                    'submit_proposal', 'draft', 'submitted',
+                    CAST(:items_snapshot AS jsonb), CAST(:quote_snapshot AS jsonb),
+                    CAST(:shipping_snapshot AS jsonb), :note, :now)"""),
+        {
+            "id": f"rev_{uuid.uuid4().hex}",
+            "order_id": order_id,
+            "actor_id": actor_id,
+            "actor_name": actor_name,
+            "items_snapshot": json.dumps(items),
+            "quote_snapshot": json.dumps(order.get("quoteVersions") or []),
+            "shipping_snapshot": json.dumps({
+                "recipientName": order.get("recipientName") or "",
+                "recipientPhone": order.get("recipientPhone") or "",
+                "recipientAddress": order.get("recipientAddress") or "",
+                "customerTaxCode": order.get("customerTaxCode") or "",
+                "customerNote": order.get("customerNote") or "",
+            }),
+            "note": str(order.get("customerNote") or ""),
+            "now": now,
+        },
+    )
     await db.commit()
     return {"orderId": order_id, "orderNumber": order_number, "updatedAt": _iso(now) or ""}
 
@@ -272,6 +308,8 @@ async def _update_order(
         "recipient_name": order.get("recipientName", current["recipient_name"]),
         "recipient_phone": order.get("recipientPhone", current["recipient_phone"]),
         "recipient_address": order.get("recipientAddress", current["recipient_address"]),
+        "customer_tax_code": order.get("customerTaxCode", current["customer_tax_code"] if "customer_tax_code" in current else None),
+        "customer_note": order.get("customerNote", current["customer_note"] if "customer_note" in current else None),
         "commercial_status": next_commercial_status,
         "payment_status": order.get("paymentStatus", current["payment_status"]) if internal else current["payment_status"],
         "fulfillment_status": order.get("fulfillmentStatus", current["fulfillment_status"]) if internal else current["fulfillment_status"],
@@ -282,11 +320,105 @@ async def _update_order(
         text("""update customer_orders set payment_intent = :payment_intent,
             invoice_requested = :invoice_requested, recipient_name = :recipient_name,
             recipient_phone = :recipient_phone, recipient_address = :recipient_address,
+            customer_tax_code = :customer_tax_code, customer_note = :customer_note,
             commercial_status = :commercial_status, payment_status = :payment_status,
             fulfillment_status = :fulfillment_status, assigned_staff_id = :assigned_staff_id,
             updated_at = :now where id = :id"""),
         values,
     )
+
+    if internal and order.get("items") is not None:
+        incoming_items = order["items"]
+        if not incoming_items:
+            raise ValueError("Đơn hàng phải có ít nhất một sản phẩm.")
+
+        existing_items_rows = (
+            await db.execute(
+                text("select id from order_items where order_id = :order_id"),
+                {"order_id": order_id},
+            )
+        ).scalars().all()
+        existing_item_ids = set(existing_items_rows)
+        incoming_item_ids = {str(item.get("id")) for item in incoming_items if item.get("id")}
+
+        to_delete = existing_item_ids - incoming_item_ids
+        if to_delete:
+            del_filter, del_params = _bound_in("order_item_id", to_delete, "del_item")
+            await db.execute(text(f"delete from fulfillment_items where {del_filter}"), del_params)
+            del_filter_oi, del_params_oi = _bound_in("id", to_delete, "del_oi")
+            await db.execute(
+                text(f"delete from order_items where {del_filter_oi} and order_id = :order_id"),
+                {**del_params_oi, "order_id": order_id},
+            )
+
+        for index, item in enumerate(incoming_items):
+            item_id = str(item.get("id") or f"item_{uuid.uuid4().hex}_{index}")
+            sku = str(item.get("variantSku") or "")
+            supplier_id = str(item.get("supplierId") or "sup_pettravel")
+            quantity = int(item.get("quantity") or 1)
+            unit_price = int(item.get("unitPriceSnapshot") or 0)
+            product_code = str(item.get("productCode") or "")
+            product_name = str(item.get("productName") or "")
+            variant_label = str(item.get("variantLabel") or sku)
+            variant_image = str(item.get("variantImage") or "")
+
+            if item_id in existing_item_ids:
+                await db.execute(
+                    text("""update order_items set
+                        quantity = :quantity,
+                        unit_price_snapshot = :unit_price,
+                        variant_label_snapshot = :variant_label,
+                        variant_image = :variant_image
+                        where id = :id and order_id = :order_id"""),
+                    {
+                        "id": item_id,
+                        "order_id": order_id,
+                        "quantity": quantity,
+                        "unit_price": unit_price,
+                        "variant_label": variant_label,
+                        "variant_image": variant_image,
+                    },
+                )
+            else:
+                await db.execute(
+                    text("""insert into order_items
+                        (id, order_id, product_code_snapshot, product_name_snapshot,
+                         variant_sku_snapshot, variant_label_snapshot, variant_image,
+                         supplier_id, quantity, unit_price_snapshot, locked)
+                        values (:id, :order_id, :product_code, :product_name,
+                                :sku, :variant_label, :variant_image, :supplier_id,
+                                :quantity, :unit_price, false)"""),
+                    {
+                        "id": item_id,
+                        "order_id": order_id,
+                        "product_code": product_code,
+                        "product_name": product_name,
+                        "sku": sku,
+                        "variant_label": variant_label,
+                        "variant_image": variant_image,
+                        "supplier_id": supplier_id,
+                        "quantity": quantity,
+                        "unit_price": unit_price,
+                    },
+                )
+                group_id = (
+                    await db.execute(
+                        text("select id from fulfillment_groups where order_id = :order_id and supplier_id = :supplier_id limit 1"),
+                        {"order_id": order_id, "supplier_id": supplier_id},
+                    )
+                ).scalar()
+                if not group_id:
+                    group_id = f"fulfillment_{uuid.uuid4().hex}"
+                    await db.execute(
+                        text("""insert into fulfillment_groups (id, order_id, supplier_id, status, internal_note, updated_at)
+                            values (:id, :order_id, :supplier_id, 'supplier_checking', '', :now)"""),
+                        {"id": group_id, "order_id": order_id, "supplier_id": supplier_id, "now": now},
+                    )
+                await db.execute(
+                    text("""insert into fulfillment_items (fulfillment_group_id, order_item_id)
+                        values (:group_id, :item_id) on conflict do nothing"""),
+                    {"group_id": group_id, "item_id": item_id},
+                )
 
     if internal and order.get("quoteVersions") is not None:
         if "order.quote" not in permissions:
@@ -628,6 +760,73 @@ async def _update_order(
             order_id=order_id,
             actor_id=actor_id,
         )
+
+    actor_user = (
+        await db.execute(text("select full_name from app_users where id = :id"), {"id": actor_id})
+    ).first()
+    actor_name = str(actor_user[0]) if actor_user else ("Quản trị viên" if internal else "Đại lý")
+
+    rev_row = await db.execute(
+        text("select coalesce(max(revision_no), 0) from order_revision_history where order_id = :id"),
+        {"id": order_id},
+    )
+    next_rev_no = int(rev_row.scalar() or 0) + 1
+
+    if internal and (order.get("quoteVersions") or next_commercial_status == "quoted"):
+        action_type = "publish_quote"
+        actor_role = "admin"
+    elif not internal and next_commercial_status == "customer_accepted":
+        action_type = "accept_quote"
+        actor_role = "customer"
+    elif not internal and next_commercial_status == "admin_review":
+        action_type = "request_changes"
+        actor_role = "customer"
+    elif not internal and (order.get("recipientName") or order.get("recipientAddress") or order.get("customerTaxCode")):
+        action_type = "update_shipping"
+        actor_role = "customer"
+    else:
+        action_type = "update_order"
+        actor_role = "admin" if internal else "customer"
+
+    note = (
+        order.get("customerNote")
+        or (order.get("comments", [{}])[-1].get("message") if order.get("comments") else "")
+        or ""
+    )
+
+    await db.execute(
+        text("""insert into order_revision_history
+            (id, order_id, revision_no, actor_id, actor_name, actor_role,
+             action_type, from_commercial_status, to_commercial_status,
+             items_snapshot, quote_snapshot, shipping_snapshot, note, created_at)
+            values (:id, :order_id, :rev_no, :actor_id, :actor_name, :actor_role,
+                    :action_type, :from_status, :to_status,
+                    CAST(:items_snapshot AS jsonb), CAST(:quote_snapshot AS jsonb),
+                    CAST(:shipping_snapshot AS jsonb), :note, :now)"""),
+        {
+            "id": f"rev_{uuid.uuid4().hex}",
+            "order_id": order_id,
+            "rev_no": next_rev_no,
+            "actor_id": actor_id,
+            "actor_name": actor_name,
+            "actor_role": actor_role,
+            "action_type": action_type,
+            "from_status": current["commercial_status"],
+            "to_status": next_commercial_status,
+            "items_snapshot": json.dumps(order.get("items") or []),
+            "quote_snapshot": json.dumps(order.get("quoteVersions") or []),
+            "shipping_snapshot": json.dumps({
+                "recipientName": values["recipient_name"] or "",
+                "recipientPhone": values["recipient_phone"] or "",
+                "recipientAddress": values["recipient_address"] or "",
+                "customerTaxCode": values["customer_tax_code"] or "",
+                "customerNote": values["customer_note"] or "",
+            }),
+            "note": str(note)[:2000],
+            "now": now,
+        },
+    )
+
     await db.commit()
     invalidate_orders_cache()
     return {

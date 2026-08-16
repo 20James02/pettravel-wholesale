@@ -360,6 +360,8 @@ async def list_orders(db: AsyncSession, *, actor_id: str, is_admin: bool) -> lis
                 "recipientName": order_row["recipient_name"],
                 "recipientPhone": order_row["recipient_phone"],
                 "recipientAddress": order_row["recipient_address"],
+                "customerTaxCode": order_row["customer_tax_code"],
+                "customerNote": order_row["customer_note"],
                 "items": [
                     {
                         "id": item["id"],
@@ -367,6 +369,7 @@ async def list_orders(db: AsyncSession, *, actor_id: str, is_admin: bool) -> lis
                         "productName": item["product_name_snapshot"],
                         "variantSku": item["variant_sku_snapshot"],
                         "variantLabel": item["variant_label_snapshot"],
+                        "variantImage": item["variant_image"] if "variant_image" in item else None,
                         "quantity": int(item["quantity"]),
                         "unitPriceSnapshot": int(item["unit_price_snapshot"]),
                         "supplierId": item["supplier_id"],
@@ -439,3 +442,51 @@ async def list_orders(db: AsyncSession, *, actor_id: str, is_admin: bool) -> lis
         )
     _orders_cache[cache_key] = (now, output)
     return output
+
+
+async def get_order_revision_history(
+    db: AsyncSession, *, order_id: str, actor_id: str, is_admin: bool
+) -> list[dict[str, Any]]:
+    order = (
+        await db.execute(
+            text("""select o.id, o.organization_id from customer_orders o
+                where o.id = :order_id and (:is_admin = true or o.organization_id = (
+                    select organization_id from app_users where id = :actor_id and status = 'active'
+                ))"""),
+            {"order_id": order_id, "actor_id": actor_id, "is_admin": is_admin},
+        )
+    ).mappings().first()
+    if not order:
+        return []
+
+    rows = (
+        await db.execute(
+            text("""select id, order_id, revision_no, actor_id, actor_name, actor_role,
+                action_type, from_commercial_status, to_commercial_status,
+                items_snapshot, quote_snapshot, shipping_snapshot, note, created_at
+                from order_revision_history
+                where order_id = :order_id
+                order by revision_no asc"""),
+            {"order_id": order_id},
+        )
+    ).mappings().all()
+
+    return [
+        {
+            "id": row["id"],
+            "orderId": row["order_id"],
+            "revisionNo": row["revision_no"],
+            "actorId": row["actor_id"],
+            "actorName": row["actor_name"],
+            "actorRole": row["actor_role"],
+            "actionType": row["action_type"],
+            "fromCommercialStatus": row["from_commercial_status"],
+            "toCommercialStatus": row["to_commercial_status"],
+            "itemsSnapshot": row["items_snapshot"],
+            "quoteSnapshot": row["quote_snapshot"],
+            "shippingSnapshot": row["shipping_snapshot"],
+            "note": row["note"],
+            "createdAt": _iso(row["created_at"]),
+        }
+        for row in rows
+    ]

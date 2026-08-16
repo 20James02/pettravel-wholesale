@@ -10,9 +10,17 @@ interface ModalProps {
   title: string;
   children: ReactNode;
   closeOnBackdropClick?: boolean;
+  maxWidth?: string;
 }
 
-export function Modal({ isOpen, onClose, title, children, closeOnBackdropClick = false }: ModalProps) {
+export function Modal({
+  isOpen,
+  onClose,
+  title,
+  children,
+  closeOnBackdropClick = false,
+  maxWidth = "max-w-2xl"
+}: ModalProps) {
   const contentRef = useRef<HTMLDivElement>(null);
 
   // Lock body scroll when open and scroll to top of modal
@@ -41,7 +49,7 @@ export function Modal({ isOpen, onClose, title, children, closeOnBackdropClick =
       {/* Modal Content */}
       <div 
         ref={contentRef}
-        className="relative w-full max-w-2xl bg-white border-2 border-brand-line rounded-panel shadow-clay-card p-6 animate-scale-in max-h-[90vh] overflow-y-auto"
+        className={`relative w-full ${maxWidth} bg-white border-2 border-brand-line rounded-panel shadow-clay-card p-6 animate-scale-in max-h-[90vh] overflow-y-auto`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

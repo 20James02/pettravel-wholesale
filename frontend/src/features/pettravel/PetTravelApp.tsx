@@ -378,6 +378,11 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
           setWorkingOrder(targetOrder);
           setAdminOrderItems(targetOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
           setCartItems(targetOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
+        } else {
+          setWorkingOrder(targetOrder);
+          if (targetOrder.commercialStatus !== "draft") {
+            setCartItems(targetOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
+          }
         }
       }
     } catch { /* silent */ }
@@ -392,7 +397,6 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       try {
         const payload = JSON.parse(e.data);
         if (payload?.type === "order.delta" && payload?.orderId && payload?.patch) {
-          // Fine-grained delta patch without full refetch
           entityStore.patchOrder(payload.orderId, payload.patch);
           setAllOrders(entityStore.getAllOrders());
         } else if (payload?.revision && payload.revision !== lastRevisionRef.current) {
@@ -405,9 +409,17 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       }
     };
     events.addEventListener("orders.snapshot", handleSnapshot);
+
+    const pollInterval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void fetchOrders();
+      }
+    }, 4000);
+
     return () => {
       events.removeEventListener("orders.snapshot", handleSnapshot);
       events.close();
+      clearInterval(pollInterval);
     };
   }, [currentUser, fetchOrders]);
 
