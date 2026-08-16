@@ -39,7 +39,11 @@ def build_database_connect_config(
         allowed = ", ".join(sorted(REMOTE_SSL_MODES))
         raise ValueError(f"Remote DB_SSL_MODE must be one of: {allowed}.")
 
-    connect_args: dict[str, object] = {"timeout": 10}
+    connect_args: dict[str, object] = {
+        "timeout": 10,
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+    }
     if selected_mode == "require":
         connect_args["ssl"] = "require"
         return clean_url, connect_args
