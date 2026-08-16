@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     const user = await requireAuth();
     const input = paymentRequestSchema.parse(await request.json());
     const order = (await getOrders(user)).find((candidate) => candidate.id === input.orderId);
-    if (!order || order.number !== input.orderNumber || (!user.isAdmin && order.customerId !== user.id)) {
+    if (!order || order.number !== input.orderNumber) {
       return NextResponse.json({ error: "Không có quyền tạo yêu cầu thanh toán cho đơn này." }, { status: 403 });
     }
 

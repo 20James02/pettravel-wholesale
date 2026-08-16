@@ -311,7 +311,19 @@ async def _update_order(
         "customer_tax_code": order.get("customerTaxCode", current["customer_tax_code"] if "customer_tax_code" in current else None),
         "customer_note": order.get("customerNote", current["customer_note"] if "customer_note" in current else None),
         "commercial_status": next_commercial_status,
-        "payment_status": order.get("paymentStatus", current["payment_status"]) if internal else current["payment_status"],
+        "payment_status": (
+            order.get("paymentStatus", current["payment_status"])
+            if internal
+            else (
+                ("full_requested" if order.get("paymentIntent", current["payment_intent"]) == "pay_full" else "deposit_requested")
+                if next_commercial_status == "customer_accepted"
+                else (
+                    str(order["paymentStatus"])
+                    if order.get("paymentStatus") in {"deposit_uploaded", "full_uploaded", "deposit_requested", "full_requested"}
+                    else current["payment_status"]
+                )
+            )
+        ),
         "fulfillment_status": order.get("fulfillmentStatus", current["fulfillment_status"]) if internal else current["fulfillment_status"],
         "assigned_staff_id": order.get("assignedStaffId", current["assigned_staff_id"]) if internal else current["assigned_staff_id"],
         "now": now,

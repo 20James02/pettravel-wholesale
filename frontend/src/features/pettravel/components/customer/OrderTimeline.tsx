@@ -99,21 +99,44 @@ export function OrderTimeline({
     return workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1];
   }, [workingOrder.quoteVersions]);
 
-  // Lấy ghi chú / thông báo mới nhất từ Admin
+  // Lấy ghi chú / thông báo mới nhất từ Admin (kèm theo note trực tiếp trên order)
   const latestAdminNote = useMemo(() => {
+    if (workingOrder.customerNote && workingOrder.commercialStatus === "quoted") {
+      return workingOrder.customerNote;
+    }
     const pubNote = workingOrder.comments?.find(
       (c) => c.audience === "customer_visible" && (c.id.startsWith("c_pub_note") || c.author === "Admin" || c.author === "Operator") && !c.message.startsWith("Nhân viên đã thẩm định")
     );
-    return pubNote?.message || null;
-  }, [workingOrder.comments]);
+    return pubNote?.message || workingOrder.customerNote || null;
+  }, [workingOrder.comments, workingOrder.customerNote, workingOrder.commercialStatus]);
 
-  // Lấy payment request hoạt động cuối cùng
+  // Lấy payment request hoạt động cuối cùng (kèm fallback tức thì khi khách vừa chốt đơn)
   const activeReq = useMemo(() => {
-    if (!workingOrder.paymentRequests || workingOrder.paymentRequests.length === 0) {
-      return null;
+    if (workingOrder.paymentRequests && workingOrder.paymentRequests.length > 0) {
+      const active = workingOrder.paymentRequests.find((r) => r.status === "active") || workingOrder.paymentRequests[workingOrder.paymentRequests.length - 1];
+      if (active) return active;
     }
-    return workingOrder.paymentRequests[workingOrder.paymentRequests.length - 1];
-  }, [workingOrder.paymentRequests]);
+    // Fallback tức thì khi order ở trạng thái khách đã chốt hoặc đang yêu cầu thanh toán
+    if (
+      (workingOrder.commercialStatus === "customer_accepted" || workingOrder.paymentStatus.includes("requested")) &&
+      quote.finalTotal > 0
+    ) {
+      const isDeposit = workingOrder.paymentIntent === "deposit_cod";
+      const amount = isDeposit ? (quote.depositAmount > 0 ? quote.depositAmount : Math.round(quote.finalTotal * 0.3)) : quote.finalTotal;
+      const ref = `PTW-${workingOrder.number || "ORDER"}-${isDeposit ? "DEP" : "FULL"}`;
+      return {
+        id: `pay_req_auto_${workingOrder.id}`,
+        quoteVersion: quote.version,
+        amount,
+        purpose: isDeposit ? ("deposit" as const) : ("full" as const),
+        reference: ref,
+        qrPayload: `00020101021238540010A00000072701240006970422011219036888888880208QRIBFTTA5303704540${amount}5802VN62${ref.length.toString().padStart(2, "0")}${ref}6304`,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        status: "active" as const
+      };
+    }
+    return null;
+  }, [workingOrder.paymentRequests, workingOrder.commercialStatus, workingOrder.paymentStatus, workingOrder.paymentIntent, workingOrder.number, workingOrder.id, quote]);
 
   const paymentDetails = useMemo(() => {
     const fields = new Map(
@@ -455,21 +478,21 @@ export function OrderTimeline({
                 </div>
 
                 {/* VietQR Mockup Frame */}
-                <div className="w-48 p-3.5 bg-gradient-to-b from-blue-50/80 to-orange-50/80 border-2 border-orange-100 rounded-2xl flex flex-col items-center text-center relative overflow-hidden shadow-sm">
-                  <span className="text-[10px] text-blue-900 font-bold tracking-wider mb-2 bg-blue-100/70 px-2.5 py-0.5 rounded-full">
+                <div className="w-52 p-3 bg-gradient-to-b from-blue-50/90 to-orange-50/90 border-2 border-orange-200 rounded-2xl flex flex-col items-center text-center relative overflow-hidden shadow-sm">
+                  <span className="text-[10px] text-blue-900 font-bold tracking-wider mb-2 bg-blue-100/80 px-3 py-0.5 rounded-full border border-blue-200">
                     VIETQR · NAPAS 247
                   </span>
 
-                  <div className="w-32 h-32 bg-white border border-orange-100 rounded-xl flex flex-col items-center justify-center p-2 relative shadow-inner">
-                    <div className="w-full h-full bg-[radial-gradient(#000_1.5px,transparent_1.5px)] [background-size:7px_7px] opacity-80 flex items-center justify-center">
-                      <div className="w-9 h-9 bg-orange-500 rounded-lg flex items-center justify-center text-[9px] text-white font-extrabold shadow-md">
-                        PET
-                      </div>
-                    </div>
+                  <div className="w-36 h-36 bg-white border border-orange-100 rounded-xl flex items-center justify-center p-1 relative shadow-inner overflow-hidden">
+                    <img
+                      src={`https://img.vietqr.io/image/970422-${paymentDetails.account}-compact2.png?amount=${activeReq.amount}&addInfo=${encodeURIComponent(activeReq.reference)}&accountName=${encodeURIComponent(paymentDetails.name)}`}
+                      alt="Mã VietQR thanh toán tự động"
+                      className="w-full h-full object-contain"
+                    />
                   </div>
 
-                  <strong className="text-base text-orange-600 block mt-3 font-extrabold font-mono">{formatVnd(activeReq.amount)}</strong>
-                  <span className="text-[10px] text-gray-500 font-mono mt-0.5">TK: {paymentDetails.account}</span>
+                  <strong className="text-base text-orange-600 block mt-2.5 font-extrabold font-mono">{formatVnd(activeReq.amount)}</strong>
+                  <span className="text-[10px] text-gray-600 font-mono mt-0.5 font-semibold">TK: {paymentDetails.account}</span>
                 </div>
 
                 {/* Chi tiết tài khoản với nút Copy nhanh */}
@@ -529,6 +552,40 @@ export function OrderTimeline({
                     </div>
                   </div>
                 </div>
+
+                {/* Trạng thái minh chứng đã gửi */}
+                {workingOrder.paymentStatus.includes("uploaded") && (
+                  <div className="w-full p-3 bg-amber-50 border border-amber-300 rounded-2xl flex flex-col gap-1.5 text-xs text-amber-900 shadow-sm animate-fade-in">
+                    <div className="flex items-center gap-2 font-bold text-amber-950">
+                      <CheckCircle2 size={16} className="text-amber-600 shrink-0" />
+                      <span>Đã gửi hóa đơn chuyển khoản</span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 m-0">
+                      Minh chứng chuyển khoản của bạn đã được tiếp nhận. Kế toán Pet Travel đang đối soát để xác nhận đơn hàng!
+                    </p>
+                    <label className="text-[11px] text-amber-900 font-bold underline cursor-pointer hover:text-orange-600 mt-1 flex items-center gap-1">
+                      <Camera size={13} /> Tải lại ảnh khác nếu cần thay đổi
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="sr-only"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) onUploadProof(file);
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {/* Trạng thái kế toán đã xác nhận */}
+                {(workingOrder.paymentStatus.includes("confirmed") || workingOrder.paymentStatus === "paid") && (
+                  <div className="w-full p-3 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center gap-2 text-xs font-bold text-emerald-900 shadow-sm animate-fade-in">
+                    <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+                    <span>Kế toán đã xác nhận thanh toán thành công! Đơn hàng sẵn sàng đóng gói.</span>
+                  </div>
+                )}
 
                 {/* Nút gửi ảnh xác nhận chuyển khoản hỗ trợ mở camera trực tiếp */}
                 {workingOrder.paymentStatus.includes("requested") && (

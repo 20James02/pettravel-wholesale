@@ -51,6 +51,17 @@ const customerProofSchema = z.object({
   uploadedAt: z.string().optional()
 });
 
+const customerPaymentRequestSchema = z.object({
+  id: z.string().trim().min(1),
+  quoteVersion: z.number().int().nonnegative(),
+  amount: z.number().int().nonnegative(),
+  purpose: z.enum(["deposit", "full", "remaining"]),
+  reference: z.string().trim().min(1),
+  qrPayload: z.string().trim().min(1),
+  expiresAt: z.string().min(1),
+  status: z.enum(["active", "uploaded", "confirmed", "expired", "superseded"])
+});
+
 const customerOrderUpdateSchema = z.object({
   id: idSchema,
   paymentIntent: z.enum(["deposit_cod", "pay_full"]).optional(),
@@ -61,6 +72,8 @@ const customerOrderUpdateSchema = z.object({
   customerTaxCode: z.string().trim().max(50).optional().or(z.literal("")),
   customerNote: z.string().trim().max(1000).optional().or(z.literal("")),
   commercialStatus: z.enum(["draft", "submitted", "admin_review", "quoted", "customer_accepted", "locked", "cancelled"]).optional(),
+  paymentStatus: z.enum(["unrequested", "deposit_requested", "deposit_uploaded", "deposit_confirmed", "full_requested", "full_uploaded", "paid", "cod_remaining", "refunded"]).optional(),
+  paymentRequests: z.array(customerPaymentRequestSchema).max(20).optional(),
   comments: z.array(customerCommentSchema).max(20, "Mỗi lần cập nhật tối đa 20 ghi chú.").optional(),
   paymentProofs: z.array(customerProofSchema).max(20, "Mỗi lần cập nhật tối đa 20 minh chứng.").optional()
 });
@@ -373,6 +386,10 @@ export async function PUT(request: Request) {
 
       // Allow customer to update status (e.g. customer_accepted when agreeing to quote, or admin_review when asking for re-quote)
       let nextCommercialStatus = existing.commercialStatus;
+      let nextQuoteVersions = existing.quoteVersions;
+      let nextPaymentStatus = existing.paymentStatus;
+      let nextPaymentRequests = existing.paymentRequests;
+
       if (customerPayload.commercialStatus) {
         if (
           (existing.commercialStatus === "quoted" && customerPayload.commercialStatus === "customer_accepted") ||
@@ -380,7 +397,22 @@ export async function PUT(request: Request) {
           (existing.commercialStatus === "draft" && customerPayload.commercialStatus === "submitted")
         ) {
           nextCommercialStatus = customerPayload.commercialStatus;
+          if (customerPayload.commercialStatus === "customer_accepted") {
+            nextQuoteVersions = existing.quoteVersions.map((q, idx) =>
+              idx === existing.quoteVersions.length - 1 ? { ...q, status: "accepted" as const } : q
+            );
+            const intent = customerPayload.paymentIntent ?? existing.paymentIntent;
+            nextPaymentStatus = intent === "pay_full" ? "full_requested" : "deposit_requested";
+          }
         }
+      }
+
+      if (customerPayload.paymentStatus) {
+        nextPaymentStatus = customerPayload.paymentStatus;
+      }
+
+      if (customerPayload.paymentRequests && customerPayload.paymentRequests.length > 0) {
+        nextPaymentRequests = customerPayload.paymentRequests;
       }
 
       orderToSave = {
@@ -396,12 +428,12 @@ export async function PUT(request: Request) {
         customerName: existing.customerName,
         customerCompany: existing.customerCompany,
         commercialStatus: nextCommercialStatus,
-        paymentStatus: existing.paymentStatus,
+        paymentStatus: nextPaymentStatus,
         fulfillmentStatus: existing.fulfillmentStatus,
         items: existing.items,
         fulfillmentGroups: existing.fulfillmentGroups,
-        quoteVersions: existing.quoteVersions,
-        paymentRequests: existing.paymentRequests,
+        quoteVersions: nextQuoteVersions,
+        paymentRequests: nextPaymentRequests,
         paymentProofs: safeProofs,
         comments: safeComments,
         assignedStaffId: existing.assignedStaffId,
