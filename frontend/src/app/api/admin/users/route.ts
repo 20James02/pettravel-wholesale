@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requirePermission, requireSameOrigin } from "@/server/auth";
+import { invalidateUserSessionCache, requirePermission, requireSameOrigin } from "@/server/auth";
 import { createAppUser, deleteAppUser, getAppUsers } from "@/server/db";
 import {
   emailSchema,
@@ -112,6 +112,7 @@ export async function DELETE(request: Request) {
     }
 
     const res = await deleteAppUser(userId);
+    invalidateUserSessionCache(userId);
     return NextResponse.json({ success: true, message: res.message || "Đã xóa tài khoản thành công." });
   } catch (error) {
     const msg = getValidationErrorMessage(error, "Không thể xóa tài khoản.");

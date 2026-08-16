@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin, requirePermission, requireSameOrigin } from "@/server/auth";
 import { backendFetchJson as backendFetch } from "@/server/backend-client";
+import { invalidateDbCache } from "@/server/db";
 import { getValidationErrorMessage, promotionsPolicySchema } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -41,6 +42,7 @@ export async function PUT(request: Request) {
 
   try {
     const payload = promotionsPolicySchema.parse(await request.json());
+    invalidateDbCache("admin_policy");
     await backendFetch(`/api/v1/categories/policy`, {
       method: "POST",
       body: JSON.stringify(payload)

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionUser, requireSameOrigin } from "@/server/auth";
+import { getSessionUser, invalidateUserSessionCache, requireSameOrigin } from "@/server/auth";
 
 export const runtime = "nodejs";
 
@@ -28,6 +28,11 @@ export async function DELETE(request: Request) {
     requireSameOrigin(request);
   } catch (resp) {
     if (resp instanceof Response) return resp;
+  }
+
+  const user = await getSessionUser();
+  if (user?.id) {
+    invalidateUserSessionCache(user.id);
   }
 
   const response = NextResponse.json({ ok: true });

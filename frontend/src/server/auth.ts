@@ -91,6 +91,22 @@ export function requireSameOrigin(request: Request): void {
     });
   }
 }
+interface CachedUserSession {
+  user: UserAccount;
+  cachedAt: number;
+}
+
+const userSessionCache = new Map<string, CachedUserSession>();
+const CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
+export function invalidateUserSessionCache(userId?: string): void {
+  if (userId) {
+    userSessionCache.delete(userId);
+  } else {
+    userSessionCache.clear();
+  }
+}
+
 export async function getSessionUser(): Promise<UserAccount | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
@@ -98,6 +114,12 @@ export async function getSessionUser(): Promise<UserAccount | null> {
 
   const userId = decodeSession(token);
   if (!userId) return null;
+
+  const now = Date.now();
+  const cached = userSessionCache.get(userId);
+  if (cached && now - cached.cachedAt < CACHE_TTL_MS) {
+    return cached.user;
+  }
 
   try {
     const res = await fetch(`${getBackendUrl()}/api/v1/users/by-id/${userId}`, {
@@ -111,7 +133,7 @@ export async function getSessionUser(): Promise<UserAccount | null> {
     }
     const isAdmin = INTERNAL_ROLE_KEYS.has(role);
 
-    return {
+    const userAccount: UserAccount = {
       id: row.id,
       name: row.name,
       company: row.company,
@@ -121,6 +143,9 @@ export async function getSessionUser(): Promise<UserAccount | null> {
       isAdmin,
       permissions: Array.isArray(row.permissions) ? row.permissions : []
     };
+
+    userSessionCache.set(userId, { user: userAccount, cachedAt: now });
+    return userAccount;
   } catch {
     return null;
   }

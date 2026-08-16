@@ -31,13 +31,52 @@ export async function deleteProduct(id: string): Promise<void> {
   });
 }
 
+// ── IN-MEMORY CACHE FOR STATIC/SEMI-STATIC DATA ─────────────
+
+interface CacheEntry<T> {
+  data: T;
+  cachedAt: number;
+}
+
+const dbCache = new Map<string, CacheEntry<unknown>>();
+const DB_CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
+function getCached<T>(key: string): T | null {
+  const entry = dbCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > DB_CACHE_TTL_MS) {
+    dbCache.delete(key);
+    return null;
+  }
+  return entry.data as T;
+}
+
+function setCached<T>(key: string, data: T): void {
+  dbCache.set(key, { data, cachedAt: Date.now() });
+}
+
+export function invalidateDbCache(prefix?: string): void {
+  if (prefix) {
+    for (const k of dbCache.keys()) {
+      if (k.startsWith(prefix)) dbCache.delete(k);
+    }
+  } else {
+    dbCache.clear();
+  }
+}
+
 // ── SUPPLIERS ────────────────────────────────────────────────
 
 export async function getSuppliers(): Promise<Supplier[]> {
-  return backendFetch(`/api/v1/suppliers`);
+  const cached = getCached<Supplier[]>("suppliers");
+  if (cached) return cached;
+  const data: Supplier[] = await backendFetch(`/api/v1/suppliers`);
+  setCached("suppliers", data);
+  return data;
 }
 
 export async function saveSupplier(supplier: Supplier): Promise<void> {
+  invalidateDbCache("suppliers");
   await backendFetch(`/api/v1/suppliers`, {
     method: "POST",
     body: JSON.stringify(supplier)
@@ -45,6 +84,7 @@ export async function saveSupplier(supplier: Supplier): Promise<void> {
 }
 
 export async function deleteSupplier(id: string): Promise<void> {
+  invalidateDbCache("suppliers");
   await backendFetch(`/api/v1/suppliers/${id}`, {
     method: "DELETE"
   });
@@ -53,10 +93,15 @@ export async function deleteSupplier(id: string): Promise<void> {
 // ── CATEGORIES (SETTINGS) ────────────────────────────────────
 
 export async function getCategories(): Promise<string[]> {
-  return backendFetch(`/api/v1/categories`);
+  const cached = getCached<string[]>("categories");
+  if (cached) return cached;
+  const data: string[] = await backendFetch(`/api/v1/categories`);
+  setCached("categories", data);
+  return data;
 }
 
 export async function saveCategories(categories: string[]): Promise<void> {
+  invalidateDbCache("categories");
   await backendFetch(`/api/v1/categories`, {
     method: "POST",
     body: JSON.stringify({ categories })
@@ -90,11 +135,19 @@ export interface AdminPolicy {
 }
 
 export async function getAdminPolicy(): Promise<AdminPolicy> {
-  return backendFetch(`/api/v1/categories/policy`);
+  const cached = getCached<AdminPolicy>("admin_policy");
+  if (cached) return cached;
+  const data: AdminPolicy = await backendFetch(`/api/v1/categories/policy`);
+  setCached("admin_policy", data);
+  return data;
 }
 
 export async function getRolePermissions(): Promise<Record<string, string[]>> {
-  return backendFetch(`/api/v1/users/role-permissions`);
+  const cached = getCached<Record<string, string[]>>("role_permissions");
+  if (cached) return cached;
+  const data: Record<string, string[]> = await backendFetch(`/api/v1/users/role-permissions`);
+  setCached("role_permissions", data);
+  return data;
 }
 
 // ── USER ACCOUNTS ────────────────────────────────────────────

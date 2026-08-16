@@ -86,10 +86,47 @@ interface OrderMutationResponse {
   order: CustomerOrder;
 }
 
-export function PetTravelApp() {
+import { TAB_ROUTE_MAP, ROUTE_TAB_MAP } from "./types";
+
+interface PetTravelAppProps {
+  initialTab?: TabKey;
+}
+
+export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   // --- CORE APPLICATION STATES ---
   const [mode, setMode] = useState<AppMode>("guest");
-  const [activeTab, setActiveTab] = useState<TabKey>("catalog");
+  const [activeTab, setActiveTabState] = useState<TabKey>(() => {
+    if (initialTab) return initialTab;
+    if (typeof window !== "undefined") {
+      const path = window.location.pathname;
+      return ROUTE_TAB_MAP[path] || "catalog";
+    }
+    return "catalog";
+  });
+
+  const setActiveTab = useCallback((newTab: TabKey | ((prev: TabKey) => TabKey)) => {
+    setActiveTabState((current) => {
+      const resolved = typeof newTab === "function" ? newTab(current) : newTab;
+      if (typeof window !== "undefined") {
+        const targetRoute = TAB_ROUTE_MAP[resolved] || "/";
+        if (window.location.pathname !== targetRoute) {
+          window.history.pushState(null, "", targetRoute);
+        }
+      }
+      return resolved;
+    });
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname;
+      const mappedTab = ROUTE_TAB_MAP[path] || "catalog";
+      setActiveTabState(mappedTab);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -248,7 +285,17 @@ export function PetTravelApp() {
             setCurrentUser(data.user);
             setMode(data.user.isAdmin ? "admin" : "customer");
             if (data.user.isAdmin) {
-              setActiveTab((prev) => (prev === "catalog" || prev === "profile" ? "admin" : prev));
+              if (initialTab) {
+                setActiveTab(initialTab);
+              } else if (typeof window !== "undefined") {
+                const path = window.location.pathname;
+                const mappedTab = ROUTE_TAB_MAP[path];
+                if (mappedTab) {
+                  setActiveTab(mappedTab);
+                } else {
+                  setActiveTab((prev: TabKey) => (prev === "catalog" || prev === "profile" ? "admin" : prev));
+                }
+              }
             }
             // Restore user's cart from localStorage
             const savedCart = localStorage.getItem(`ptw_cart_${data.user.id}`);
