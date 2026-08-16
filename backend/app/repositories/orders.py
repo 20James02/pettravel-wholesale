@@ -187,6 +187,7 @@ async def _update_order(
     order: dict[str, Any],
     expected_updated_at: str | None,
 ) -> dict[str, str]:
+    now = datetime.now(timezone.utc)
     order_id = str(order["id"])
     current = (
         await db.execute(

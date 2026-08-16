@@ -1296,12 +1296,15 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       updatedAt: new Date().toISOString()
     };
 
-    await syncOrder(updatedOrder);
-    setRecipientName(info.recipientName);
-    setRecipientPhone(info.recipientPhone);
-    setRecipientAddress(info.recipientAddress);
-    setCustomerTaxCode(info.customerTaxCode);
-    setCustomerNote(info.customerNote);
+    const ok = await syncOrder(updatedOrder);
+    if (ok) {
+      setRecipientName(info.recipientName);
+      setRecipientPhone(info.recipientPhone);
+      setRecipientAddress(info.recipientAddress);
+      setCustomerTaxCode(info.customerTaxCode);
+      setCustomerNote(info.customerNote);
+      alert("Đã cập nhật thông tin giao nhận thành công!");
+    }
   }
 
   async function handleConfirmCheckout() {
