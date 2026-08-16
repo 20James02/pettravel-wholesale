@@ -11,8 +11,7 @@ import {
   idSchema,
   phoneSchema,
   recipientSchema,
-  shortTextSchema,
-  vndAmountSchema
+  shortTextSchema
 } from "@/lib/validation";
 
 export const runtime = "nodejs";

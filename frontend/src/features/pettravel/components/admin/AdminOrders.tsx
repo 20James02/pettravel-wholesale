@@ -91,8 +91,7 @@ export function AdminOrders({
   handleAdminQtyChange,
   handlePublishQuote,
   confirmDeposit,
-  handlePostOrderAccounting,
-  addComment
+  handlePostOrderAccounting
 }: AdminOrdersProps) {
   const [darkTabFilter, setDarkTabFilter] = useState<"all" | "draft" | "unpaid" | "accepted" | "locked">("all");
   const [showAdjustments, setShowAdjustments] = useState<boolean>(false);

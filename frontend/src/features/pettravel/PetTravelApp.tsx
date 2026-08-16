@@ -313,7 +313,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     return () => {
       lenis.destroy();
     };
-  }, []);
+  }, [initialTab, setActiveTab]);
 
   // Sync window overflow on modal open
   useEffect(() => {
