@@ -18,6 +18,7 @@ export const runtime = "nodejs";
 
 const customerOrderItemSchema = z.object({
   variantSku: z.string().trim().min(1, "Thiếu SKU sản phẩm.").max(120, "SKU sản phẩm quá dài."),
+  variantImage: z.string().trim().nullish(),
   quantity: z
     .number()
     .int("Số lượng phải là số nguyên.")
@@ -30,7 +31,9 @@ const createCustomerOrderSchema = z.object({
   paymentIntent: z.enum(["deposit_cod", "pay_full"]).default("deposit_cod"),
   recipientName: recipientSchema.shape.recipientName.optional().or(z.literal("")),
   recipientPhone: phoneSchema.optional().or(z.literal("")),
-  recipientAddress: recipientSchema.shape.recipientAddress.optional().or(z.literal(""))
+  recipientAddress: recipientSchema.shape.recipientAddress.optional().or(z.literal("")),
+  customerTaxCode: z.string().trim().max(50).optional().or(z.literal("")),
+  customerNote: z.string().trim().max(1000).optional().or(z.literal(""))
 });
 
 const customerCommentSchema = z.object({
@@ -52,9 +55,12 @@ const customerOrderUpdateSchema = z.object({
   id: idSchema,
   paymentIntent: z.enum(["deposit_cod", "pay_full"]).optional(),
   invoiceRequested: z.boolean().optional(),
-  recipientName: recipientSchema.shape.recipientName.optional(),
-  recipientPhone: phoneSchema.optional(),
-  recipientAddress: recipientSchema.shape.recipientAddress.optional(),
+  recipientName: recipientSchema.shape.recipientName.optional().or(z.literal("")),
+  recipientPhone: phoneSchema.optional().or(z.literal("")),
+  recipientAddress: recipientSchema.shape.recipientAddress.optional().or(z.literal("")),
+  customerTaxCode: z.string().trim().max(50).optional().or(z.literal("")),
+  customerNote: z.string().trim().max(1000).optional().or(z.literal("")),
+  commercialStatus: z.enum(["draft", "submitted", "admin_review", "quoted", "customer_accepted", "locked", "cancelled"]).optional(),
   comments: z.array(customerCommentSchema).max(20, "Mỗi lần cập nhật tối đa 20 ghi chú.").optional(),
   paymentProofs: z.array(customerProofSchema).max(20, "Mỗi lần cập nhật tối đa 20 minh chứng.").optional()
 });
@@ -65,6 +71,7 @@ const adminOrderItemSchema = z.object({
   productName: z.string().trim().nullish(),
   variantSku: z.string().trim().min(1, "Thiếu SKU phân loại.").max(120, "SKU phân loại quá dài."),
   variantLabel: z.string().trim().nullish(),
+  variantImage: z.string().trim().nullish(),
   quantity: z.number().int("Số lượng phải là số nguyên.").positive("Số lượng phải lớn hơn 0.").max(10_000),
   unitPriceSnapshot: z.number().int().nonnegative("Đơn giá phải là số không âm."),
   supplierId: z.string().nullish()
@@ -108,6 +115,8 @@ const adminOrderSchema = z.object({
   recipientName: z.string().nullish(),
   recipientPhone: z.string().nullish(),
   recipientAddress: z.string().nullish(),
+  customerTaxCode: z.string().nullish(),
+  customerNote: z.string().nullish(),
   items: z.array(adminOrderItemSchema).min(1, "Đơn hàng phải có ít nhất 1 sản phẩm.").max(200, "Đơn hàng tối đa 200 dòng sản phẩm."),
   quoteVersions: z.array(adminQuoteSchema).max(50, "Tối đa 50 phiên bản báo giá."),
   paymentRequests: z.array(z.unknown()).max(50),
@@ -138,6 +147,7 @@ async function buildCustomerItems(
       productName: product.name,
       variantSku: variant.sku,
       variantLabel: variant.label,
+      variantImage: variant.imageUrl || product.imageUrl || "/product-food.svg",
       quantity: item.quantity,
       unitPriceSnapshot: variant.wholesalePrice ?? 0,
       supplierId: variant.supplierId || "sup_pettravel"
@@ -244,6 +254,8 @@ export async function POST(request: Request) {
       recipientName: body.recipientName,
       recipientPhone: body.recipientPhone,
       recipientAddress: body.recipientAddress,
+      customerTaxCode: body.customerTaxCode,
+      customerNote: body.customerNote,
       items,
       quoteVersions: [],
       paymentRequests: [],
@@ -359,17 +371,31 @@ export async function PUT(request: Request) {
           }))
       ];
 
+      // Allow customer to update status (e.g. customer_accepted when agreeing to quote, or admin_review when asking for re-quote)
+      let nextCommercialStatus = existing.commercialStatus;
+      if (customerPayload.commercialStatus) {
+        if (
+          (existing.commercialStatus === "quoted" && customerPayload.commercialStatus === "customer_accepted") ||
+          (existing.commercialStatus === "quoted" && customerPayload.commercialStatus === "admin_review") ||
+          (existing.commercialStatus === "draft" && customerPayload.commercialStatus === "submitted")
+        ) {
+          nextCommercialStatus = customerPayload.commercialStatus;
+        }
+      }
+
       orderToSave = {
         ...existing,
         paymentIntent: customerPayload.paymentIntent ?? existing.paymentIntent,
         invoiceRequested: customerPayload.invoiceRequested ?? existing.invoiceRequested,
-        recipientName: customerPayload.recipientName ?? existing.recipientName,
-        recipientPhone: customerPayload.recipientPhone ?? existing.recipientPhone,
-        recipientAddress: customerPayload.recipientAddress ?? existing.recipientAddress,
+        recipientName: customerPayload.recipientName !== undefined ? customerPayload.recipientName : existing.recipientName,
+        recipientPhone: customerPayload.recipientPhone !== undefined ? customerPayload.recipientPhone : existing.recipientPhone,
+        recipientAddress: customerPayload.recipientAddress !== undefined ? customerPayload.recipientAddress : existing.recipientAddress,
+        customerTaxCode: customerPayload.customerTaxCode !== undefined ? customerPayload.customerTaxCode : existing.customerTaxCode,
+        customerNote: customerPayload.customerNote !== undefined ? customerPayload.customerNote : existing.customerNote,
         customerId: existing.customerId,
         customerName: existing.customerName,
         customerCompany: existing.customerCompany,
-        commercialStatus: existing.commercialStatus,
+        commercialStatus: nextCommercialStatus,
         paymentStatus: existing.paymentStatus,
         fulfillmentStatus: existing.fulfillmentStatus,
         items: existing.items,

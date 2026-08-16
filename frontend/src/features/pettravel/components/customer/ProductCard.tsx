@@ -60,6 +60,30 @@ export function ProductCard({ product, isLoggedIn, onClick }: ProductCardProps) 
           </h3>
         </div>
 
+        {/* Variant Thumbnails Row */}
+        {product.variants.some((v) => v.imageUrl) && (
+          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5" onClick={(e) => e.stopPropagation()}>
+            {product.variants.slice(0, 4).map((v) => (
+              <div
+                key={v.sku}
+                className="relative w-6 h-6 rounded-md border border-orange-200/70 bg-[#FFFDF9] overflow-hidden shrink-0 shadow-2xs"
+                title={v.label}
+              >
+                <Image
+                  src={v.imageUrl || product.imageUrl || "/product-food.svg"}
+                  alt={v.label}
+                  fill
+                  sizes="24px"
+                  className="object-contain p-0.5"
+                />
+              </div>
+            ))}
+            {product.variants.length > 4 && (
+              <span className="text-[9px] text-gray-400 font-mono font-bold">+{product.variants.length - 4}</span>
+            )}
+          </div>
+        )}
+
         {/* Footer State */}
         {!isLoggedIn ? (
           <div className="flex items-center justify-between border-t border-dashed border-orange-100 pt-2 mt-auto">

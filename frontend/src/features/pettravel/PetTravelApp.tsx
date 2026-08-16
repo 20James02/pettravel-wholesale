@@ -197,6 +197,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   const [recipientName, setRecipientName] = useState<string>("");
   const [recipientPhone, setRecipientPhone] = useState<string>("");
   const [recipientAddress, setRecipientAddress] = useState<string>("");
+  const [customerTaxCode, setCustomerTaxCode] = useState<string>("");
+  const [customerNote, setCustomerNote] = useState<string>("");
   const [profileFullName, setProfileFullName] = useState<string>("");
   const [profileAvatarUrl, setProfileAvatarUrl] = useState<string>("");
   const [profileNewPassword, setProfileNewPassword] = useState<string>("");
@@ -1033,7 +1035,16 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
 
   // --- SHOPPING CART HANDLERS ---
 
-  function addToCart(variantSku: string, productCode: string, productName: string, variantLabel: string, price: number, supplierId: string, qty: number = 1) {
+  function addToCart(
+    variantSku: string,
+    productCode: string,
+    productName: string,
+    variantLabel: string,
+    price: number,
+    supplierId: string,
+    qty: number = 1,
+    variantImage?: string
+  ) {
     setCartItems((prev) => {
       const existing = prev.find((item) => item.variantSku === variantSku);
       if (existing) {
@@ -1047,6 +1058,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
           productName,
           variantSku,
           variantLabel,
+          variantImage,
           quantity: qty,
           unitPriceSnapshot: price,
           supplierId
@@ -1076,6 +1088,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
         }
         vndAmountSchema("Đơn giá").parse(item.unitPriceSnapshot);
       });
+      if (!recipientName.trim() || !recipientPhone.trim() || !recipientAddress.trim()) {
+        setShowCheckoutModal(true);
+        return;
+      }
     } catch (error) {
       alert(getValidationErrorMessage(error, "Dữ liệu giỏ hàng không hợp lệ."));
       return;
@@ -1102,6 +1118,11 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
 
       const updatedOrder: CustomerOrder = {
         ...workingOrder,
+        recipientName: recipientName.trim(),
+        recipientPhone: recipientPhone.trim(),
+        recipientAddress: recipientAddress.trim(),
+        customerTaxCode: customerTaxCode.trim(),
+        customerNote: customerNote.trim(),
         commercialStatus: "submitted",
         items: cartItems.map((item) => ({ ...item })),
         quoteVersions: [...workingOrder.quoteVersions.map((q) => ({ ...q, status: "superseded" as const })), nextQuote],
@@ -1119,6 +1140,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       };
 
       await syncOrder(updatedOrder);
+      setShowCheckoutModal(false);
       setActiveTab("order");
     } else {
       try {
@@ -1128,9 +1150,11 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
           body: JSON.stringify({
             items: cartItems.map((item) => ({ ...item })),
             paymentIntent: workingOrder.paymentIntent,
-            recipientName,
-            recipientPhone,
-            recipientAddress
+            recipientName: recipientName.trim(),
+            recipientPhone: recipientPhone.trim(),
+            recipientAddress: recipientAddress.trim(),
+            customerTaxCode: customerTaxCode.trim(),
+            customerNote: customerNote.trim()
           })
         });
         if (!res.ok) {
@@ -1143,6 +1167,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
         setAllOrders((prev) => [data.order, ...prev]);
         setSelectedOrderId(data.order.id);
         setCartItems(data.order.items.map((item) => ({ ...item })));
+        setShowCheckoutModal(false);
         setActiveTab("order");
       } catch {
         alert("Lỗi kết nối. Vui lòng kiểm tra mạng và thử lại.");
@@ -1161,6 +1186,124 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     await syncOrder(updatedOrder);
   }
 
+  async function handleCustomerAcceptQuote() {
+    if (!workingOrder?.id) return;
+    const activeQuote = workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1];
+    if (!activeQuote) return;
+
+    const isDeposit = workingOrder.paymentIntent === "deposit_cod";
+    const reqAmount = isDeposit ? activeQuote.depositAmount : activeQuote.finalTotal;
+
+    try {
+      const paymentResponse = await fetch("/api/orders/payment-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: workingOrder.id,
+          orderNumber: workingOrder.number,
+          quoteVersion: activeQuote.version,
+          amount: reqAmount,
+          purpose: isDeposit ? "deposit" : "full"
+        })
+      });
+      if (!paymentResponse.ok) {
+        const error = await paymentResponse.json().catch(() => ({}));
+        alert(error.error || "Không thể tạo mã thanh toán VietQR.");
+        return;
+      }
+      const newRequest = (await paymentResponse.json()) as PaymentRequest;
+
+      const updatedRequests = workingOrder.paymentRequests.map((req) =>
+        req.status === "active" ? { ...req, status: "superseded" as const } : req
+      );
+
+      const updatedOrder: CustomerOrder = {
+        ...workingOrder,
+        commercialStatus: "customer_accepted",
+        paymentStatus: isDeposit ? "deposit_requested" : "full_requested",
+        paymentRequests: [...updatedRequests, newRequest],
+        quoteVersions: workingOrder.quoteVersions.map((q, idx) =>
+          idx === workingOrder.quoteVersions.length - 1 ? { ...q, status: "accepted" as const } : q
+        ),
+        comments: [
+          {
+            id: `c_acc_${Date.now()}`,
+            author: workingOrder.customerName,
+            audience: "customer_visible",
+            message: `Đại lý đã đồng ý bản báo giá số ${activeQuote.version} (Tổng tiền: ${formatVnd(activeQuote.finalTotal)}). Tiến hành thanh toán cọc ${formatVnd(reqAmount)}.`,
+            createdAt: new Date().toISOString()
+          },
+          ...workingOrder.comments
+        ],
+        updatedAt: new Date().toISOString()
+      };
+
+      await syncOrder(updatedOrder);
+      alert("Đã chấp thuận báo giá! Vui lòng quét mã VietQR để thanh toán tiền cọc.");
+    } catch {
+      alert("Lỗi kết nối khi chấp thuận báo giá.");
+    }
+  }
+
+  async function handleCustomerRequestChange(reason: string) {
+    if (!workingOrder?.id) return;
+    const updatedOrder: CustomerOrder = {
+      ...workingOrder,
+      commercialStatus: "admin_review",
+      customerNote: reason,
+      comments: [
+        {
+          id: `c_req_chg_${Date.now()}`,
+          author: workingOrder.customerName,
+          audience: "customer_visible",
+          message: `Đại lý yêu cầu điều chỉnh đơn hàng: "${reason}". Đơn đã được chuyển về thẩm định lại.`,
+          createdAt: new Date().toISOString()
+        },
+        ...workingOrder.comments
+      ],
+      updatedAt: new Date().toISOString()
+    };
+
+    await syncOrder(updatedOrder);
+    alert("Đã gửi yêu cầu điều chỉnh thành công! Nhân viên Pet Travel sẽ kiểm tra và xuất lại báo giá mới.");
+  }
+
+  async function handleUpdateRecipientInfo(info: {
+    recipientName: string;
+    recipientPhone: string;
+    recipientAddress: string;
+    customerTaxCode: string;
+    customerNote: string;
+  }) {
+    if (!workingOrder?.id) return;
+    const updatedOrder: CustomerOrder = {
+      ...workingOrder,
+      recipientName: info.recipientName,
+      recipientPhone: info.recipientPhone,
+      recipientAddress: info.recipientAddress,
+      customerTaxCode: info.customerTaxCode,
+      customerNote: info.customerNote,
+      comments: [
+        {
+          id: `c_upd_ship_${Date.now()}`,
+          author: workingOrder.customerName,
+          audience: "customer_visible",
+          message: `Đại lý đã cập nhật lại địa chỉ nhận hàng: ${info.recipientName} (${info.recipientPhone}) - ${info.recipientAddress}.`,
+          createdAt: new Date().toISOString()
+        },
+        ...workingOrder.comments
+      ],
+      updatedAt: new Date().toISOString()
+    };
+
+    await syncOrder(updatedOrder);
+    setRecipientName(info.recipientName);
+    setRecipientPhone(info.recipientPhone);
+    setRecipientAddress(info.recipientAddress);
+    setCustomerTaxCode(info.customerTaxCode);
+    setCustomerNote(info.customerNote);
+  }
+
   async function handleConfirmCheckout() {
     if (!recipientName || !recipientPhone || !recipientAddress) {
       alert("Vui lòng điền đầy đủ thông tin giao nhận hàng.");
@@ -1170,6 +1313,11 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     const recipientValidation = recipientSchema.safeParse({ recipientName, recipientPhone, recipientAddress });
     if (!recipientValidation.success) {
       alert(getValidationErrorMessage(recipientValidation.error, "Thông tin giao nhận không hợp lệ."));
+      return;
+    }
+
+    if (workingOrder.id === "") {
+      await handleSubmitCartProposal();
       return;
     }
 
@@ -1206,6 +1354,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       recipientName: recipientValidation.data.recipientName,
       recipientPhone: recipientValidation.data.recipientPhone,
       recipientAddress: recipientValidation.data.recipientAddress,
+      customerTaxCode: customerTaxCode.trim(),
+      customerNote: customerNote.trim(),
       commercialStatus: "locked",
       paymentStatus: isDeposit ? "deposit_requested" : "full_requested",
       paymentRequests: [...updatedRequests, newRequest],
@@ -1410,6 +1560,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
             setRecipientPhone={setRecipientPhone}
             recipientAddress={recipientAddress}
             setRecipientAddress={setRecipientAddress}
+            customerTaxCode={customerTaxCode}
+            setCustomerTaxCode={setCustomerTaxCode}
+            customerNote={customerNote}
+            setCustomerNote={setCustomerNote}
             onConfirmCheckout={handleConfirmCheckout}
           />
         )}
@@ -1419,14 +1573,13 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
             isLoggedIn={isLoggedIn}
             mode={mode}
             workingOrder={workingOrder}
-            onPayNowClick={() => {
-              setRecipientName(currentUser?.name || "");
-              setRecipientPhone("");
-              setRecipientAddress(workingOrder.recipientAddress || "");
-              setShowCheckoutModal(true);
-            }}
+            allProducts={allProducts}
+            onPayNowClick={handleCustomerAcceptQuote}
             onBuyMore={handleBuyMore}
             onUploadProof={uploadPaymentProof}
+            onAcceptQuote={handleCustomerAcceptQuote}
+            onRequestOrderChange={handleCustomerRequestChange}
+            onUpdateRecipientInfo={handleUpdateRecipientInfo}
           />
         )}
 
@@ -1739,179 +1892,215 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
             }
             maxWidth="max-w-3xl"
           >
-            <div className="flex flex-col md:flex-row gap-5">
-              {/* Product Gallery with Multi-Image, Swipe & Variant Sync */}
-              <div className="md:w-1/2">
-                <ProductGallery product={selectedProduct} activeVariant={activeVariant} />
-              </div>
-
-              {/* Product Details & Variant Selection */}
-              <div className="md:w-1/2 flex flex-col justify-between text-xs gap-4">
-                <div className="flex flex-col gap-3">
-                  <div>
-                    <h2 className="text-base sm:text-lg font-bold text-[#331B08] font-['Varela_Round'] leading-snug m-0">
-                      {selectedProduct.name}
-                    </h2>
-                    <p className="text-gray-500 text-xs mt-1.5 leading-relaxed m-0 font-medium">
-                      {selectedProduct.description || "Sản phẩm thú cưng chất lượng cao từ Pet Travel Wholesale."}
-                    </p>
-                  </div>
-
-                  {/* Interactive Variant Pills */}
-                  <div className="flex flex-col gap-2 border-t border-dashed border-orange-100 pt-3">
-                    <label className="text-[11px] font-bold text-orange-950/80 uppercase tracking-wider flex items-center gap-1">
-                      <Sparkles size={12} className="text-orange-500" /> Chọn phân loại sỉ:
-                    </label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1 overscroll-contain">
-                      {selectedProduct.variants.map((v) => {
-                        const isSelected = v.sku === (activeVariant?.sku ?? "");
-                        return (
-                          <button
-                            key={v.sku}
-                            type="button"
-                            className={`p-2.5 rounded-xl border-2 text-left flex items-center gap-2.5 transition-all cursor-pointer ${
-                              isSelected
-                                ? "border-orange-500 bg-orange-50/70 shadow-sm"
-                                : "border-orange-100 bg-white hover:border-orange-200"
-                            }`}
-                            onClick={() => {
-                              setSelectedVariantSku(v.sku);
-                              setModalQty(v.minOrderQty || 1);
-                            }}
-                          >
-                            {v.imageUrl && (
-                              <div className="relative w-9 h-9 rounded-lg overflow-hidden border border-orange-100 bg-white shrink-0">
-                                <Image src={v.imageUrl} alt={v.label} fill sizes="36px" className="object-contain p-0.5" />
-                              </div>
-                            )}
-                            <div className="flex flex-col flex-1 min-w-0">
-                              <div className="flex items-center justify-between">
-                                <span className="font-bold text-xs text-[#331B08] truncate">{v.label}</span>
-                                {isSelected && <Check size={14} className="text-orange-600 shrink-0" />}
-                              </div>
-                              <div className="flex items-baseline justify-between gap-1 mt-0.5">
-                                <span className="text-xs font-bold text-orange-600 font-mono">
-                                  {isLoggedIn && typeof v.wholesalePrice === "number" && v.wholesalePrice > 0 ? formatVnd(v.wholesalePrice) : "🔒 Giá sỉ"}
-                                </span>
-                                <span className="text-[9px] text-gray-500 font-semibold font-mono">
-                                  Kho: {v.stock}
-                                </span>
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Price & Quantity Stepper */}
-                  <div className="flex flex-col gap-3 bg-[#FFFDF9] p-3 rounded-2xl border border-orange-100">
-                    <div className="flex justify-between items-baseline">
-                      <span className="text-xs text-gray-600 font-bold">Đơn giá bán sỉ:</span>
-                      {isLoggedIn && wholesalePrice > 0 ? (
-                        <span className="text-lg font-extrabold text-orange-600 font-mono">{formatVnd(wholesalePrice)}</span>
-                      ) : (
-                        <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-lg flex items-center gap-1">
-                          <Lock size={12} /> Đăng nhập để xem giá sỉ
-                        </span>
-                      )}
-                    </div>
-
-                    {isLoggedIn && mode === "customer" && activeVariant && (
-                      <div className="flex items-center justify-between gap-3 border-t border-dashed border-orange-100 pt-2">
-                        <span className="text-xs font-bold text-orange-950">Số lượng đặt sỉ:</span>
-                        <div className="flex items-center gap-1.5 border border-orange-200 rounded-xl p-1 bg-white shadow-sm">
-                          <button
-                            type="button"
-                            className="w-8 h-8 rounded-lg bg-orange-50 hover:bg-orange-100 flex items-center justify-center font-bold text-orange-900 shadow-sm active:scale-90 cursor-pointer disabled:opacity-40"
-                            onClick={() => setModalQty((q) => Math.max(moq, q - 1))}
-                            disabled={modalQty <= moq}
-                            aria-label="Giảm 1"
-                          >
-                            -
-                          </button>
-                          <input
-                            type="number"
-                            className="w-12 text-center font-extrabold text-sm text-[#331B08] bg-transparent border-0 focus:ring-0 p-0 font-mono"
-                            value={modalQty}
-                            min={moq}
-                            onChange={(e) => setModalQty(Math.max(moq, parseInt(e.target.value) || moq))}
-                          />
-                          <button
-                            type="button"
-                            className="w-8 h-8 rounded-lg bg-orange-50 hover:bg-orange-100 flex items-center justify-center font-bold text-orange-900 shadow-sm active:scale-90 cursor-pointer"
-                            onClick={() => setModalQty((q) => q + 1)}
-                            aria-label="Tăng 1"
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+            <div className="flex flex-col gap-5">
+              {/* Upper 2-column section: Gallery (left) + Variant selection & CTA (right) */}
+              <div className="flex flex-col md:flex-row gap-5">
+                {/* Product Gallery with Multi-Image, Swipe & Variant Sync */}
+                <div className="md:w-1/2">
+                  <ProductGallery product={selectedProduct} activeVariant={activeVariant} />
                 </div>
 
-                {/* Actions Bar with Instant Total Price */}
-                <div className="flex flex-col gap-2.5 border-t border-orange-100 pt-3 mt-auto">
-                  {isLoggedIn && mode === "customer" && activeVariant && (
-                    <div className="flex justify-between items-center px-1">
-                      <span className="text-xs text-gray-500 font-bold">Thành tiền tạm tính:</span>
-                      <strong className="text-base font-extrabold text-orange-600 font-mono">
-                        {formatVnd(modalQty * wholesalePrice)}
-                      </strong>
+                {/* Product Details & Variant Selection */}
+                <div className="md:w-1/2 flex flex-col justify-between text-xs gap-4">
+                  <div className="flex flex-col gap-3">
+                    <div>
+                      <h2 className="text-base sm:text-lg font-bold text-[#331B08] font-['Varela_Round'] leading-snug m-0">
+                        {selectedProduct.name}
+                      </h2>
                     </div>
-                  )}
 
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      className="tab-button font-bold text-xs py-3 px-4 flex-1 justify-center rounded-xl cursor-pointer"
-                      onClick={() => {
-                        setSelectedProduct(null);
-                      }}
-                    >
-                      Đóng
-                    </button>
+                    {/* Interactive Variant Pills */}
+                    <div className="flex flex-col gap-2 border-t border-dashed border-orange-100 pt-3">
+                      <label className="text-[11px] font-bold text-orange-950/80 uppercase tracking-wider flex items-center gap-1">
+                        <Sparkles size={12} className="text-orange-500" /> Chọn phân loại sỉ:
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[180px] overflow-y-auto pr-1 overscroll-contain">
+                        {selectedProduct.variants.map((v) => {
+                          const isSelected = v.sku === (activeVariant?.sku ?? "");
+                          return (
+                            <button
+                              key={v.sku}
+                              type="button"
+                              className={`p-2.5 rounded-xl border-2 text-left flex items-center gap-2.5 transition-all cursor-pointer ${
+                                isSelected
+                                  ? "border-orange-500 bg-orange-50/70 shadow-sm"
+                                  : "border-orange-100 bg-white hover:border-orange-200"
+                              }`}
+                              onClick={() => {
+                                setSelectedVariantSku(v.sku);
+                                setModalQty(v.minOrderQty || 1);
+                              }}
+                            >
+                              {v.imageUrl && (
+                                <div className="relative w-9 h-9 rounded-lg overflow-hidden border border-orange-100 bg-white shrink-0 shadow-inner">
+                                  <Image src={v.imageUrl} alt={v.label} fill sizes="36px" className="object-contain p-0.5" />
+                                </div>
+                              )}
+                              <div className="flex flex-col flex-1 min-w-0">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-bold text-xs text-[#331B08] truncate">{v.label}</span>
+                                  {isSelected && <Check size={14} className="text-orange-600 shrink-0" />}
+                                </div>
+                                <div className="flex items-baseline justify-between gap-1 mt-0.5">
+                                  <span className="text-xs font-bold text-orange-600 font-mono">
+                                    {isLoggedIn && typeof v.wholesalePrice === "number" && v.wholesalePrice > 0 ? formatVnd(v.wholesalePrice) : "🔒 Giá sỉ"}
+                                  </span>
+                                  <span className="text-[9px] text-gray-500 font-semibold font-mono">
+                                    Kho: {v.stock}
+                                  </span>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
 
-                    {!isLoggedIn ? (
+                    {/* Price & Quantity Stepper */}
+                    <div className="flex flex-col gap-3 bg-[#FFFDF9] p-3 rounded-2xl border border-orange-100">
+                      <div className="flex justify-between items-baseline">
+                        <span className="text-xs text-gray-600 font-bold">Đơn giá bán sỉ:</span>
+                        {isLoggedIn && wholesalePrice > 0 ? (
+                          <span className="text-lg font-extrabold text-orange-600 font-mono">{formatVnd(wholesalePrice)}</span>
+                        ) : (
+                          <span className="text-xs font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-lg flex items-center gap-1">
+                            <Lock size={12} /> Đăng nhập để xem giá sỉ
+                          </span>
+                        )}
+                      </div>
+
+                      {isLoggedIn && mode === "customer" && activeVariant && (
+                        <div className="flex items-center justify-between gap-3 border-t border-dashed border-orange-100 pt-2">
+                          <span className="text-xs font-bold text-orange-950">Số lượng đặt sỉ:</span>
+                          <div className="flex items-center gap-1.5 border border-orange-200 rounded-xl p-1 bg-white shadow-sm">
+                            <button
+                              type="button"
+                              className="w-8 h-8 rounded-lg bg-orange-50 hover:bg-orange-100 flex items-center justify-center font-bold text-orange-900 shadow-sm active:scale-90 cursor-pointer disabled:opacity-40"
+                              onClick={() => setModalQty((q) => Math.max(moq, q - 1))}
+                              disabled={modalQty <= moq}
+                              aria-label="Giảm 1"
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              className="w-12 text-center font-extrabold text-sm text-[#331B08] bg-transparent border-0 focus:ring-0 p-0 font-mono"
+                              value={modalQty}
+                              min={moq}
+                              onChange={(e) => setModalQty(Math.max(moq, parseInt(e.target.value) || moq))}
+                            />
+                            <button
+                              type="button"
+                              className="w-8 h-8 rounded-lg bg-orange-50 hover:bg-orange-100 flex items-center justify-center font-bold text-orange-900 shadow-sm active:scale-90 cursor-pointer"
+                              onClick={() => setModalQty((q) => q + 1)}
+                              aria-label="Tăng 1"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Actions Bar with Instant Total Price */}
+                  <div className="flex flex-col gap-2.5 border-t border-orange-100 pt-3 mt-auto">
+                    {isLoggedIn && mode === "customer" && activeVariant && (
+                      <div className="flex justify-between items-center px-1">
+                        <span className="text-xs text-gray-500 font-bold">Thành tiền tạm tính:</span>
+                        <strong className="text-base font-extrabold text-orange-600 font-mono">
+                          {formatVnd(modalQty * wholesalePrice)}
+                        </strong>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
                       <button
                         type="button"
-                        className="primary-button font-bold text-xs py-3 px-6 flex-[2] justify-center bg-orange-500 hover:bg-orange-600 text-white rounded-xl cursor-pointer shadow-lg flex items-center gap-1.5"
+                        className="tab-button font-bold text-xs py-3 px-4 flex-1 justify-center rounded-xl cursor-pointer"
                         onClick={() => {
                           setSelectedProduct(null);
-                          setShowLoginModal(true);
                         }}
                       >
-                        <Lock size={15} />
-                        <span>Đăng nhập để đặt sỉ</span>
+                        Đóng
                       </button>
-                    ) : (
-                      activeVariant && (
+
+                      {!isLoggedIn ? (
                         <button
                           type="button"
                           className="primary-button font-bold text-xs py-3 px-6 flex-[2] justify-center bg-orange-500 hover:bg-orange-600 text-white rounded-xl cursor-pointer shadow-lg flex items-center gap-1.5"
-                          disabled={stock <= 0}
                           onClick={() => {
-                            addToCart(
-                              activeVariant.sku,
-                              selectedProduct.code,
-                              selectedProduct.name,
-                              activeVariant.label,
-                              activeVariant.wholesalePrice ?? 0,
-                              activeVariant.supplierId || "sup_pettravel",
-                              modalQty
-                            );
                             setSelectedProduct(null);
-                            setActiveTab("cart");
+                            setShowLoginModal(true);
                           }}
                         >
-                          <PackagePlus size={16} />
-                          <span>Thêm vào đơn sỉ</span>
+                          <Lock size={15} />
+                          <span>Đăng nhập để đặt sỉ</span>
                         </button>
-                      )
-                    )}
+                      ) : (
+                        activeVariant && (
+                          <button
+                            type="button"
+                            className="primary-button font-bold text-xs py-3 px-6 flex-[2] justify-center bg-orange-500 hover:bg-orange-600 text-white rounded-xl cursor-pointer shadow-lg flex items-center gap-1.5"
+                            disabled={stock <= 0}
+                            onClick={() => {
+                              addToCart(
+                                activeVariant.sku,
+                                selectedProduct.code,
+                                selectedProduct.name,
+                                activeVariant.label,
+                                activeVariant.wholesalePrice ?? 0,
+                                activeVariant.supplierId || "sup_pettravel",
+                                modalQty,
+                                activeVariant.imageUrl || selectedProduct.imageUrl
+                              );
+                              setSelectedProduct(null);
+                              setActiveTab("cart");
+                            }}
+                          >
+                            <PackagePlus size={16} />
+                            <span>Thêm vào đơn sỉ</span>
+                          </button>
+                        )
+                      )}
+                    </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Lower Section: Product Description & Specifications Placed Underneath */}
+              <div className="border-t-2 border-dashed border-orange-100 pt-4 mt-1 flex flex-col gap-3">
+                <h3 className="text-xs font-bold text-orange-950 uppercase tracking-wider flex items-center gap-1.5 font-['Varela_Round']">
+                  <Sparkles size={14} className="text-orange-500" /> Mô tả chi tiết & Thông số sản phẩm
+                </h3>
+                <div className="bg-[#FFFDF9] p-4 rounded-2xl border border-orange-100/80 text-xs text-gray-700 leading-relaxed font-medium whitespace-pre-line shadow-inner">
+                  {selectedProduct.description || "Sản phẩm thú cưng chất lượng cao từ Pet Travel Wholesale. Đạt tiêu chuẩn chất lượng an toàn, thích hợp phân phối sỉ tại các pet shop và phòng khám trên toàn quốc."}
+                </div>
+
+                {(selectedProduct.dimensions || selectedProduct.weight || selectedProduct.brand || (selectedProduct.tags && selectedProduct.tags.length > 0)) && (
+                  <div className="flex flex-wrap gap-2 text-[11px]">
+                    {selectedProduct.brand && (
+                      <span className="bg-orange-50 border border-orange-200 text-orange-900 px-3 py-1 rounded-xl font-semibold">
+                        🏷️ Thương hiệu: <strong>{selectedProduct.brand}</strong>
+                      </span>
+                    )}
+                    {selectedProduct.dimensions && (
+                      <span className="bg-orange-50 border border-orange-200 text-orange-900 px-3 py-1 rounded-xl font-semibold">
+                        📐 Kích thước: <strong>{selectedProduct.dimensions}</strong>
+                      </span>
+                    )}
+                    {selectedProduct.weight && (
+                      <span className="bg-orange-50 border border-orange-200 text-orange-900 px-3 py-1 rounded-xl font-semibold">
+                        ⚖️ Khối lượng: <strong>{selectedProduct.weight}g</strong>
+                      </span>
+                    )}
+                    {selectedProduct.tags && selectedProduct.tags.map((tag) => (
+                      <span key={tag} className="bg-white border border-orange-100 text-gray-600 px-2.5 py-1 rounded-xl">
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </BottomSheet>

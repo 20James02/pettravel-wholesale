@@ -27,6 +27,10 @@ interface CartProps {
   setRecipientPhone: (val: string) => void;
   recipientAddress: string;
   setRecipientAddress: (val: string) => void;
+  customerTaxCode: string;
+  setCustomerTaxCode: (val: string) => void;
+  customerNote: string;
+  setCustomerNote: (val: string) => void;
   onConfirmCheckout: () => void;
 }
 
@@ -50,6 +54,10 @@ export function Cart({
   setRecipientPhone,
   recipientAddress,
   setRecipientAddress,
+  customerTaxCode,
+  setCustomerTaxCode,
+  customerNote,
+  setCustomerNote,
   onConfirmCheckout
 }: CartProps) {
   // Nhóm các items trong giỏ hàng theo code sản phẩm
@@ -157,61 +165,73 @@ export function Cart({
 
                     {/* Danh sách phân loại */}
                     <div className="flex flex-col gap-2.5">
-                      {group.items.map((item) => (
-                        <div
-                          className="flex items-center justify-between gap-2 sm:gap-4 text-xs bg-white p-2.5 rounded-xl border border-orange-100"
-                          key={item.variantSku}
-                        >
-                          <div className="flex-1 min-w-0 pr-1">
-                            <span className="font-bold text-orange-950 block truncate">{item.variantLabel}</span>
-                            <span className="text-[10px] font-mono text-gray-400 font-semibold">{item.variantSku}</span>
-                          </div>
+                      {group.items.map((item) => {
+                        const prod = allProducts.find((p) => p.code === item.productCode);
+                        const variant = prod?.variants.find((v) => v.sku === item.variantSku);
+                        const itemImg = item.variantImage || variant?.imageUrl || prod?.imageUrl || group.productImage;
 
-                          {/* Cụm tăng giảm số lượng chuẩn touch target */}
-                          <div className="flex items-center gap-2 shrink-0">
-                            <div className="flex items-center border border-orange-200 rounded-xl p-0.5 bg-[#FFFBEB]">
-                              <button
-                                type="button"
-                                className="w-7 h-7 rounded-lg bg-white flex items-center justify-center text-sm font-extrabold text-[#78350F] shadow-sm active:scale-90 cursor-pointer disabled:opacity-40"
-                                onClick={() => updateCartQty(item.variantSku, -1)}
-                                aria-label="Giảm 1"
-                              >
-                                -
-                              </button>
-                              <span className="text-xs font-extrabold text-[#331B08] min-w-[28px] text-center font-mono">
-                                {item.quantity}
-                              </span>
-                              <button
-                                type="button"
-                                className="w-7 h-7 rounded-lg bg-white flex items-center justify-center text-sm font-extrabold text-[#78350F] shadow-sm active:scale-90 cursor-pointer"
-                                onClick={() => updateCartQty(item.variantSku, 1)}
-                                aria-label="Tăng 1"
-                              >
-                                +
-                              </button>
+                        return (
+                          <div
+                            className="flex items-center justify-between gap-2 sm:gap-4 text-xs bg-white p-2.5 rounded-xl border border-orange-100"
+                            key={item.variantSku}
+                          >
+                            <div className="flex items-center gap-2.5 flex-1 min-w-0 pr-1">
+                              {/* Variant Specific Image Thumbnail */}
+                              <div className="relative w-10 h-10 rounded-lg overflow-hidden border border-orange-100 bg-[#FFFBEB] shrink-0 shadow-inner">
+                                <Image src={itemImg} alt={item.variantLabel} fill sizes="40px" className="object-cover" />
+                              </div>
+                              <div className="flex flex-col min-w-0">
+                                <span className="font-bold text-orange-950 block truncate">{item.variantLabel}</span>
+                                <span className="text-[10px] font-mono text-gray-400 font-semibold">SKU: {item.variantSku}</span>
+                              </div>
                             </div>
 
-                            <div className="text-right min-w-[80px] sm:min-w-[95px]">
-                              <strong className="text-xs sm:text-sm text-orange-600 block font-bold font-mono">
-                                {formatVnd(item.quantity * item.unitPriceSnapshot)}
-                              </strong>
-                              <span className="text-[9px] text-gray-400 font-mono font-medium">
-                                {formatVnd(item.unitPriceSnapshot)}/cái
-                              </span>
-                            </div>
+                            {/* Cụm tăng giảm số lượng chuẩn touch target */}
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div className="flex items-center border border-orange-200 rounded-xl p-0.5 bg-[#FFFBEB]">
+                                <button
+                                  type="button"
+                                  className="w-7 h-7 rounded-lg bg-white flex items-center justify-center text-sm font-extrabold text-[#78350F] shadow-sm active:scale-90 cursor-pointer disabled:opacity-40"
+                                  onClick={() => updateCartQty(item.variantSku, -1)}
+                                  aria-label="Giảm 1"
+                                >
+                                  -
+                                </button>
+                                <span className="text-xs font-extrabold text-[#331B08] min-w-[28px] text-center font-mono">
+                                  {item.quantity}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="w-7 h-7 rounded-lg bg-white flex items-center justify-center text-sm font-extrabold text-[#78350F] shadow-sm active:scale-90 cursor-pointer"
+                                  onClick={() => updateCartQty(item.variantSku, 1)}
+                                  aria-label="Tăng 1"
+                                >
+                                  +
+                                </button>
+                              </div>
 
-                            <button
-                              type="button"
-                              title="Xóa mẫu này"
-                              className="w-7 h-7 rounded-xl bg-red-50 hover:bg-red-100 flex items-center justify-center text-red-500 hover:text-red-700 transition active:scale-90 cursor-pointer shrink-0 border border-red-100"
-                              onClick={() => removeCartItem(item.variantSku)}
-                              aria-label="Xóa mẫu"
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                              <div className="text-right min-w-[80px] sm:min-w-[95px]">
+                                <strong className="text-xs sm:text-sm text-orange-600 block font-bold font-mono">
+                                  {formatVnd(item.quantity * item.unitPriceSnapshot)}
+                                </strong>
+                                <span className="text-[9px] text-gray-400 font-mono font-medium">
+                                  {formatVnd(item.unitPriceSnapshot)}/cái
+                                </span>
+                              </div>
+
+                              <button
+                                type="button"
+                                title="Xóa mẫu này"
+                                className="w-7 h-7 rounded-xl bg-red-50 hover:bg-red-100 flex items-center justify-center text-red-500 hover:text-red-700 transition active:scale-90 cursor-pointer shrink-0 border border-red-100"
+                                onClick={() => removeCartItem(item.variantSku)}
+                                aria-label="Xóa mẫu"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
@@ -226,12 +246,82 @@ export function Cart({
           )}
         </div>
 
-        {/* Cột phải: Phương án thanh toán */}
+        {/* Cột phải: Thông tin giao nhận + Phương án thanh toán */}
         <aside className="flex flex-col gap-4">
-          <div className="panel flex flex-col gap-4 p-4 sm:p-6 bg-white border-2 border-orange-100 rounded-3xl">
-            <div className="section-title pb-3 border-b border-dashed border-orange-100">
+          <div className="panel flex flex-col gap-4 p-4 sm:p-6 bg-white border-2 border-orange-100 rounded-3xl shadow-sm">
+            {/* 1. Form Nhập Thông Tin Giao Nhận Ngay Tại Giỏ Hàng */}
+            <div className="section-title pb-2 border-b border-dashed border-orange-100">
               <h3 className="text-base sm:text-lg font-bold text-[#331B08] font-['Varela_Round'] flex items-center gap-2">
-                <ShieldCheck size={20} className="text-orange-500" /> Chọn Hình thức Thanh toán
+                <Truck size={20} className="text-orange-500" /> Thông tin Nhận hàng & Xuất HĐ
+              </h3>
+            </div>
+
+            <div className="flex flex-col gap-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-bold text-orange-950">Họ và tên người nhận: *</label>
+                  <input
+                    type="text"
+                    className="text-input text-xs py-2 px-3 rounded-xl border-orange-200"
+                    value={recipientName}
+                    onChange={(e) => setRecipientName(e.target.value)}
+                    placeholder="Ví dụ: Nguyễn Văn A"
+                    autoComplete="name"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-bold text-orange-950">Số điện thoại liên hệ: *</label>
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    className="text-input text-xs py-2 px-3 rounded-xl border-orange-200 font-mono"
+                    value={recipientPhone}
+                    onChange={(e) => setRecipientPhone(e.target.value)}
+                    placeholder="Ví dụ: 0987654321"
+                    autoComplete="tel"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-bold text-orange-950">Địa chỉ giao nhận hàng sỉ: *</label>
+                <textarea
+                  className="text-input text-xs py-2 px-3 min-h-[60px] rounded-xl border-orange-200"
+                  value={recipientAddress}
+                  onChange={(e) => setRecipientAddress(e.target.value)}
+                  placeholder="Số nhà, tên đường, phường/xã, quận/huyện, tỉnh/thành phố..."
+                  autoComplete="street-address"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-bold text-orange-950">Mã số thuế (nếu cần xuất HĐ):</label>
+                  <input
+                    type="text"
+                    className="text-input text-xs py-2 px-3 rounded-xl border-orange-200 font-mono"
+                    value={customerTaxCode}
+                    onChange={(e) => setCustomerTaxCode(e.target.value)}
+                    placeholder="MST doanh nghiệp / hộ KD"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-bold text-orange-950">Ghi chú đơn sỉ (tùy chọn):</label>
+                  <input
+                    type="text"
+                    className="text-input text-xs py-2 px-3 rounded-xl border-orange-200"
+                    value={customerNote}
+                    onChange={(e) => setCustomerNote(e.target.value)}
+                    placeholder="Giao giờ hành chính, gọi trước..."
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Phương án thanh toán */}
+            <div className="section-title pb-2 pt-2 border-b border-t border-dashed border-orange-100">
+              <h3 className="text-sm sm:text-base font-bold text-[#331B08] font-['Varela_Round'] flex items-center gap-2">
+                <ShieldCheck size={18} className="text-orange-500" /> Chọn Hình thức Thanh toán
               </h3>
             </div>
 
@@ -339,7 +429,7 @@ export function Cart({
       >
         <div className="flex flex-col gap-3.5">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-bold text-orange-950">Họ và tên người nhận hàng:</label>
+            <label className="text-xs font-bold text-orange-950">Họ và tên người nhận hàng: *</label>
             <input
               type="text"
               className="text-input text-sm py-2.5 px-3 rounded-xl border-orange-200"
@@ -351,7 +441,7 @@ export function Cart({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-bold text-orange-950">Số điện thoại liên hệ:</label>
+            <label className="text-xs font-bold text-orange-950">Số điện thoại liên hệ: *</label>
             <input
               type="tel"
               inputMode="tel"
@@ -364,7 +454,7 @@ export function Cart({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-bold text-orange-950">Địa chỉ nhận hàng sỉ:</label>
+            <label className="text-xs font-bold text-orange-950">Địa chỉ nhận hàng sỉ: *</label>
             <textarea
               className="text-input text-sm py-2.5 px-3 min-h-[90px] rounded-xl border-orange-200"
               value={recipientAddress}
@@ -372,6 +462,29 @@ export function Cart({
               placeholder="Số nhà, tên đường, phường/xã, quận/huyện, tỉnh/thành phố..."
               autoComplete="street-address"
             />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-bold text-orange-950">Mã số thuế (nếu cần HĐ):</label>
+              <input
+                type="text"
+                className="text-input text-xs py-2 px-3 rounded-xl border-orange-200 font-mono"
+                value={customerTaxCode}
+                onChange={(e) => setCustomerTaxCode(e.target.value)}
+                placeholder="MST doanh nghiệp"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-bold text-orange-950">Ghi chú đơn hàng:</label>
+              <input
+                type="text"
+                className="text-input text-xs py-2 px-3 rounded-xl border-orange-200"
+                value={customerNote}
+                onChange={(e) => setCustomerNote(e.target.value)}
+                placeholder="Ghi chú thêm..."
+              />
+            </div>
           </div>
 
           <div className="flex gap-2.5 justify-end mt-4 pt-3 border-t border-dashed border-orange-100">

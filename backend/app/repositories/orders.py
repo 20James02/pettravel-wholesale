@@ -255,7 +255,15 @@ async def _update_order(
             if has_changes and required_permission not in permissions:
                 raise ValueError(f"Tài khoản thiếu quyền nghiệp vụ {required_permission}.")
 
-    now = datetime.now(timezone.utc)
+    if not internal:
+        new_status = order.get("commercialStatus")
+        if new_status in {"customer_accepted", "admin_review", "submitted", "locked"} and current["commercial_status"] in {"draft", "submitted", "quoted", "admin_review"}:
+            next_commercial_status = new_status
+        else:
+            next_commercial_status = current["commercial_status"]
+    else:
+        next_commercial_status = order.get("commercialStatus", current["commercial_status"])
+
     values = {
         "id": order_id,
         "payment_intent": order.get("paymentIntent") or current["payment_intent"],
@@ -263,7 +271,7 @@ async def _update_order(
         "recipient_name": order.get("recipientName", current["recipient_name"]),
         "recipient_phone": order.get("recipientPhone", current["recipient_phone"]),
         "recipient_address": order.get("recipientAddress", current["recipient_address"]),
-        "commercial_status": order.get("commercialStatus", current["commercial_status"]) if internal else current["commercial_status"],
+        "commercial_status": next_commercial_status,
         "payment_status": order.get("paymentStatus", current["payment_status"]) if internal else current["payment_status"],
         "fulfillment_status": order.get("fulfillmentStatus", current["fulfillment_status"]) if internal else current["fulfillment_status"],
         "assigned_staff_id": order.get("assignedStaffId", current["assigned_staff_id"]) if internal else current["assigned_staff_id"],

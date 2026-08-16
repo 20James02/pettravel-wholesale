@@ -23,7 +23,9 @@ import {
   Send,
   Search,
   Filter,
-  CreditCard
+  CreditCard,
+  AlertTriangle,
+  Edit3
 } from "lucide-react";
 import type { CustomerOrder, Supplier, Product, OrderItem } from "@/lib/domain";
 import type { ApiUser } from "../../types";
@@ -578,6 +580,36 @@ export function AdminOrders({
                 </div>
               )}
 
+              {/* Locked Quote Notice when waiting for customer response */}
+              {activeOrder.commercialStatus === "quoted" && !isOrderModified && (
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-[#1a203d] border border-amber-500/40 rounded-2xl animate-fade-in shadow-md">
+                  <div className="flex items-center gap-2.5 text-amber-300 font-bold text-xs">
+                    <div className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" />
+                    <span>⏳ Báo giá đã gửi cho đại lý duyệt. Hệ thống tạm khóa chỉnh sửa để tránh chồng chéo dữ liệu.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdjustments(true)}
+                    className="px-3.5 py-1.5 bg-[#252e55] hover:bg-[#303c6e] border border-amber-400/40 text-amber-200 hover:text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap"
+                  >
+                    <Edit3 size={13} /> Mở điều chỉnh báo giá
+                  </button>
+                </div>
+              )}
+
+              {/* Customer Request Change Alert */}
+              {activeOrder.commercialStatus === "admin_review" && (
+                <div className="p-3.5 bg-rose-500/15 border border-rose-500/50 rounded-2xl flex items-start gap-2.5 text-xs text-rose-200 font-bold shadow-md">
+                  <AlertTriangle size={18} className="text-rose-400 shrink-0 mt-0.5" />
+                  <div className="flex flex-col gap-1 w-full">
+                    <span className="text-rose-300 uppercase tracking-wide text-[11px]">Đại lý yêu cầu điều chỉnh đơn sỉ:</span>
+                    <span className="text-white font-medium bg-black/40 p-2.5 rounded-xl border border-rose-500/30">
+                      {activeOrder.customerNote || activeOrder.comments?.find((c) => c.audience === "customer_visible" && c.author !== "Hệ thống" && !c.message.startsWith("Nhân viên đã"))?.message || "Đại lý yêu cầu xem xét lại số lượng hoặc bảng giá."}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* 3. PRODUCT ITEMS LIST (Mã, Tên SP, Phân loại, Đơn giá, SL, Tổng tiền) */}
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
@@ -622,7 +654,8 @@ export function AdminOrders({
                       {activeOrder.items && activeOrder.items.length > 0 ? (
                         activeOrder.items.map((item, idx) => {
                           const prod = allProducts.find((p) => p.code === item.productCode || p.name === item.productName);
-                          const img = item.variantImage || prod?.imageUrl || "/product-food.svg";
+                          const variant = prod?.variants?.find((v) => v.sku === item.variantSku || v.label === item.variantLabel);
+                          const img = item.variantImage || variant?.imageUrl || prod?.imageUrl || "/product-food.svg";
 
                           return (
                             <tr key={item.id || idx} className="hover:bg-[#1d2340]/60 transition">
