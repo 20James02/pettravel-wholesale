@@ -50,6 +50,9 @@ import { AdminUsers } from "./components/admin/AdminUsers";
 import { AdminHeader } from "./components/admin/AdminHeader";
 import { BottomSheet } from "./components/ui/BottomSheet";
 import { ProductGallery } from "./components/product/ProductGallery";
+import { ToastProvider } from "./components/ui/Toast";
+import { AnnouncementBanner } from "./components/shared/AnnouncementBanner";
+import { B2BPartnerModal } from "./components/shared/B2BPartnerModal";
 import { Eye, EyeOff, Lock, Sparkles, Check, PackagePlus } from "lucide-react";
 
 
@@ -142,6 +145,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [userList, setUserList] = useState<ApiUser[]>([]);
+  const [showPartnerModal, setShowPartnerModal] = useState<boolean>(false);
 
   // Core working order & selected order states
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
@@ -1511,62 +1515,69 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   }
 
   return (
-    <main className="app-shell">
-      {/* MAIN APPLICATION CONTENT */}
-      <section className={`main-area ${
-        isAdmin && (activeTab.startsWith("admin") || activeTab === "settings")
-          ? `admin-theme-container ${theme === "dark" ? "admin-dark bg-[#0e1120] text-white" : "admin-light bg-[#f4f6fb] text-[#111827]"} p-3 sm:p-5 lg:p-6`
-          : ""
-      }`}>
-        {/* Top bar header: Finnova Admin Header vs Customer Dynamic Liquid Glass Capsule Nav */}
-        {isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") ? (
-          <AdminHeader
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            currentUser={currentUser}
-            totalOrdersCount={allOrders.length}
-            pendingApprovalsCount={realPendingApprovalsCount}
-            lowStockCount={realLowStockCount}
-            onLogout={handleLogout}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            theme={theme}
-            setTheme={handleThemeChange}
-            onBackClick={() => setActiveTab("catalog")}
-          />
-        ) : (
-          <Topbar
-            isLoggedIn={isLoggedIn}
-            activeUser={currentUser}
-            isAdmin={isAdmin}
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            setShowLoginModal={setShowLoginModal}
-            cartItemsCount={cartItems.reduce((sum, item) => sum + item.quantity, 0)}
-          />
+    <ToastProvider>
+      <main className="app-shell">
+        {/* Top Announcement Banner for Customer mode */}
+        {!(isAdmin && (activeTab.startsWith("admin") || activeTab === "settings")) && (
+          <AnnouncementBanner onOpenPartnerModal={() => setShowPartnerModal(true)} />
         )}
 
-        {/* --- PAGE TABS ROUTING --- */}
+        {/* MAIN APPLICATION CONTENT */}
+        <section className={`main-area ${
+          isAdmin && (activeTab.startsWith("admin") || activeTab === "settings")
+            ? `admin-theme-container ${theme === "dark" ? "admin-dark bg-[#0e1120] text-white" : "admin-light bg-[#f4f6fb] text-[#111827]"} p-3 sm:p-5 lg:p-6`
+            : ""
+        }`}>
+          {/* Top bar header: Finnova Admin Header vs Customer Dynamic Liquid Glass Capsule Nav */}
+          {isAdmin && (activeTab.startsWith("admin") || activeTab === "settings") ? (
+            <AdminHeader
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              currentUser={currentUser}
+              totalOrdersCount={allOrders.length}
+              pendingApprovalsCount={realPendingApprovalsCount}
+              lowStockCount={realLowStockCount}
+              onLogout={handleLogout}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              theme={theme}
+              setTheme={handleThemeChange}
+              onBackClick={() => setActiveTab("catalog")}
+            />
+          ) : (
+            <Topbar
+              isLoggedIn={isLoggedIn}
+              activeUser={currentUser}
+              isAdmin={isAdmin}
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              setShowLoginModal={setShowLoginModal}
+              cartItemsCount={cartItems.reduce((sum, item) => sum + item.quantity, 0)}
+            />
+          )}
 
-        {/* CUSTOMER TABS */}
-        {activeTab === "catalog" && (
-          <Catalog
-            products={allProducts}
-            availableCategories={allCategories}
-            categoryFilter={categoryFilter}
-            setCategoryFilter={setCategoryFilter}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            isLoggedIn={isLoggedIn}
-            isLoading={isProductsLoading}
-            onSelectProduct={(product) => {
-              setSelectedProduct(product);
-              const firstVariant = product.variants[0];
-              setSelectedVariantSku(firstVariant?.sku || "");
-              setModalQty(firstVariant?.minOrderQty || 1);
-            }}
-          />
-        )}
+          {/* --- PAGE TABS ROUTING --- */}
+
+          {/* CUSTOMER TABS */}
+          {activeTab === "catalog" && (
+            <Catalog
+              products={allProducts}
+              availableCategories={allCategories}
+              categoryFilter={categoryFilter}
+              setCategoryFilter={setCategoryFilter}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              isLoggedIn={isLoggedIn}
+              isLoading={isProductsLoading}
+              onOpenPartnerModal={() => setShowPartnerModal(true)}
+              onSelectProduct={(product) => {
+                setSelectedProduct(product);
+                const firstVariant = product.variants[0];
+                setSelectedVariantSku(firstVariant?.sku || "");
+                setModalQty(firstVariant?.minOrderQty || 1);
+              }}
+            />
+          )}
 
         {activeTab === "cart" && mode === "customer" && (
           <Cart
@@ -2196,7 +2207,14 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
           </button>
         </form>
       </BottomSheet>
+
+      {/* 6. B2B WHOLESALE & CO-MARKETING PARTNER MODAL */}
+      <B2BPartnerModal
+        isOpen={showPartnerModal}
+        onClose={() => setShowPartnerModal(false)}
+      />
     </main>
+    </ToastProvider>
   );
 }
 

@@ -24,8 +24,8 @@ def stock_command_for_transition(
     if after_fulfillment == "shipped" and before_fulfillment != "shipped":
         return "consume_order"
     if (
-        after_commercial in {"customer_accepted", "locked"}
-        and before_commercial not in {"customer_accepted", "locked"}
+        after_commercial == "locked"
+        and before_commercial != "locked"
     ):
         return "reserve_order"
     return None
@@ -67,5 +67,26 @@ async def execute_stock_command(
     if isinstance(payload, str):
         payload = json.loads(payload)
     if command == "consume_order" and int((payload or {}).get("lineCount", 0)) == 0:
-        raise ValueError("Không thể xuất kho vì đơn hàng chưa có giữ chỗ tồn kho đang hoạt động.")
+        await db.execute(
+            text("select pt_reserve_order_stock(:order_id, :actor_id, :expires_at)"),
+            {
+                "order_id": order_id,
+                "actor_id": actor_id,
+                "expires_at": datetime.now(timezone.utc) + timedelta(hours=72),
+            },
+        )
+        result2 = await db.execute(
+            text("""select pt_transition_order_stock_reservations(
+                :order_id, :actor_id, :action, :reason)"""),
+            {
+                "order_id": order_id,
+                "actor_id": actor_id,
+                "action": command,
+                "reason": f"Automatic order workflow transition: {command}",
+            },
+        )
+        payload2 = result2.scalar()
+        if isinstance(payload2, str):
+            payload2 = json.loads(payload2)
+        return payload2
     return payload

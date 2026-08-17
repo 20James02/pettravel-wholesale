@@ -1,0 +1,38 @@
+# Pet Travel WholeSale — Nền Tảng Phân Phối Sỉ Phụ Kiện Du Lịch Thú Cưng
+
+> Nền tảng phân phối sỉ phụ kiện du lịch, đồ dùng thú cưng cao cấp hàng đầu Việt Nam cho các Đại lý, Pet Shop, Spa Grooming, Phòng khám Thú y và Nhà nhân giống.
+
+## Tổng quan nền tảng
+- **Tên doanh nghiệp**: Pet Travel Wholesale Vietnam
+- **Website chính thức**: https://pettravel.vn
+- **Lĩnh vực**: B2B Wholesale / Phân phối sỉ đồ dùng và phụ kiện thú cưng
+- **Thị trường phục vụ**: Toàn quốc (Hà Nội, TP. Hồ Chí Minh, Đà Nẵng và 60 tỉnh thành)
+- **Phương thức đặt hàng**: Báo giá tương tác thời gian thực 2 chiều (Admin - Đại lý), duyệt đơn đa phiên bản, mã thanh toán tự động VietQR Napas 247.
+
+## Danh mục sản phẩm sỉ chủ lực
+1. **Túi Vận Chuyển Thú Cưng (Pet Carriers & Backpacks)**:
+   - Túi hàng không đạt chuẩn IATA, balo phi hành gia thoáng khí, lồng gấp gọn du lịch.
+   - Chất liệu: Vải Oxford 900D chống thấm, khung hợp kim siêu nhẹ, lưới chống cào.
+2. **Bát Ăn & Bình Nước Du Lịch (Portable Travel Bowls & Feeders)**:
+   - Bát silicone y tế gấp gọn có móc khóa carabiner, bình nước tích hợp ngăn thức ăn 2in1.
+   - Đạt chứng chỉ FDA an toàn thực phẩm không chứa BPA.
+3. **Khăn Lau & Sản Phẩm Vệ Sinh Du Lịch (Pet Travel Hygiene & Care)**:
+   - Khăn ướt khử khuẩn chiết xuất cúc la mã, xịt khử mùi ion bạc, túi đựng chất thải tự phân hủy sinh học.
+4. **Dây Dắt & Đai An Toàn Ô Tô (Car Safety Harness & Leashes)**:
+   - Đai an toàn ghế xe hơi chống va đập, dây dắt trợ lực phản quang ban đêm.
+
+## Chính sách & Chiết khấu B2B
+- **Mức chiết khấu sỉ**: Từ 25% đến 45% tùy theo cấp bậc đại lý (Bạc, Vàng, Kim Cương) và khối lượng đơn hàng.
+- **Số lượng tối thiểu (MOQ)**: Linh hoạt chỉ từ 5 sản phẩm/mẫu, phù hợp cho cả shop mới khởi nghiệp.
+- **Chính sách thanh toán**: Đặt cọc 30% khi xác nhận bản báo giá, 70% còn lại thanh toán COD khi nhận hàng hoặc chuyển khoản 100% nhận thêm chiết khấu 2%.
+- **Chính sách bảo hành & đổi trả**: 1 đổi 1 trong 30 ngày cho lỗi từ nhà sản xuất, bảo hiểm vận chuyển 100%.
+
+## Tài liệu máy đọc được dành cho AI Agents
+- **Bảng giá sỉ chi tiết cho AI Buyers**: [Pricing Guide](/pricing.md)
+- **Sơ đồ cấu trúc website**: [Sitemap](/sitemap.xml)
+- **Quy định thu thập dữ liệu bot**: [Robots.txt](/robots.txt)
+
+## Hỗ trợ & Liên hệ Đại lý
+- **Hotline / Zalo B2B**: 0988.888.888
+- **Email phòng kinh doanh sỉ**: b2b@pettravel.vn / wholesale@pettravel.vn
+- **Thời gian xử lý báo giá**: Dưới 15 phút trong giờ hành chính.

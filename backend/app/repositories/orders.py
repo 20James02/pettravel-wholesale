@@ -65,8 +65,8 @@ async def save_order(
         await db.execute(
             text("""select id from customer_orders
                 where organization_id = :organization_id
-                  and commercial_status <> 'cancelled'
-                  and fulfillment_status <> 'delivered'
+                  and commercial_status not in ('cancelled', 'completed')
+                  and fulfillment_status not in ('delivered', 'cancelled')
                 limit 1"""),
             {"organization_id": actor["organization_id"]},
         )
@@ -512,9 +512,9 @@ async def _update_order(
                     {
                         "id": adjustment_id,
                         "quote_id": quote_id,
-                        "type": adjustment["type"],
-                        "label": adjustment["label"],
-                        "amount": int(adjustment["amount"]),
+                        "type": str(adjustment.get("type") or "discount"),
+                        "label": str(adjustment.get("label") or adjustment.get("name") or "Chiết khấu"),
+                        "amount": int(adjustment.get("amount") or 0),
                         "requires_approval": bool(adjustment.get("requiresApproval", False)),
                         "approved_by": (
                             actor_id
