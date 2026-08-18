@@ -86,15 +86,25 @@ async def vietqr_webhook(
 ):
     """
     Authoritative canonical VietQR bank webhook.
-    - Provider authentication
+    - Provider authentication (Fail-Closed, isolated from internal BFF secret)
     - Idempotent row locking
     - Server-side reference resolution
-    - Amount verification with excess tracking
-    - Canonical state machine & accounting posting
+    - Exact amount verification (PAYMENT_AMOUNT_MISMATCH)
+    - Canonical state machine & atomic accounting posting
     """
     expected_secret = os.environ.get("VIETQR_WEBHOOK_SECRET")
-    if expected_secret and x_webhook_secret != expected_secret:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Webhook signature verification failed.")
+    if not expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PAYMENT_WEBHOOK_NOT_CONFIGURED: Chưa cấu hình VIETQR_WEBHOOK_SECRET trên máy chủ.",
+        )
+
+    import secrets
+    if not x_webhook_secret or not secrets.compare_digest(x_webhook_secret, expected_secret):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Webhook signature verification failed.",
+        )
 
     now = datetime.now(timezone.utc)
     ref_code = str(payload.get("reference") or payload.get("addInfo") or payload.get("content") or "").strip().upper()
@@ -133,30 +143,60 @@ async def vietqr_webhook(
     if payment_req["status"] not in {"active", "uploaded"}:
         raise HTTPException(status_code=400, detail=f"Yêu cầu thanh toán đang ở trạng thái không hợp lệ: {payment_req['status']}.")
 
-    # 3. Verify Amount & Excess
+    # 3. Verify Exact Amount
     expected_amount = int(payment_req["amount"])
-    if amount_received < expected_amount:
+    if amount_received != expected_amount:
         raise HTTPException(
             status_code=400,
-            detail=f"Số tiền nhận ({amount_received:,} VND) nhỏ hơn số tiền yêu cầu ({expected_amount:,} VND).",
+            detail=f"PAYMENT_AMOUNT_MISMATCH: Số tiền nhận ({amount_received:,} VND) không khớp với số tiền yêu cầu ({expected_amount:,} VND).",
         )
 
-    excess_amount = amount_received - expected_amount
     order_id = payment_req["order_id"]
     purpose = payment_req["purpose"]
 
-    # 4. Update Payment Request to confirmed
-    system_actor = (
-        await db.execute(
-            text("""select u.id from app_users u
-                join user_roles ur on ur.user_id = u.id
-                join role_permissions rp on rp.role_id = ur.role_id
-                where rp.permission_key = 'order.confirm_payment' and u.status = 'active'
-                limit 1""")
-        )
-    ).scalar()
-    actor_id = str(system_actor or payment_req["created_by"] or "system")
+    # 4. Resolve Deterministic System Actor
+    payment_system_actor_id = os.environ.get("PAYMENT_SYSTEM_ACTOR_ID")
+    system_actor = None
+    if payment_system_actor_id:
+        system_actor = (
+            await db.execute(
+                text("""select u.id from app_users u
+                    join user_roles ur on ur.user_id = u.id
+                    left join role_permissions rp on rp.role_id = ur.role_id
+                    left join roles r on r.id = ur.role_id
+                    where u.id = :actor_id
+                      and u.status = 'active'
+                      and (r.key in ('super_admin', 'admin', 'admin_manager', 'accountant')
+                           or rp.permission_key = 'order.confirm_payment')
+                    limit 1"""),
+                {"actor_id": payment_system_actor_id},
+            )
+        ).scalar()
 
+    if not system_actor:
+        system_actor = (
+            await db.execute(
+                text("""select u.id from app_users u
+                    join user_roles ur on ur.user_id = u.id
+                    left join role_permissions rp on rp.role_id = ur.role_id
+                    left join roles r on r.id = ur.role_id
+                    where u.status = 'active'
+                      and (r.key in ('super_admin', 'admin', 'admin_manager', 'accountant')
+                           or rp.permission_key = 'order.confirm_payment')
+                    order by u.created_at asc
+                    limit 1""")
+            )
+        ).scalar()
+
+    if not system_actor:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PAYMENT_SYSTEM_ACTOR_INVALID: Không tìm thấy tài khoản hệ thống có quyền xác nhận thanh toán.",
+        )
+
+    actor_id = str(system_actor)
+
+    # 5. Update Payment Request to confirmed
     await db.execute(
         text("""update payment_requests
             set status = 'confirmed', confirmed_by = :actor_id, confirmed_at = :now
@@ -164,7 +204,7 @@ async def vietqr_webhook(
         {"pr_id": payment_req["id"], "actor_id": actor_id, "now": now},
     )
 
-    # 5. Update Order Payment Status
+    # 6. Update Order Payment Status
     if purpose == "deposit":
         next_payment_status = "deposit_confirmed"
     else:
@@ -177,8 +217,7 @@ async def vietqr_webhook(
         {"order_id": order_id, "payment_status": next_payment_status, "now": now},
     )
 
-    # 6. Add System Audit Comment
-    excess_msg = f" (Dư thừa: {excess_amount:,} VND)" if excess_amount > 0 else ""
+    # 7. Add System Audit Comment
     await db.execute(
         text("""insert into order_comments
             (id, order_id, author_id, audience, message, created_at)
@@ -187,12 +226,12 @@ async def vietqr_webhook(
             "id": f"comment_{uuid.uuid4().hex}",
             "order_id": order_id,
             "actor_id": actor_id,
-            "message": f"Đối soát tự động VietQR Napas 247 thành công. Số tiền: {amount_received:,} VND{excess_msg}. Mã tham chiếu: {ref_code}.",
+            "message": f"Đối soát tự động VietQR Napas 247 thành công. Số tiền: {amount_received:,} VND. Mã tham chiếu: {ref_code}.",
             "now": now,
         },
     )
 
-    # 7. Trigger Canonical Accounting Posting
+    # 8. Trigger Canonical Accounting Posting (Atomic with transaction)
     if is_postgres:
         await post_order_accounting(
             db,
@@ -211,5 +250,6 @@ async def vietqr_webhook(
         "orderId": order_id,
         "orderNumber": payment_req["order_number"],
         "paymentStatus": next_payment_status,
-        "excessAmount": excess_amount,
+        "amount": amount_received,
     }
+

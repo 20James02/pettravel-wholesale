@@ -253,7 +253,7 @@ async def save_order(
                 "actor_id": actor_id,
                 "actor_name": actor_name,
                 "items_snapshot": json.dumps(persisted_items),
-                "quote_snapshot": json.dumps(order.get("quoteVersions") or []),
+                "quote_snapshot": json.dumps([]),
                 "shipping_snapshot": json.dumps({
                     "recipientName": order.get("recipientName") or "",
                     "recipientPhone": order.get("recipientPhone") or "",
@@ -383,35 +383,33 @@ async def _update_order(
         target_quote_id = order.get("acceptedQuoteId")
         target_quote_version = order.get("acceptedQuoteVersion")
 
-        if not target_quote_id and not target_quote_version and order.get("quoteVersions"):
-            for q in order["quoteVersions"]:
-                if q.get("id") or q.get("version"):
-                    target_quote_id = q.get("id")
-                    target_quote_version = q.get("version")
-                    break
+        if not target_quote_id or target_quote_version is None:
+            raise OrderConflictError("Thiếu thông tin nhận diện báo giá cần chấp thuận (yêu cầu cả acceptedQuoteId và acceptedQuoteVersion).")
 
         quote_for_update = "for update" if is_postgres else ""
-        quote_query = f"select * from quote_versions where order_id = :order_id and status = 'published'"
-        quote_params: dict[str, Any] = {"order_id": order_id}
+        quote_query = f"""select * from quote_versions
+            where id = :quote_id
+              and order_id = :order_id
+              and version = :version
+              and status = 'published' {quote_for_update}"""
+        quote_params: dict[str, Any] = {
+            "quote_id": str(target_quote_id),
+            "order_id": order_id,
+            "version": int(target_quote_version),
+        }
 
-        if target_quote_id:
-            quote_query += " and id = :quote_id"
-            quote_params["quote_id"] = str(target_quote_id)
-        elif target_quote_version:
-            quote_query += " and version = :version"
-            quote_params["version"] = int(target_quote_version)
-        else:
-            raise OrderConflictError("Thiếu thông tin nhận diện báo giá cần chấp thuận (acceptedQuoteId hoặc acceptedQuoteVersion).")
-
-        quote_query += f" order by version desc limit 1 {quote_for_update}"
         db_quote = (await db.execute(text(quote_query), quote_params)).mappings().first()
         if not db_quote:
-            raise OrderConflictError("Báo giá đã thay đổi, bị hủy hoặc đã hết hiệu lực. Vui lòng tải lại trang.")
+            raise OrderConflictError("Báo giá không tồn tại, đã thay đổi, bị hủy hoặc đã hết hiệu lực. (QUOTE_STALE_OR_INVALID)")
+
+        # Verify current quote version
+        if int(db_quote["version"]) != int(current["current_quote_version"] or 0):
+            raise OrderConflictError("Báo giá không phải là phiên bản hiện hành mới nhất. (QUOTE_STALE)")
 
         # Check expiry
         quote_expires_at = _as_utc(db_quote["expires_at"])
-        if quote_expires_at < now:
-            raise ValueError("Báo giá đã hết hạn. Vui lòng gửi yêu cầu để nhân viên báo giá lại.")
+        if quote_expires_at <= now:
+            raise OrderConflictError("Báo giá đã hết hạn. Vui lòng gửi yêu cầu để nhân viên báo giá lại. (QUOTE_EXPIRED)")
 
         # Verify adjustment approvals
         unapproved_adj = (
@@ -422,7 +420,7 @@ async def _update_order(
             )
         ).scalar()
         if unapproved_adj and int(unapproved_adj) > 0:
-            raise ValueError("Báo giá có điều chỉnh đặc biệt chưa được phê duyệt.")
+            raise OrderConflictError("Báo giá có điều chỉnh đặc biệt chưa được phê duyệt. (QUOTE_APPROVAL_REQUIRED)")
 
         accepted_quote_row = dict(db_quote)
 
@@ -454,13 +452,153 @@ async def _update_order(
             {"version": int(db_quote["version"]), "id": order_id},
         )
 
-    # 5. Handle Admin Quote Publishing & Editing
+    # 5. Guard & Canonicalize Order Items (Canonicalize BEFORE Quote Calculation)
+    locked_items_count = (
+        await db.execute(
+            text("select count(*) from order_items where order_id = :order_id and locked = true"),
+            {"order_id": order_id},
+        )
+    ).scalar()
+
+    if order.get("items") is not None:
+        if locked_items_count and int(locked_items_count) > 0:
+            raise ValueError("Không thể chỉnh sửa danh sách sản phẩm của đơn hàng đã khóa báo giá thương mại. (LOCKED_ITEM_IMMUTABLE)")
+
+        incoming_items = order["items"]
+        if not incoming_items:
+            raise ValueError("Đơn hàng phải có ít nhất một sản phẩm.")
+
+        existing_items_rows = (
+            await db.execute(
+                text("select id from order_items where order_id = :order_id"),
+                {"order_id": order_id},
+            )
+        ).scalars().all()
+        existing_item_ids = set(existing_items_rows)
+        incoming_item_ids = {str(item.get("id")) for item in incoming_items if item.get("id")}
+
+        to_delete = existing_item_ids - incoming_item_ids
+        if to_delete:
+            del_filter, del_params = _bound_in("order_item_id", to_delete, "del_item")
+            await db.execute(text(f"delete from fulfillment_items where {del_filter}"), del_params)
+            del_filter_oi, del_params_oi = _bound_in("id", to_delete, "del_oi")
+            await db.execute(
+                text(f"delete from order_items where {del_filter_oi} and order_id = :order_id"),
+                {**del_params_oi, "order_id": order_id},
+            )
+
+        for index, item in enumerate(incoming_items):
+            item_id = str(item.get("id") or f"item_{uuid.uuid4().hex}_{index}")
+            sku = str(item.get("variantSku") or item.get("sku") or "")
+            supplier_id = str(item.get("supplierId") or item.get("supplier_id") or "sup_pettravel")
+            quantity = int(item.get("quantity") or 1)
+
+            # Authoritative pricing lookup (Fail-closed, no fallback to client unitPriceSnapshot)
+            catalog_row = (
+                await db.execute(
+                    text("""select p.code, p.name, v.label, v.image_url as variant_image,
+                                so.wholesale_price, so.min_order_qty, so.stock_qty
+                            from product_variants v
+                            join products p on p.id = v.product_id
+                            join supplier_offers so on so.product_variant_id = v.id
+                            join suppliers s on s.id = so.supplier_id
+                            where v.sku = :sku
+                              and v.active = true
+                              and p.active = true
+                              and so.supplier_id = :supplier_id
+                              and so.active = true
+                              and s.active = true
+                            limit 1"""),
+                    {"sku": sku, "supplier_id": supplier_id},
+                )
+            ).mappings().first()
+
+            if not catalog_row:
+                raise ValueError(f"SKU_OR_SUPPLIER_INVALID: Sản phẩm ({sku}) hoặc nhà cung cấp ({supplier_id}) không hợp lệ hoặc đã ngừng hoạt động.")
+
+            min_order_qty = int(catalog_row.get("min_order_qty") or 1)
+            if quantity < min_order_qty:
+                raise ValueError(f"MOQ_NOT_MET: Số lượng ({quantity}) nhỏ hơn số lượng tối thiểu ({min_order_qty}) của phân loại {sku}.")
+
+            unit_price = int(catalog_row["wholesale_price"])
+            product_code = str(catalog_row["code"])
+            product_name = str(catalog_row["name"])
+            variant_label = str(catalog_row["label"] or sku)
+            variant_image = str(catalog_row["variant_image"] or item.get("variantImage") or "")
+
+            if item_id in existing_item_ids:
+                await db.execute(
+                    text("""update order_items set
+                        quantity = :quantity,
+                        unit_price_snapshot = :unit_price,
+                        product_code_snapshot = :product_code,
+                        product_name_snapshot = :product_name,
+                        variant_sku_snapshot = :sku,
+                        variant_label_snapshot = :variant_label,
+                        variant_image = :variant_image,
+                        supplier_id = :supplier_id
+                        where id = :id and order_id = :order_id"""),
+                    {
+                        "id": item_id,
+                        "order_id": order_id,
+                        "quantity": quantity,
+                        "unit_price": unit_price,
+                        "product_code": product_code,
+                        "product_name": product_name,
+                        "sku": sku,
+                        "variant_label": variant_label,
+                        "variant_image": variant_image,
+                        "supplier_id": supplier_id,
+                    },
+                )
+            else:
+                await db.execute(
+                    text("""insert into order_items
+                        (id, order_id, product_code_snapshot, product_name_snapshot,
+                         variant_sku_snapshot, variant_label_snapshot, variant_image,
+                         supplier_id, quantity, unit_price_snapshot, locked)
+                        values (:id, :order_id, :product_code, :product_name,
+                                :sku, :variant_label, :variant_image, :supplier_id,
+                                :quantity, :unit_price, false)"""),
+                    {
+                        "id": item_id,
+                        "order_id": order_id,
+                        "product_code": product_code,
+                        "product_name": product_name,
+                        "sku": sku,
+                        "variant_label": variant_label,
+                        "variant_image": variant_image,
+                        "supplier_id": supplier_id,
+                        "quantity": quantity,
+                        "unit_price": unit_price,
+                    },
+                )
+                group_id = (
+                    await db.execute(
+                        text("select id from fulfillment_groups where order_id = :order_id and supplier_id = :supplier_id limit 1"),
+                        {"order_id": order_id, "supplier_id": supplier_id},
+                    )
+                ).scalar()
+                if not group_id:
+                    group_id = f"fulfillment_{uuid.uuid4().hex}"
+                    await db.execute(
+                        text("""insert into fulfillment_groups (id, order_id, supplier_id, status, internal_note, updated_at)
+                            values (:id, :order_id, :supplier_id, 'supplier_checking', '', :now)"""),
+                        {"id": group_id, "order_id": order_id, "supplier_id": supplier_id, "now": now},
+                    )
+                await db.execute(
+                    text("""insert into fulfillment_items (fulfillment_group_id, order_item_id)
+                        values (:group_id, :item_id) on conflict do nothing"""),
+                    {"group_id": group_id, "item_id": item_id},
+                )
+
+    # 6. Handle Admin Quote Publishing & Editing
     if internal and order.get("quoteVersions") is not None:
         if "order.quote" not in permissions and "super_admin" not in actor_role_keys:
             raise ValueError("Tài khoản không có quyền xuất bản báo giá.")
 
         highest_version = int(current["current_quote_version"] or 0)
-        items_for_pricing = order.get("items") or (
+        canonical_items = (
             await db.execute(
                 text("select quantity, unit_price_snapshot from order_items where order_id = :order_id"),
                 {"order_id": order_id},
@@ -470,6 +608,10 @@ async def _update_order(
         deposit_rate_bps = await resolve_deposit_rate_bps(db, default_bps=3000)
 
         for quote in order.get("quoteVersions") or []:
+            quote_status = str(quote.get("status") or "published")
+            if quote_status == "accepted":
+                raise ValueError("ADMIN_CANNOT_ACCEPT_QUOTE: Quản trị viên không thể tạo hoặc đặt trạng thái báo giá là accepted trực tiếp.")
+
             quote_id = str(quote.get("id") or f"quote_{uuid.uuid4().hex}")
             version = int(quote.get("version") or 0)
             if version <= 0:
@@ -479,16 +621,16 @@ async def _update_order(
             adjustments = quote.get("adjustments") or []
             requires_manager_approval = any(bool(adj.get("requiresApproval")) for adj in adjustments)
             if (
-                quote.get("status") in {"published", "accepted"}
+                quote_status == "published"
                 and requires_manager_approval
                 and not actor_role_keys.intersection({"super_admin", "admin_manager"})
             ):
                 raise ValueError("Báo giá có điều chỉnh đặc biệt phải được quản lý phê duyệt trước khi phát hành.")
 
-            # Authoritative Server-Side Calculation
+            # Authoritative Server-Side Calculation using canonical DB items
             intent = str(order.get("paymentIntent") or current["payment_intent"])
             calc = calculate_quote_financials(
-                items=items_for_pricing,
+                items=canonical_items,
                 adjustments=adjustments,
                 payment_intent=intent,
                 deposit_rate_bps=deposit_rate_bps,
@@ -499,8 +641,6 @@ async def _update_order(
                 expires_at_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
             else:
                 expires_at_dt = now + timedelta(days=3)
-
-            quote_status = str(quote.get("status") or "published")
 
             quote_exists = (
                 await db.execute(
@@ -524,8 +664,8 @@ async def _update_order(
             }
 
             if quote_exists:
-                if quote_exists["status"] == "accepted" and quote_status != "accepted":
-                    raise ValueError("Không thể thay đổi trạng thái của báo giá đã được đại lý chấp thuận.")
+                if quote_exists["status"] == "accepted":
+                    raise ValueError("Không thể thay đổi trạng thái của báo giá đã được đại lý chấp thuận. (ACCEPTED_QUOTE_IMMUTABLE)")
                 await db.execute(
                     text("""update quote_versions set
                         status = :status, subtotal = :subtotal, final_total = :final_total,
@@ -584,122 +724,6 @@ async def _update_order(
             {"version": highest_version, "id": order_id},
         )
 
-    # 6. Guard Locked Order Items Against Mutation
-    locked_items_count = (
-        await db.execute(
-            text("select count(*) from order_items where order_id = :order_id and locked = true"),
-            {"order_id": order_id},
-        )
-    ).scalar()
-
-    if order.get("items") is not None:
-        if locked_items_count and int(locked_items_count) > 0:
-            raise ValueError("Không thể chỉnh sửa danh sách sản phẩm của đơn hàng đã khóa báo giá thương mại.")
-
-        incoming_items = order["items"]
-        if not incoming_items:
-            raise ValueError("Đơn hàng phải có ít nhất một sản phẩm.")
-
-        existing_items_rows = (
-            await db.execute(
-                text("select id from order_items where order_id = :order_id"),
-                {"order_id": order_id},
-            )
-        ).scalars().all()
-        existing_item_ids = set(existing_items_rows)
-        incoming_item_ids = {str(item.get("id")) for item in incoming_items if item.get("id")}
-
-        to_delete = existing_item_ids - incoming_item_ids
-        if to_delete:
-            del_filter, del_params = _bound_in("order_item_id", to_delete, "del_item")
-            await db.execute(text(f"delete from fulfillment_items where {del_filter}"), del_params)
-            del_filter_oi, del_params_oi = _bound_in("id", to_delete, "del_oi")
-            await db.execute(
-                text(f"delete from order_items where {del_filter_oi} and order_id = :order_id"),
-                {**del_params_oi, "order_id": order_id},
-            )
-
-        for index, item in enumerate(incoming_items):
-            item_id = str(item.get("id") or f"item_{uuid.uuid4().hex}_{index}")
-            sku = str(item.get("variantSku") or "")
-            supplier_id = str(item.get("supplierId") or "sup_pettravel")
-            quantity = int(item.get("quantity") or 1)
-            
-            # Authoritative pricing lookup
-            catalog_price = (
-                await db.execute(
-                    text("""select so.wholesale_price, p.code, p.name, v.label
-                        from product_variants v
-                        join products p on p.id = v.product_id
-                        join supplier_offers so on so.product_variant_id = v.id and so.supplier_id = :supplier_id
-                        where v.sku = :sku limit 1"""),
-                    {"sku": sku, "supplier_id": supplier_id},
-                )
-            ).mappings().first()
-            
-            unit_price = int(catalog_price["wholesale_price"] if catalog_price else (item.get("unitPriceSnapshot") or 0))
-            product_code = str(catalog_price["code"] if catalog_price else (item.get("productCode") or ""))
-            product_name = str(catalog_price["name"] if catalog_price else (item.get("productName") or ""))
-            variant_label = str(catalog_price["label"] if catalog_price else (item.get("variantLabel") or sku))
-            variant_image = str(item.get("variantImage") or "")
-
-            if item_id in existing_item_ids:
-                await db.execute(
-                    text("""update order_items set
-                        quantity = :quantity,
-                        unit_price_snapshot = :unit_price,
-                        variant_label_snapshot = :variant_label,
-                        variant_image = :variant_image
-                        where id = :id and order_id = :order_id"""),
-                    {
-                        "id": item_id,
-                        "order_id": order_id,
-                        "quantity": quantity,
-                        "unit_price": unit_price,
-                        "variant_label": variant_label,
-                        "variant_image": variant_image,
-                    },
-                )
-            else:
-                await db.execute(
-                    text("""insert into order_items
-                        (id, order_id, product_code_snapshot, product_name_snapshot,
-                         variant_sku_snapshot, variant_label_snapshot, variant_image,
-                         supplier_id, quantity, unit_price_snapshot, locked)
-                        values (:id, :order_id, :product_code, :product_name,
-                                :sku, :variant_label, :variant_image, :supplier_id,
-                                :quantity, :unit_price, false)"""),
-                    {
-                        "id": item_id,
-                        "order_id": order_id,
-                        "product_code": product_code,
-                        "product_name": product_name,
-                        "sku": sku,
-                        "variant_label": variant_label,
-                        "variant_image": variant_image,
-                        "supplier_id": supplier_id,
-                        "quantity": quantity,
-                        "unit_price": unit_price,
-                    },
-                )
-                group_id = (
-                    await db.execute(
-                        text("select id from fulfillment_groups where order_id = :order_id and supplier_id = :supplier_id limit 1"),
-                        {"order_id": order_id, "supplier_id": supplier_id},
-                    )
-                ).scalar()
-                if not group_id:
-                    group_id = f"fulfillment_{uuid.uuid4().hex}"
-                    await db.execute(
-                        text("""insert into fulfillment_groups (id, order_id, supplier_id, status, internal_note, updated_at)
-                            values (:id, :order_id, :supplier_id, 'supplier_checking', '', :now)"""),
-                        {"id": group_id, "order_id": order_id, "supplier_id": supplier_id, "now": now},
-                    )
-                await db.execute(
-                    text("""insert into fulfillment_items (fulfillment_group_id, order_item_id)
-                        values (:group_id, :item_id) on conflict do nothing"""),
-                    {"group_id": group_id, "item_id": item_id},
-                )
 
     # 7. Update Fulfillment Groups & Shipments if Admin
     if internal and order.get("fulfillmentGroups") is not None:

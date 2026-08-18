@@ -12,11 +12,14 @@ PUBLIC_API_PATHS = {
     "/api/v1/categories",
     "/api/v1/products",
     "/api/v1/uploads/presign",
+    "/api/v1/orders/webhook/vietqr",
 }
 
 
 def is_public_api_path(path: str, method: str = "GET") -> bool:
     if path in {"/api/v1/products", "/api/v1/categories"} and method.upper() not in {"GET", "HEAD"}:
+        return False
+    if path == "/api/v1/orders/webhook/vietqr" and method.upper() != "POST":
         return False
     return path in PUBLIC_API_PATHS
 

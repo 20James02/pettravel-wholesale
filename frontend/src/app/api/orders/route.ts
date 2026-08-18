@@ -72,10 +72,29 @@ const customerOrderUpdateSchema = z.object({
   customerTaxCode: z.string().trim().max(50).optional().or(z.literal("")),
   customerNote: z.string().trim().max(1000).optional().or(z.literal("")),
   commercialStatus: z.enum(["draft", "submitted", "admin_review", "quoted", "customer_accepted", "locked", "cancelled"]).optional(),
+  acceptedQuoteId: z.string().trim().min(1).optional(),
+  acceptedQuoteVersion: z.number().int().positive().optional(),
   paymentStatus: z.enum(["unrequested", "deposit_requested", "deposit_uploaded", "deposit_confirmed", "full_requested", "full_uploaded", "paid", "cod_remaining", "refunded"]).optional(),
   paymentRequests: z.array(customerPaymentRequestSchema).max(20).optional(),
   comments: z.array(customerCommentSchema).max(20, "Mỗi lần cập nhật tối đa 20 ghi chú.").optional(),
   paymentProofs: z.array(customerProofSchema).max(20, "Mỗi lần cập nhật tối đa 20 minh chứng.").optional()
+}).superRefine((data, ctx) => {
+  if (data.commercialStatus === "customer_accepted") {
+    if (!data.acceptedQuoteId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Thiếu acceptedQuoteId khi chấp thuận báo giá.",
+        path: ["acceptedQuoteId"]
+      });
+    }
+    if (data.acceptedQuoteVersion === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Thiếu acceptedQuoteVersion khi chấp thuận báo giá.",
+        path: ["acceptedQuoteVersion"]
+      });
+    }
+  }
 });
 
 const adminOrderItemSchema = z.object({
@@ -386,7 +405,6 @@ export async function PUT(request: Request) {
 
       // Allow customer to update status (e.g. customer_accepted when agreeing to quote, or admin_review when asking for re-quote)
       let nextCommercialStatus = existing.commercialStatus;
-      let nextQuoteVersions = existing.quoteVersions;
       let nextPaymentStatus = existing.paymentStatus;
       let nextPaymentRequests = existing.paymentRequests;
 
@@ -398,9 +416,6 @@ export async function PUT(request: Request) {
         ) {
           nextCommercialStatus = customerPayload.commercialStatus;
           if (customerPayload.commercialStatus === "customer_accepted") {
-            nextQuoteVersions = existing.quoteVersions.map((q, idx) =>
-              idx === existing.quoteVersions.length - 1 ? { ...q, status: "accepted" as const } : q
-            );
             const intent = customerPayload.paymentIntent ?? existing.paymentIntent;
             nextPaymentStatus = intent === "pay_full" ? "full_requested" : "deposit_requested";
           }
@@ -432,7 +447,9 @@ export async function PUT(request: Request) {
         fulfillmentStatus: existing.fulfillmentStatus,
         items: existing.items,
         fulfillmentGroups: existing.fulfillmentGroups,
-        quoteVersions: nextQuoteVersions,
+        quoteVersions: existing.quoteVersions,
+        acceptedQuoteId: customerPayload.acceptedQuoteId,
+        acceptedQuoteVersion: customerPayload.acceptedQuoteVersion,
         paymentRequests: nextPaymentRequests,
         paymentProofs: safeProofs,
         comments: safeComments,

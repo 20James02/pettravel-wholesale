@@ -53,14 +53,13 @@ def validate_commercial_transition(
             return
         raise ValueError(f"Đại lý không có quyền chuyển trạng thái từ '{before}' sang '{after}'.")
 
-    # Internal operator transitions
+    # Internal operator transitions (Internal actors CANNOT accept quotes on behalf of customer)
     allowed_internal_transitions = {
         ("draft", "submitted"),
         ("submitted", "admin_review"),
         ("submitted", "quoted"),
         ("admin_review", "quoted"),
         ("quoted", "admin_review"),
-        ("quoted", "customer_accepted"),
         ("customer_accepted", "locked"),
     }
     if (before, after) not in allowed_internal_transitions:
@@ -73,7 +72,12 @@ def validate_fulfillment_transition(
     after: str,
 ) -> None:
     """
-    Authoritative linear transition matrix for fulfillmentStatus.
+    Authoritative linear adjacent-only transition matrix for fulfillmentStatus.
+    Invariants:
+    - after_index == before_index + 1 (or before == after for idempotent no-op)
+    - No skipping states
+    - No backwards transitions
+    - No transitions from delivered
     """
     if before == after:
         return
@@ -93,13 +97,13 @@ def validate_fulfillment_transition(
     before_idx = allowed_chain.index(before)
     after_idx = allowed_chain.index(after)
 
-    # Cannot go backwards
-    if after_idx < before_idx:
-        raise ValueError(f"Không thể chuyển ngược trạng thái giao hàng từ '{before}' về '{after}'.")
-
-    # Cannot skip directly to delivered from not_started/supplier_checking without shipping
-    if after == "delivered" and before not in {"shipped"}:
-        raise ValueError(f"Đơn hàng phải ở trạng thái 'shipped' trước khi hoàn tất giao hàng ('delivered').")
+    # Strictly enforce adjacent forward progression
+    if after_idx != before_idx + 1:
+        if after_idx < before_idx:
+            raise ValueError(f"Không thể chuyển ngược trạng thái giao hàng từ '{before}' về '{after}'.")
+        raise ValueError(
+            f"Trạng thái giao hàng chỉ được phép chuyển liền kề theo thứ tự: '{before}' -> '{allowed_chain[before_idx + 1]}'. (Không được bỏ qua trạng thái)"
+        )
 
 
 def stock_command_for_transition(
@@ -136,13 +140,15 @@ async def execute_stock_command(
 
     reserving_actor = actor_id
     if command == "reserve_order":
-        # Check if the actor is internal
+        # Check if the actor is internal with operational permission
         is_internal = (
             await db.execute(
                 text("""select 1 from user_roles ur
-                    join role_permissions rp on rp.role_id = ur.role_id
+                    join roles r on r.id = ur.role_id
+                    left join role_permissions rp on rp.role_id = ur.role_id
                     where ur.user_id = :actor_id
-                      and rp.permission_key in ('operations.write', 'order.quote')
+                      and (r.key in ('super_admin', 'admin', 'admin_manager')
+                           or rp.permission_key in ('operations.write', 'order.quote'))
                     limit 1"""),
                 {"actor_id": actor_id},
             )
@@ -150,7 +156,7 @@ async def execute_stock_command(
 
         if not is_internal:
             # Deterministic attribution:
-            # 1. Staff who published the accepted quote
+            # 1. Staff who published the exact accepted quote (must be active and hold permission)
             internal_actor = None
             if accepted_quote_id:
                 internal_actor = (
@@ -158,38 +164,39 @@ async def execute_stock_command(
                         text("""select q.published_by
                             from quote_versions q
                             join app_users u on u.id = q.published_by
-                            where q.id = :quote_id and u.status = 'active'"""),
+                            join user_roles ur on ur.user_id = u.id
+                            join roles r on r.id = ur.role_id
+                            left join role_permissions rp on rp.role_id = ur.role_id
+                            where q.id = :quote_id
+                              and u.status = 'active'
+                              and (r.key in ('super_admin', 'admin', 'admin_manager')
+                                   or rp.permission_key in ('operations.write', 'order.quote'))
+                            limit 1"""),
                         {"quote_id": accepted_quote_id},
                     )
                 ).scalar()
 
-            if not internal_actor:
-                internal_actor = (
-                    await db.execute(
-                        text("""select q.published_by
-                            from quote_versions q
-                            join app_users u on u.id = q.published_by
-                            where q.order_id = :order_id and q.status in ('published', 'accepted')
-                              and u.status = 'active'
-                            order by q.version desc limit 1"""),
-                        {"order_id": order_id},
-                    )
-                ).scalar()
-
-            # 2. Staff assigned to the order
+            # 2. Staff assigned to the order (must be active and hold permission)
             if not internal_actor:
                 internal_actor = (
                     await db.execute(
                         text("""select o.assigned_staff_id
                             from customer_orders o
                             join app_users u on u.id = o.assigned_staff_id
-                            where o.id = :order_id and u.status = 'active'"""),
+                            join user_roles ur on ur.user_id = u.id
+                            join roles r on r.id = ur.role_id
+                            left join role_permissions rp on rp.role_id = ur.role_id
+                            where o.id = :order_id
+                              and u.status = 'active'
+                              and (r.key in ('super_admin', 'admin', 'admin_manager')
+                                   or rp.permission_key in ('operations.write', 'order.quote'))
+                            limit 1"""),
                         {"order_id": order_id},
                     )
                 ).scalar()
 
             if not internal_actor:
-                raise ValueError("Không thể xác định nhân viên phụ trách xuất bản báo giá để thực hiện giữ tồn kho.")
+                raise ValueError("RESERVATION_OPERATOR_UNAVAILABLE: Không thể xác định nhân viên phụ trách có đủ quyền giữ tồn kho.")
 
             reserving_actor = str(internal_actor)
 

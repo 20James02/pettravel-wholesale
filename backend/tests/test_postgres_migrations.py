@@ -48,29 +48,12 @@ async def run_sql_file(conn: asyncpg.Connection, filepath: str):
 @pytest.mark.asyncio
 async def test_migration_paths_and_v13_lifecycle_hardening():
     supabase_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "supabase"))
+    fixtures_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "fixtures"))
     schema_file = os.path.join(supabase_dir, "schema.sql")
-    
-    historical_migration_files = [
-        os.path.join(supabase_dir, f) for f in [
-            "update_schema.sql",
-            "update_v2.sql",
-            "update_v3_accounting.sql",
-            "update_v4_operations.sql",
-            "update_v5_receivables_reconciliation.sql",
-            "update_v6_stock_reservations.sql",
-            "update_v7_accounting_order_posting.sql",
-            "update_v7_variant_images.sql",
-            "update_v8_drop_exec_sql.sql",
-            "update_v9_order_workflow_guards.sql"
-        ]
-    ]
-    
-    v10_file = os.path.join(supabase_dir, "update_v10_integrity_hardening.sql")
-    v11_file = os.path.join(supabase_dir, "update_v11_security_accounting_hardening.sql")
-    v12_file = os.path.join(supabase_dir, "update_v12_commercial_sot_hardening.sql")
+    schema_v12_file = os.path.join(fixtures_dir, "schema_v12_snapshot.sql")
     v13_file = os.path.join(supabase_dir, "update_v13_order_lifecycle_canonicalization.sql")
     
-    # ── PATH A: Fresh Schema Bootstrap ──
+    # ── PATH A: Fresh Schema Bootstrap (from full schema.sql) ──
     db_path_a = "pettravel_path_a_fresh_v13"
     await create_isolated_database(db_path_a)
     conn_a = await asyncpg.connect(
@@ -94,7 +77,7 @@ async def test_migration_paths_and_v13_lifecycle_hardening():
     finally:
         await conn_a.close()
 
-    # ── PATH B: Upgrade through V10 -> V11 -> V12 -> V13 ──
+    # ── PATH B: True Upgrade from V12 Baseline -> Apply V13 Migration ──
     db_path_b = "pettravel_path_b_upgrade_v13"
     await create_isolated_database(db_path_b)
     conn_b = await asyncpg.connect(
@@ -102,17 +85,31 @@ async def test_migration_paths_and_v13_lifecycle_hardening():
         host=POSTGRES_TEST_HOST, port=POSTGRES_TEST_PORT, database=db_path_b
     )
     try:
-        await run_sql_file(conn_b, schema_file)
-        for mf in historical_migration_files:
-            if os.path.exists(mf):
-                await run_sql_file(conn_b, mf)
+        # 1. Bootstrap from pure V12 snapshot
+        await run_sql_file(conn_b, schema_v12_file)
         
-        if os.path.exists(v10_file):
-            await run_sql_file(conn_b, v10_file)
-        await run_sql_file(conn_b, v11_file)
-        await run_sql_file(conn_b, v12_file)
+        # Verify pre-conditions: V13 objects MUST be absent
+        has_rev_before = await conn_b.fetchval("SELECT 1 FROM information_schema.tables WHERE table_name = 'order_revision_history'")
+        assert has_rev_before is None, "V12 baseline must NOT have order_revision_history"
+
+        has_sync_before = await conn_b.fetchval("SELECT 1 FROM information_schema.tables WHERE table_name = 'order_sync_revisions'")
+        assert has_sync_before is None, "V12 baseline must NOT have order_sync_revisions"
+
+        has_active_org_before = await conn_b.fetchval("""
+            SELECT 1 FROM pg_indexes WHERE indexname = 'uq_customer_orders_active_org'
+        """)
+        assert has_active_org_before is None, "V12 baseline must NOT have uq_customer_orders_active_org"
+
+        # 2. Apply V13 Migration in place
         await run_sql_file(conn_b, v13_file)
         
+        # Verify post-conditions: V13 objects MUST be present
+        has_rev_after = await conn_b.fetchval("SELECT 1 FROM information_schema.tables WHERE table_name = 'order_revision_history'")
+        assert has_rev_after == 1, "Path B must have order_revision_history table after V13 migration"
+
+        has_sync_after = await conn_b.fetchval("SELECT 1 FROM information_schema.tables WHERE table_name = 'order_sync_revisions'")
+        assert has_sync_after == 1, "Path B must have order_sync_revisions table after V13 migration"
+
         has_active_org_idx = await conn_b.fetchval("""
             SELECT 1 FROM pg_indexes 
             WHERE indexname = 'uq_customer_orders_active_org'
@@ -124,6 +121,12 @@ async def test_migration_paths_and_v13_lifecycle_hardening():
             WHERE indexname = 'uq_quote_versions_single_accepted'
         """)
         assert has_single_accepted_idx == 1, "Path B must have uq_quote_versions_single_accepted index"
+
+        has_immut_trg_b = await conn_b.fetchval("""
+            SELECT 1 FROM information_schema.triggers 
+            WHERE trigger_name = 'trg_guard_accepted_quote_immutability'
+        """)
+        assert has_immut_trg_b == 1, "Path B must have accepted quote immutability trigger"
     finally:
         await conn_b.close()
 
@@ -133,7 +136,8 @@ async def test_migration_paths_and_v13_lifecycle_hardening():
 @pytest.mark.asyncio
 async def test_v13_migration_preflight_aborts_on_dirty_active_orders():
     supabase_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "supabase"))
-    schema_file = os.path.join(supabase_dir, "schema.sql")
+    fixtures_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "fixtures"))
+    schema_v12_file = os.path.join(fixtures_dir, "schema_v12_snapshot.sql")
     v13_file = os.path.join(supabase_dir, "update_v13_order_lifecycle_canonicalization.sql")
     
     db_dirty = "pettravel_v13_dirty_test"
@@ -143,10 +147,8 @@ async def test_v13_migration_preflight_aborts_on_dirty_active_orders():
         host=POSTGRES_TEST_HOST, port=POSTGRES_TEST_PORT, database=db_dirty
     )
     try:
-        await run_sql_file(conn, schema_file)
-        
-        # Drop constraint to simulate an unmigrated older schema state with dirty data
-        await conn.execute("DROP INDEX IF EXISTS uq_customer_orders_active_org;")
+        # Load pure V12 schema (which has no active org unique index)
+        await run_sql_file(conn, schema_v12_file)
         
         # Seed organizations and users
         await conn.execute("INSERT INTO organizations (id, name) VALUES ('org_dirty', 'Dirty Org');")
@@ -155,7 +157,7 @@ async def test_v13_migration_preflight_aborts_on_dirty_active_orders():
             VALUES ('user_dirty', 'org_dirty', 'User D', 'dirty@example.com', 'active');
         """)
         
-        # Seed duplicate active orders for same org
+        # Seed duplicate active orders for same org in V12 state
         await conn.execute("""
             INSERT INTO customer_orders 
             (id, order_number, organization_id, created_by, commercial_status, fulfillment_status, payment_intent)
@@ -178,7 +180,8 @@ async def test_v13_migration_preflight_aborts_on_dirty_active_orders():
 @pytest.mark.asyncio
 async def test_v13_triggers_prevent_accepted_quote_and_locked_item_mutation():
     supabase_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "supabase"))
-    schema_file = os.path.join(supabase_dir, "schema.sql")
+    fixtures_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "fixtures"))
+    schema_v12_file = os.path.join(fixtures_dir, "schema_v12_snapshot.sql")
     v13_file = os.path.join(supabase_dir, "update_v13_order_lifecycle_canonicalization.sql")
     
     db_trg = "pettravel_v13_triggers_test"
@@ -188,7 +191,7 @@ async def test_v13_triggers_prevent_accepted_quote_and_locked_item_mutation():
         host=POSTGRES_TEST_HOST, port=POSTGRES_TEST_PORT, database=db_trg
     )
     try:
-        await run_sql_file(conn, schema_file)
+        await run_sql_file(conn, schema_v12_file)
         await run_sql_file(conn, v13_file)
         
         # Seed test data
@@ -235,3 +238,4 @@ async def test_v13_triggers_prevent_accepted_quote_and_locked_item_mutation():
         assert "LOCKED_ITEM_IMMUTABLE" in str(exc4.value)
     finally:
         await conn.close()
+

@@ -151,7 +151,7 @@ def setup_postgres_schema():
 
 @pytest_asyncio.fixture
 async def pg_engine():
-    engine = create_async_engine(POSTGRES_TEST_URL, echo=False, poolclass=NullPool)
+    engine = create_async_engine(POSTGRES_TEST_URL, echo=False, pool_size=10, max_overflow=20, pool_pre_ping=True)
     yield engine
     await engine.dispose()
 
@@ -484,33 +484,42 @@ async def test_postgres_atp_multi_sku_deterministic_lock_ordering(pg_engine):
 # ── TEST 10: INTERNAL AUTH HTTP GATE ────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_internal_auth_http_gate(monkeypatch):
+async def test_internal_auth_http_gate(monkeypatch, pg_session: AsyncSession):
     from httpx import AsyncClient, ASGITransport
     from app.main import app
     from app.core.config import settings
+    from app.core.db import get_db
 
     monkeypatch.setattr(settings, "BACKEND_INTERNAL_SECRET", "super-secret-gate-token")
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        res_no_auth = await client.post("/api/v1/accounting/order-posting", json={
-            "orderId": "ord_acct_test",
-            "actorId": "admin_ops"
-        })
-        assert res_no_auth.status_code == 401, f"Expected 401 without secret, got {res_no_auth.status_code}"
 
-        res_wrong_auth = await client.post(
-            "/api/v1/accounting/order-posting",
-            headers={"x-backend-internal-secret": "wrong_secret"},
-            json={"orderId": "ord_acct_test", "actorId": "admin_ops"}
-        )
-        assert res_wrong_auth.status_code == 401, f"Expected 401 with wrong secret, got {res_wrong_auth.status_code}"
+    async def override_get_db():
+        yield pg_session
 
-        res_valid_auth = await client.post(
-            "/api/v1/accounting/order-posting",
-            headers={"x-backend-internal-secret": "super-secret-gate-token"},
-            json={"orderId": "ord_acct_test", "actorId": "admin_ops", "mode": "post_all"}
-        )
-        assert res_valid_auth.status_code != 401, "Valid internal secret must pass auth gate"
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            res_no_auth = await client.post("/api/v1/accounting/order-posting", json={
+                "orderId": "ord_acct_test",
+                "actorId": "admin_ops"
+            })
+            assert res_no_auth.status_code == 401, f"Expected 401 without secret, got {res_no_auth.status_code}"
+
+            res_wrong_auth = await client.post(
+                "/api/v1/accounting/order-posting",
+                headers={"x-backend-internal-secret": "wrong_secret"},
+                json={"orderId": "ord_acct_test", "actorId": "admin_ops"}
+            )
+            assert res_wrong_auth.status_code == 401, f"Expected 401 with wrong secret, got {res_wrong_auth.status_code}"
+
+            res_valid_auth = await client.post(
+                "/api/v1/accounting/order-posting",
+                headers={"x-backend-internal-secret": "super-secret-gate-token"},
+                json={"orderId": "ord_acct_test", "actorId": "admin_ops", "mode": "post_all"}
+            )
+            assert res_valid_auth.status_code != 401, "Valid internal secret must pass auth gate"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 # ── TEST 11: EXACT INTEGER VAT MATHEMATICS MATRIX ──────────────────

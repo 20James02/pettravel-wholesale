@@ -174,6 +174,13 @@ async def canonical_db_session() -> AsyncSession:
         """create table bank_transactions (
             id text primary key, organization_id text not null, reconciliation_status text not null
         )""",
+        """create table app_settings (
+            key text primary key, value json not null, updated_by text, updated_at timestamp default current_timestamp
+        )""",
+        """create table audit_log (
+            id text primary key, actor_id text, entity_type text not null, entity_id text not null,
+            action text not null, before_data json, after_data json, reason text, created_at timestamp default current_timestamp
+        )""",
     ]
     async with engine.begin() as conn:
         for statement in ddl:

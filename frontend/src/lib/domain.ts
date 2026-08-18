@@ -225,6 +225,8 @@ export interface CustomerOrder {
   customerTaxCode?: string;
   customerNote?: string;
   comments: OrderComment[];
+  acceptedQuoteId?: string;
+  acceptedQuoteVersion?: number;
   updatedAt: string;
 }
 

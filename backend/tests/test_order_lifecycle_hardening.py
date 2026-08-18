@@ -78,9 +78,9 @@ async def test_customer_accept_quote_persists_accepted_state_and_locks_items(can
     await canonical_db_session.execute(
         text("""insert into customer_orders
             (id, order_number, organization_id, created_by, commercial_status, payment_status,
-             payment_intent, updated_at)
+             payment_intent, current_quote_version, updated_at)
             values ('ord_accept_test', 'PTW-2026-001', 'org_cust', 'cust_1', 'quoted', 'unrequested',
-                    'deposit_cod', '2026-08-18 10:00:00')""")
+                    'deposit_cod', 1, '2026-08-18 10:00:00')""")
     )
     await canonical_db_session.execute(
         text("""insert into order_items
@@ -105,7 +105,8 @@ async def test_customer_accept_quote_persists_accepted_state_and_locks_items(can
         order={
             "id": "ord_accept_test",
             "commercialStatus": "customer_accepted",
-            "quoteVersions": [{"id": "qv_1", "version": 1, "status": "accepted"}],
+            "acceptedQuoteId": "qv_1",
+            "acceptedQuoteVersion": 1,
         },
     )
 
@@ -158,9 +159,9 @@ async def test_customer_accept_stale_or_expired_quote_is_rejected(canonical_db_s
     await canonical_db_session.execute(
         text("""insert into customer_orders
             (id, order_number, organization_id, created_by, commercial_status, payment_status,
-             payment_intent, updated_at)
+             payment_intent, current_quote_version, updated_at)
             values ('ord_expired_test', 'PTW-2026-002', 'org_cust_2', 'cust_2', 'quoted', 'unrequested',
-                    'deposit_cod', '2026-08-18 10:00:00')""")
+                    'deposit_cod', 1, '2026-08-18 10:00:00')""")
     )
     # Expired quote
     await canonical_db_session.execute(
@@ -172,7 +173,7 @@ async def test_customer_accept_stale_or_expired_quote_is_rejected(canonical_db_s
     )
     await canonical_db_session.commit()
 
-    with pytest.raises(ValueError, match="hết hạn"):
+    with pytest.raises(ValueError, match="hết hạn|QUOTE_EXPIRED"):
         await save_order(
             canonical_db_session,
             actor_id="cust_2",
@@ -180,7 +181,8 @@ async def test_customer_accept_stale_or_expired_quote_is_rejected(canonical_db_s
             order={
                 "id": "ord_expired_test",
                 "commercialStatus": "customer_accepted",
-                "quoteVersions": [{"id": "qv_expired", "version": 1}],
+                "acceptedQuoteId": "qv_expired",
+                "acceptedQuoteVersion": 1,
             },
         )
 

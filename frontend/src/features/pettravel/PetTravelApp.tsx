@@ -1254,11 +1254,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       const updatedOrder: CustomerOrder = {
         ...workingOrder,
         commercialStatus: "customer_accepted",
+        acceptedQuoteId: activeQuote.id,
+        acceptedQuoteVersion: activeQuote.version,
         paymentStatus: isDeposit ? "deposit_requested" : "full_requested",
         paymentRequests: [...updatedRequests, newRequest],
-        quoteVersions: workingOrder.quoteVersions.map((q, idx) =>
-          idx === workingOrder.quoteVersions.length - 1 ? { ...q, status: "accepted" as const } : q
-        ),
         comments: [
           {
             id: `c_acc_${Date.now()}`,
