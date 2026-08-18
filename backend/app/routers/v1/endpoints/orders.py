@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 from typing import Any, Dict
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.services.pricing import calculate_quote_financials
+from app.services.pricing import calculate_quote_financials, resolve_deposit_rate_bps
 from app.services.canonical_accounting import post_order_accounting
 from app.services.order_workflow import execute_stock_command
 
@@ -44,7 +45,10 @@ async def list_orders_deprecated():
 
 
 @router.post("/calculate-financials", response_model=Dict[str, Any])
-async def calculate_financials(payload: Dict[str, Any]):
+async def calculate_financials(
+    payload: Dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+):
     """
     Authoritative calculation preview using canonical pricing engine.
     Guarantees strict parity between backend preview and persisted quotes.
@@ -52,7 +56,7 @@ async def calculate_financials(payload: Dict[str, Any]):
     items = payload.get("items", [])
     adjustments = payload.get("adjustments", [])
     payment_intent = payload.get("paymentIntent", "deposit_cod")
-    deposit_rate_bps = payload.get("depositRateBps", 3000)
+    deposit_rate_bps = payload.get("depositRateBps") or await resolve_deposit_rate_bps(db, default_bps=3000)
 
     try:
         calc = calculate_quote_financials(
@@ -75,15 +79,23 @@ async def calculate_financials(payload: Dict[str, Any]):
 
 
 @router.post("/webhook/vietqr")
-async def vietqr_webhook(payload: Dict[str, Any], db: AsyncSession = Depends(get_db)):
+async def vietqr_webhook(
+    payload: Dict[str, Any],
+    x_webhook_secret: str | None = Header(None, alias="x-webhook-secret"),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Authoritative canonical VietQR bank webhook.
-    - Idempotent
+    - Provider authentication
+    - Idempotent row locking
     - Server-side reference resolution
-    - Payment request row locking
-    - Amount verification
+    - Amount verification with excess tracking
     - Canonical state machine & accounting posting
     """
+    expected_secret = os.environ.get("VIETQR_WEBHOOK_SECRET")
+    if expected_secret and x_webhook_secret != expected_secret:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Webhook signature verification failed.")
+
     now = datetime.now(timezone.utc)
     ref_code = str(payload.get("reference") or payload.get("addInfo") or payload.get("content") or "").strip().upper()
     amount_received = int(payload.get("amount") or 0)
@@ -92,7 +104,8 @@ async def vietqr_webhook(payload: Dict[str, Any], db: AsyncSession = Depends(get
         raise HTTPException(status_code=400, detail="Mã đối soát hoặc số tiền thanh toán không hợp lệ.")
 
     # 1. Resolve active or uploaded payment request with exact reference
-    for_update = "for update of pr, o" if db.get_bind().dialect.name == "postgresql" else ""
+    is_postgres = db.get_bind().dialect.name == "postgresql"
+    for_update = "for update of pr, o" if is_postgres else ""
     payment_req = (
         await db.execute(
             text(f"""select pr.*, o.order_number, o.organization_id, o.commercial_status
@@ -120,13 +133,15 @@ async def vietqr_webhook(payload: Dict[str, Any], db: AsyncSession = Depends(get
     if payment_req["status"] not in {"active", "uploaded"}:
         raise HTTPException(status_code=400, detail=f"Yêu cầu thanh toán đang ở trạng thái không hợp lệ: {payment_req['status']}.")
 
-    # 3. Verify Amount
-    if amount_received < int(payment_req["amount"]):
+    # 3. Verify Amount & Excess
+    expected_amount = int(payment_req["amount"])
+    if amount_received < expected_amount:
         raise HTTPException(
             status_code=400,
-            detail=f"Số tiền nhận ({amount_received:,} VND) nhỏ hơn số tiền yêu cầu ({payment_req['amount']:,} VND).",
+            detail=f"Số tiền nhận ({amount_received:,} VND) nhỏ hơn số tiền yêu cầu ({expected_amount:,} VND).",
         )
 
+    excess_amount = amount_received - expected_amount
     order_id = payment_req["order_id"]
     purpose = payment_req["purpose"]
 
@@ -163,6 +178,7 @@ async def vietqr_webhook(payload: Dict[str, Any], db: AsyncSession = Depends(get
     )
 
     # 6. Add System Audit Comment
+    excess_msg = f" (Dư thừa: {excess_amount:,} VND)" if excess_amount > 0 else ""
     await db.execute(
         text("""insert into order_comments
             (id, order_id, author_id, audience, message, created_at)
@@ -171,13 +187,13 @@ async def vietqr_webhook(payload: Dict[str, Any], db: AsyncSession = Depends(get
             "id": f"comment_{uuid.uuid4().hex}",
             "order_id": order_id,
             "actor_id": actor_id,
-            "message": f"Đối soát tự động VietQR Napas 247 thành công. Số tiền: {amount_received:,} VND. Mã tham chiếu: {ref_code}.",
+            "message": f"Đối soát tự động VietQR Napas 247 thành công. Số tiền: {amount_received:,} VND{excess_msg}. Mã tham chiếu: {ref_code}.",
             "now": now,
         },
     )
 
     # 7. Trigger Canonical Accounting Posting
-    try:
+    if is_postgres:
         await post_order_accounting(
             db,
             order_id=order_id,
@@ -186,8 +202,6 @@ async def vietqr_webhook(payload: Dict[str, Any], db: AsyncSession = Depends(get
             vat_rate_bps=0,
             require_consumed_stock=False,
         )
-    except Exception:
-        pass
 
     await db.commit()
 
@@ -197,4 +211,5 @@ async def vietqr_webhook(payload: Dict[str, Any], db: AsyncSession = Depends(get
         "orderId": order_id,
         "orderNumber": payment_req["order_number"],
         "paymentStatus": next_payment_status,
+        "excessAmount": excess_amount,
     }

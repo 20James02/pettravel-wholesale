@@ -1,12 +1,13 @@
 # PET TRAVEL WHOLESALE — MASTER ARCHITECTURE & IMPLEMENTATION PLAN V2
 
 > **Document Status**: `AUTHORITATIVE SPECIFICATION & MASTER IMPLEMENTATION PLAN`  
-> **Version**: `2.8.1 (Post-Production Evidence Reconciliation)`  
+> **Version**: `2.9.0 (V13 Canonical Order Lifecycle Local Verification)`  
 > **Master Spec Status**: `ARCHITECTURE BASELINE READY`  
 > **P0 Status**: `LOCAL_POSTGRES_INTEGRATION_VERIFIED` (Catalog DB Path, Recursive Guest DTO, Forward Schema Migrations Synchronized)  
-> **P1 Status**: `PRODUCTION_VERIFIED_V11_V12` (Forward migrations `update_v11_security_accounting_hardening.sql` and `update_v12_commercial_sot_hardening.sql` deployed and verified on Supabase Production; PostgREST Confused Deputy Mitigated; Unambiguous Accepted Quote Commercial SOT Enforced; Exact Integer VAT & COGS Override Guard Verified; Double-Entry General Ledger Balance Verified; 31/31 Real PostgreSQL Tests Passing; 80/80 Backend Tests Passing; 23/23 Frontend Tests Passing)  
+> **P1 Status**: `PRODUCTION_VERIFIED_V11_V12` (Forward migrations V11 and V12 deployed on Supabase Production)  
+> **V13 Status**: `V13_ORDER_LIFECYCLE_LOCAL_POSTGRES_VERIFIED` (Exact Quote Acceptance Identity, Immutability Guards for Accepted Quotes and Locked Items, Single Active Order DB Invariant, Authoritative Catalog Pricing, Dynamic Deposit Policy, Atomic Acceptance & Reservation, Monotonic Realtime Sync, 90/90 Backend Tests, 26/26 Real PostgreSQL 18 Tests Passing)  
 > **P2 Status**: `BLOCKED_BY_TAX_ACCOUNTING_REVIEW` (Non-tax schema is `ARCHITECTURE_READY`)  
-> **Production Status**: `PRODUCTION_VERIFIED_V11_V12 (PostgreSQL 17.6 on Supabase Production gfiy...pgbb fully verified)`  
+> **Production Status**: `PRODUCTION_VERIFIED_V11_V12 (PostgreSQL 17.6 on Supabase Production; V13 Mutation on Production = NONE)`  
 > **Target Release**: `2026-Q3 / Q4 Enterprise Scale`  
 > **Scope**: B2B Wholesale Commerce Platform (Architecture, Money Mathematics, Pricing Pipeline, Inventory ATP, SCM, Double-Entry Accounting, RBAC Security, Database Migration, and Test Engineering).  
 > **Repository**: `https://github.com/20James02/pettravel-wholesale`

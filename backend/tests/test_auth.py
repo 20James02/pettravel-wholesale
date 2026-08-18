@@ -51,7 +51,7 @@ async def test_login_json_returns_canonical_user_role_and_organization(canonical
         },
     )
     await canonical_db_session.execute(
-        text("insert into user_roles (user_id, role_id) values ('u_auth_valid', 'role_admin')")
+        text("insert into user_roles (user_id, role_id) values ('u_auth_valid', 'role_super_admin')")
     )
     await canonical_db_session.commit()
 

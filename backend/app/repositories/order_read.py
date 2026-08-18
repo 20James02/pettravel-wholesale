@@ -43,9 +43,25 @@ def _group(rows: Iterable[Any], key: str) -> dict[str, list[Any]]:
     return grouped
 
 
+async def is_internal_actor(db: AsyncSession, actor_id: str) -> bool:
+    """Validate if the actor has internal operational roles directly from DB."""
+    if not actor_id:
+        return False
+    row = (
+        await db.execute(
+            text("""select 1 from user_roles ur join roles r on r.id = ur.role_id
+                where ur.user_id = :actor_id and r.key in
+                    ('super_admin', 'admin', 'admin_manager', 'order_operator', 'accountant', 'warehouse', 'sales_staff') limit 1"""),
+            {"actor_id": actor_id},
+        )
+    ).first()
+    return row is not None
+
+
 async def get_orders_revision(db: AsyncSession, *, actor_id: str, is_admin: bool) -> str:
+    effective_admin = is_admin and (await is_internal_actor(db, actor_id))
     try:
-        if is_admin:
+        if effective_admin:
             row = (
                 await db.execute(
                     text("select revision, updated_at from order_sync_revisions where scope_type = 'global' and scope_id = 'global'")
@@ -76,7 +92,7 @@ async def get_orders_revision(db: AsyncSession, *, actor_id: str, is_admin: bool
                 select organization_id from app_users where id = :actor_id and status = 'active'
             ))
         """),
-        {"actor_id": actor_id, "is_admin": is_admin},
+        {"actor_id": actor_id, "is_admin": effective_admin},
     )
     val = result.scalar()
     return f"rev-{_iso(val) or 'empty'}"
@@ -91,8 +107,9 @@ async def list_orders_summary(
     cursor_updated_at: str | None = None,
     cursor_id: str | None = None,
 ) -> dict[str, Any]:
+    effective_admin = is_admin and (await is_internal_actor(db, actor_id))
     now = time.monotonic()
-    cache_key = (actor_id, is_admin, limit, cursor_updated_at, cursor_id)
+    cache_key = (actor_id, effective_admin, limit, cursor_updated_at, cursor_id)
     if cache_key in _summary_cache:
         cached_time, cached_data = _summary_cache[cache_key]
         if now - cached_time < ORDERS_CACHE_TTL:
@@ -103,7 +120,7 @@ async def list_orders_summary(
     ]
     params: dict[str, Any] = {
         "actor_id": actor_id,
-        "is_admin": is_admin,
+        "is_admin": effective_admin,
         "limit_val": limit + 1,
     }
 
@@ -213,12 +230,14 @@ async def list_orders_summary(
 
 
 async def list_orders(db: AsyncSession, *, actor_id: str, is_admin: bool) -> list[dict[str, Any]]:
+    effective_admin = is_admin and (await is_internal_actor(db, actor_id))
     now = time.monotonic()
-    cache_key = (actor_id, is_admin)
+    cache_key = (actor_id, effective_admin)
     if cache_key in _orders_cache:
         cached_time, cached_data = _orders_cache[cache_key]
         if now - cached_time < ORDERS_CACHE_TTL:
             return cached_data
+
     order_rows = (
         await db.execute(
             text("""select
@@ -232,7 +251,7 @@ async def list_orders(db: AsyncSession, *, actor_id: str, is_admin: bool) -> lis
                 select organization_id from app_users where id = :actor_id and status = 'active'
             ))
             order by o.created_at desc, o.id"""),
-            {"actor_id": actor_id, "is_admin": is_admin},
+            {"actor_id": actor_id, "is_admin": effective_admin},
         )
     ).mappings().all()
     if not order_rows:
@@ -466,13 +485,14 @@ async def list_orders(db: AsyncSession, *, actor_id: str, is_admin: bool) -> lis
 async def get_order_revision_history(
     db: AsyncSession, *, order_id: str, actor_id: str, is_admin: bool
 ) -> list[dict[str, Any]]:
+    effective_admin = is_admin and (await is_internal_actor(db, actor_id))
     order = (
         await db.execute(
             text("""select o.id, o.organization_id from customer_orders o
                 where o.id = :order_id and (:is_admin = true or o.organization_id = (
                     select organization_id from app_users where id = :actor_id and status = 'active'
                 ))"""),
-            {"order_id": order_id, "actor_id": actor_id, "is_admin": is_admin},
+            {"order_id": order_id, "actor_id": actor_id, "is_admin": effective_admin},
         )
     ).mappings().first()
     if not order:

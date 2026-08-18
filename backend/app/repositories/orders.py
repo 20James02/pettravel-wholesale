@@ -9,8 +9,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.order_read import invalidate_orders_cache, _bound_in
-from app.services.order_workflow import execute_stock_command, stock_command_for_transition
-from app.services.pricing import calculate_quote_financials
+from app.services.order_workflow import (
+    execute_stock_command,
+    stock_command_for_transition,
+    validate_commercial_transition,
+    validate_fulfillment_transition,
+)
+from app.services.pricing import calculate_quote_financials, resolve_deposit_rate_bps
 from app.services.canonical_accounting import post_order_accounting
 
 
@@ -33,6 +38,7 @@ def _as_utc(value: Any) -> datetime:
 
 async def _bump_sync_revisions(db: AsyncSession, *, org_id: str, now: datetime) -> None:
     """Increment monotonic realtime sync counter for global scope and affected organization."""
+    is_postgres = db.get_bind().dialect.name == "postgresql"
     try:
         await db.execute(
             text("""insert into order_sync_revisions (scope_type, scope_id, revision, updated_at)
@@ -49,9 +55,9 @@ async def _bump_sync_revisions(db: AsyncSession, *, org_id: str, now: datetime) 
                     do update set revision = order_sync_revisions.revision + 1, updated_at = :now"""),
                 {"org_id": org_id, "now": now},
             )
-    except Exception:
-        # If order_sync_revisions table is not present (e.g. lightweight SQLite test), pass gracefully
-        pass
+    except Exception as exc:
+        if is_postgres:
+            raise exc
 
 
 async def save_order(
@@ -230,6 +236,7 @@ async def save_order(
         )
 
     actor_name = str(actor.get("full_name") or "Đại lý")
+    is_postgres = db.get_bind().dialect.name == "postgresql"
     try:
         await db.execute(
             text("""insert into order_revision_history
@@ -258,8 +265,9 @@ async def save_order(
                 "now": now,
             },
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        if is_postgres:
+            raise exc
 
     await _bump_sync_revisions(db, org_id=actor["organization_id"], now=now)
     await db.commit()
@@ -276,9 +284,10 @@ async def _update_order(
 ) -> dict[str, str]:
     now = datetime.now(timezone.utc)
     order_id = str(order["id"])
+    is_postgres = db.get_bind().dialect.name == "postgresql"
 
     # 1. Early Row Lock on Order Entity to Serialize Concurrent Updates
-    for_update = "for update of o" if db.get_bind().dialect.name == "postgresql" else ""
+    for_update = "for update of o" if is_postgres else ""
     current = (
         await db.execute(
             text(f"""select o.*, u.organization_id as actor_org
@@ -302,7 +311,7 @@ async def _update_order(
         await db.execute(
             text("""select 1 from user_roles ur join roles r on r.id = ur.role_id
                 where ur.user_id = :actor_id and r.key in
-                    ('super_admin','admin_manager','order_operator','accountant','warehouse') limit 1"""),
+                    ('super_admin', 'admin', 'admin_manager', 'order_operator', 'accountant', 'warehouse', 'sales_staff') limit 1"""),
             {"actor_id": actor_id},
         )
     ).first()
@@ -346,65 +355,74 @@ async def _update_order(
             ),
         }
         for required_permission, has_changes in permission_changes.items():
-            if has_changes and required_permission not in permissions:
+            if has_changes and required_permission not in permissions and "super_admin" not in actor_role_keys:
                 raise ValueError(f"Tài khoản thiếu quyền nghiệp vụ {required_permission}.")
 
-    # 3. Canonical Commercial State Machine Evaluation
-    requested_commercial_status = order.get("commercialStatus")
-    is_accepting_quote = False
-    is_requesting_changes = False
+    # 3. Canonical State Machine Validation
+    requested_commercial_status = order.get("commercialStatus", current["commercial_status"])
+    validate_commercial_transition(
+        actor_is_internal=bool(internal),
+        permissions=permissions,
+        before=str(current["commercial_status"]),
+        after=str(requested_commercial_status),
+    )
+
+    if order.get("fulfillmentStatus") is not None:
+        validate_fulfillment_transition(
+            before=str(current["fulfillment_status"]),
+            after=str(order["fulfillmentStatus"]),
+        )
+
+    is_accepting_quote = requested_commercial_status == "customer_accepted" and current["commercial_status"] != "customer_accepted"
+    is_requesting_changes = requested_commercial_status == "admin_review" and current["commercial_status"] == "quoted"
     accepted_quote_row: dict[str, Any] | None = None
+    next_commercial_status = requested_commercial_status
 
-    if not internal:
-        # Customer-driven transitions
-        if requested_commercial_status == "customer_accepted":
-            if current["commercial_status"] != "quoted":
-                raise ValueError(f"Không thể chấp nhận báo giá từ trạng thái '{current['commercial_status']}'.")
-            is_accepting_quote = True
-            next_commercial_status = "customer_accepted"
-        elif requested_commercial_status == "admin_review":
-            if current["commercial_status"] != "quoted":
-                raise ValueError(f"Không thể yêu cầu điều chỉnh khi đơn không ở trạng thái báo giá.")
-            is_requesting_changes = True
-            next_commercial_status = "admin_review"
-        elif requested_commercial_status == "submitted":
-            if current["commercial_status"] != "draft":
-                raise ValueError(f"Không thể gửi đề xuất đơn từ trạng thái '{current['commercial_status']}'.")
-            next_commercial_status = "submitted"
-        else:
-            next_commercial_status = current["commercial_status"]
-    else:
-        # Internal operator transitions
-        next_commercial_status = order.get("commercialStatus", current["commercial_status"])
-
-    # 4. Handle Customer Acceptance (Atomic Persist + Stock Reservation + Immutability)
+    # 4. Handle Customer Acceptance (Exact Identity + Atomic Persist + Immutability)
     if is_accepting_quote:
-        # Resolve target quote to accept
-        target_quote_version = None
-        if order.get("quoteVersions"):
-            # If client specified a version
+        target_quote_id = order.get("acceptedQuoteId")
+        target_quote_version = order.get("acceptedQuoteVersion")
+
+        if not target_quote_id and not target_quote_version and order.get("quoteVersions"):
             for q in order["quoteVersions"]:
-                if q.get("status") in {"accepted", "published"} and q.get("version"):
-                    target_quote_version = int(q["version"])
+                if q.get("id") or q.get("version"):
+                    target_quote_id = q.get("id")
+                    target_quote_version = q.get("version")
                     break
 
-        quote_query = """select * from quote_versions
-            where order_id = :order_id and status = 'published'
-        """
+        quote_for_update = "for update" if is_postgres else ""
+        quote_query = f"select * from quote_versions where order_id = :order_id and status = 'published'"
         quote_params: dict[str, Any] = {"order_id": order_id}
-        if target_quote_version:
-            quote_query += " and version = :version"
-            quote_params["version"] = target_quote_version
-        quote_query += " order by version desc limit 1"
 
+        if target_quote_id:
+            quote_query += " and id = :quote_id"
+            quote_params["quote_id"] = str(target_quote_id)
+        elif target_quote_version:
+            quote_query += " and version = :version"
+            quote_params["version"] = int(target_quote_version)
+        else:
+            raise OrderConflictError("Thiếu thông tin nhận diện báo giá cần chấp thuận (acceptedQuoteId hoặc acceptedQuoteVersion).")
+
+        quote_query += f" order by version desc limit 1 {quote_for_update}"
         db_quote = (await db.execute(text(quote_query), quote_params)).mappings().first()
         if not db_quote:
-            raise OrderConflictError("Báo giá đã thay đổi hoặc đã hết hiệu lực. Vui lòng tải lại trang.")
+            raise OrderConflictError("Báo giá đã thay đổi, bị hủy hoặc đã hết hiệu lực. Vui lòng tải lại trang.")
 
         # Check expiry
         quote_expires_at = _as_utc(db_quote["expires_at"])
         if quote_expires_at < now:
             raise ValueError("Báo giá đã hết hạn. Vui lòng gửi yêu cầu để nhân viên báo giá lại.")
+
+        # Verify adjustment approvals
+        unapproved_adj = (
+            await db.execute(
+                text("""select count(*) from quote_adjustments
+                    where quote_id = :quote_id and requires_approval = true and approved_by is null"""),
+                {"quote_id": db_quote["id"]},
+            )
+        ).scalar()
+        if unapproved_adj and int(unapproved_adj) > 0:
+            raise ValueError("Báo giá có điều chỉnh đặc biệt chưa được phê duyệt.")
 
         accepted_quote_row = dict(db_quote)
 
@@ -438,7 +456,7 @@ async def _update_order(
 
     # 5. Handle Admin Quote Publishing & Editing
     if internal and order.get("quoteVersions") is not None:
-        if "order.quote" not in permissions:
+        if "order.quote" not in permissions and "super_admin" not in actor_role_keys:
             raise ValueError("Tài khoản không có quyền xuất bản báo giá.")
 
         highest_version = int(current["current_quote_version"] or 0)
@@ -448,6 +466,8 @@ async def _update_order(
                 {"order_id": order_id},
             )
         ).mappings().all()
+
+        deposit_rate_bps = await resolve_deposit_rate_bps(db, default_bps=3000)
 
         for quote in order.get("quoteVersions") or []:
             quote_id = str(quote.get("id") or f"quote_{uuid.uuid4().hex}")
@@ -471,7 +491,7 @@ async def _update_order(
                 items=items_for_pricing,
                 adjustments=adjustments,
                 payment_intent=intent,
-                deposit_rate_bps=3000,
+                deposit_rate_bps=deposit_rate_bps,
             )
 
             expires_at = quote.get("expiresAt")
@@ -537,7 +557,7 @@ async def _update_order(
                 adj_id = str(adjustment.get("id") or f"adjustment_{uuid.uuid4().hex}")
                 if adj_id in existing_adjustments:
                     continue
-                if "order.adjust" not in permissions:
+                if "order.adjust" not in permissions and "super_admin" not in actor_role_keys:
                     raise ValueError("Tài khoản không có quyền thêm điều chỉnh báo giá.")
                 await db.execute(
                     text("""insert into quote_adjustments
@@ -564,8 +584,18 @@ async def _update_order(
             {"version": highest_version, "id": order_id},
         )
 
-    # 6. Update Items if Admin
-    if internal and order.get("items") is not None:
+    # 6. Guard Locked Order Items Against Mutation
+    locked_items_count = (
+        await db.execute(
+            text("select count(*) from order_items where order_id = :order_id and locked = true"),
+            {"order_id": order_id},
+        )
+    ).scalar()
+
+    if order.get("items") is not None:
+        if locked_items_count and int(locked_items_count) > 0:
+            raise ValueError("Không thể chỉnh sửa danh sách sản phẩm của đơn hàng đã khóa báo giá thương mại.")
+
         incoming_items = order["items"]
         if not incoming_items:
             raise ValueError("Đơn hàng phải có ít nhất một sản phẩm.")
@@ -594,10 +624,23 @@ async def _update_order(
             sku = str(item.get("variantSku") or "")
             supplier_id = str(item.get("supplierId") or "sup_pettravel")
             quantity = int(item.get("quantity") or 1)
-            unit_price = int(item.get("unitPriceSnapshot") or 0)
-            product_code = str(item.get("productCode") or "")
-            product_name = str(item.get("productName") or "")
-            variant_label = str(item.get("variantLabel") or sku)
+            
+            # Authoritative pricing lookup
+            catalog_price = (
+                await db.execute(
+                    text("""select so.wholesale_price, p.code, p.name, v.label
+                        from product_variants v
+                        join products p on p.id = v.product_id
+                        join supplier_offers so on so.product_variant_id = v.id and so.supplier_id = :supplier_id
+                        where v.sku = :sku limit 1"""),
+                    {"sku": sku, "supplier_id": supplier_id},
+                )
+            ).mappings().first()
+            
+            unit_price = int(catalog_price["wholesale_price"] if catalog_price else (item.get("unitPriceSnapshot") or 0))
+            product_code = str(catalog_price["code"] if catalog_price else (item.get("productCode") or ""))
+            product_name = str(catalog_price["name"] if catalog_price else (item.get("productName") or ""))
+            variant_label = str(catalog_price["label"] if catalog_price else (item.get("variantLabel") or sku))
             variant_image = str(item.get("variantImage") or "")
 
             if item_id in existing_item_ids:
@@ -730,7 +773,6 @@ async def _update_order(
         purpose = "full" if intent == "pay_full" else "deposit"
         expected_amount = int(accepted_quote_row["final_total"] if purpose == "full" else accepted_quote_row["deposit_amount"])
         
-        # Invalidate/supersede existing active requests
         await db.execute(
             text("update payment_requests set status = 'superseded' where order_id = :order_id and status = 'active'"),
             {"order_id": order_id},
@@ -783,14 +825,13 @@ async def _update_order(
         ).mappings().first()
 
         if exists and internal and proof.get("status") in {"accepted", "rejected"}:
-            if "order.confirm_payment" not in permissions:
+            if "order.confirm_payment" not in permissions and "super_admin" not in actor_role_keys:
                 raise ValueError("Tài khoản không có quyền xác nhận thanh toán.")
             await db.execute(
                 text("update payment_proofs set status = :status where id = :id"),
                 {"id": proof_id, "status": proof["status"]},
             )
             if proof["status"] == "accepted":
-                # Idempotent payment confirmation
                 pr_update = await db.execute(
                     text("""update payment_requests set status = 'confirmed',
                         confirmed_by = :actor_id, confirmed_at = :confirmed_at
@@ -840,7 +881,6 @@ async def _update_order(
     # 10. Compute Next Payment Status
     if internal:
         if confirmed_payment:
-            # Check if all payments or deposit confirmed
             active_req = (
                 await db.execute(
                     text("select purpose from payment_requests where order_id = :order_id and status = 'confirmed' order by confirmed_at desc limit 1"),
@@ -931,22 +971,19 @@ async def _update_order(
             command=stock_command,
             order_id=order_id,
             actor_id=actor_id,
+            accepted_quote_id=accepted_quote_row["id"] if accepted_quote_row else None,
         )
 
     # 14. Execute Canonical Accounting Posting if Applicable
-    if internal and confirmed_payment:
-        try:
-            await post_order_accounting(
-                db,
-                order_id=order_id,
-                actor_id=actor_id,
-                mode="post_confirmed_payments",
-                vat_rate_bps=0,
-                require_consumed_stock=False,
-            )
-        except Exception:
-            # If PostgreSQL accounting SP is not configured in test environment, ignore safely
-            pass
+    if internal and confirmed_payment and is_postgres:
+        await post_order_accounting(
+            db,
+            order_id=order_id,
+            actor_id=actor_id,
+            mode="post_confirmed_payments",
+            vat_rate_bps=0,
+            require_consumed_stock=False,
+        )
 
     # 15. Record Monotonic Audit Log (order_revision_history)
     actor_user = (
@@ -982,6 +1019,29 @@ async def _update_order(
         or ""
     )
 
+    # Fetch authoritative persisted snapshots from DB for revision log
+    persisted_items_snapshot = (
+        await db.execute(
+            text("""select id, product_code_snapshot as productCode, product_name_snapshot as productName,
+                variant_sku_snapshot as variantSku, variant_label_snapshot as variantLabel,
+                variant_image as variantImage, supplier_id as supplierId, quantity,
+                unit_price_snapshot as unitPriceSnapshot, locked
+                from order_items where order_id = :order_id"""),
+            {"order_id": order_id},
+        )
+    ).mappings().all()
+
+    persisted_quotes_snapshot = (
+        await db.execute(
+            text("""select id, version, status, subtotal, final_total as finalTotal,
+                deposit_amount as depositAmount, cod_remaining as codRemaining,
+                expires_at as expiresAt, published_by as publishedBy,
+                accepted_by as acceptedBy, accepted_at as acceptedAt
+                from quote_versions where order_id = :order_id order by version asc"""),
+            {"order_id": order_id},
+        )
+    ).mappings().all()
+
     try:
         await db.execute(
             text("""insert into order_revision_history
@@ -1002,8 +1062,8 @@ async def _update_order(
                 "action_type": action_type,
                 "from_status": current["commercial_status"],
                 "to_status": next_commercial_status,
-                "items_snapshot": json.dumps(order.get("items") or []),
-                "quote_snapshot": json.dumps(order.get("quoteVersions") or []),
+                "items_snapshot": json.dumps([dict(row) for row in persisted_items_snapshot], default=str),
+                "quote_snapshot": json.dumps([dict(row) for row in persisted_quotes_snapshot], default=str),
                 "shipping_snapshot": json.dumps({
                     "recipientName": values["recipient_name"] or "",
                     "recipientPhone": values["recipient_phone"] or "",
@@ -1015,8 +1075,9 @@ async def _update_order(
                 "now": now,
             },
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        if is_postgres:
+            raise exc
 
     await _bump_sync_revisions(db, org_id=current["organization_id"], now=now)
     await db.commit()

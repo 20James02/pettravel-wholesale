@@ -9,7 +9,12 @@ def test_remote_postgres_requires_encrypted_connection_by_default():
     assert url.host == "db.example.com"
     assert url.password == "pass"
     assert not url.query
-    assert connect_args == {"ssl": "require", "timeout": 10}
+    assert connect_args == {
+        "ssl": "require",
+        "timeout": 10,
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+    }
 
 
 def test_sslmode_query_is_moved_to_asyncpg_ssl_argument():
@@ -20,7 +25,12 @@ def test_sslmode_query_is_moved_to_asyncpg_ssl_argument():
 
     assert url.host == "db.example.com"
     assert dict(url.query) == {"prepared_statement_cache_size": "0"}
-    assert connect_args == {"ssl": "require", "timeout": 10}
+    assert connect_args == {
+        "ssl": "require",
+        "timeout": 10,
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+    }
 
 
 def test_pooler_client_only_query_flags_are_not_sent_to_asyncpg():
@@ -30,7 +40,12 @@ def test_pooler_client_only_query_flags_are_not_sent_to_asyncpg():
     )
 
     assert not url.query
-    assert connect_args == {"ssl": "require", "timeout": 10}
+    assert connect_args == {
+        "ssl": "require",
+        "timeout": 10,
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+    }
 
 
 def test_local_postgres_does_not_force_ssl():

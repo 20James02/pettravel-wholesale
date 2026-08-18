@@ -181,7 +181,8 @@ async def canonical_db_session() -> AsyncSession:
         await conn.execute(
             text("insert into roles (id, key, name) values (:id, :key, :name)"),
             [
-                {"id": "role_admin", "key": "super_admin", "name": "Super Admin"},
+                {"id": "role_super_admin", "key": "super_admin", "name": "Super Admin"},
+                {"id": "role_admin", "key": "admin", "name": "Admin"},
                 {"id": "role_customer", "key": "customer_owner", "name": "Customer Owner"},
             ],
         )

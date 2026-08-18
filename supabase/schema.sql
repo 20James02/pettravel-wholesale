@@ -234,8 +234,6 @@ create table shipments (
   order_id text not null references customer_orders(id) on delete cascade,
   carrier text not null,
   tracking_code text not null,
-  carrier text not null,
-  tracking_code text not null,
   shipping_fee numeric(14, 0) not null default 0,
   eta date,
   note text,
@@ -927,6 +925,7 @@ before update or delete on journal_lines
 for each row execute function protect_posted_journal_lines();
 
 -- Guard: Prevent mutation or deletion of accepted quote versions
+-- Guard: Prevent mutation or deletion of accepted quote versions
 create or replace function public.pt_guard_accepted_quote_immutability()
 returns trigger
 language plpgsql
@@ -943,13 +942,7 @@ begin
 
   if tg_op = 'UPDATE' then
     if old.status = 'accepted' then
-      if new.subtotal <> old.subtotal
-         or new.final_total <> old.final_total
-         or new.deposit_amount <> old.deposit_amount
-         or new.cod_remaining <> old.cod_remaining
-         or new.expires_at <> old.expires_at
-         or new.version <> old.version
-         or new.order_id <> old.order_id then
+      if new is distinct from old then
         raise exception 'ACCEPTED_QUOTE_IMMUTABLE: Cannot modify commercial snapshot of accepted quote version (id: %).', old.id;
       end if;
     end if;
@@ -1007,4 +1000,49 @@ drop trigger if exists trg_guard_accepted_adjustment_immutability on public.quot
 create trigger trg_guard_accepted_adjustment_immutability
 before insert or update or delete on public.quote_adjustments
 for each row execute function public.pt_guard_accepted_adjustment_immutability();
+
+-- Guard: Prevent mutation of locked order items
+create or replace function public.pt_guard_locked_order_item_immutability()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE' then
+    if old.locked = true then
+      raise exception 'LOCKED_ITEM_IMMUTABLE: Cannot delete locked order item (id: %).', old.id;
+    end if;
+    return old;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    if old.locked = true then
+      if new.product_code_snapshot <> old.product_code_snapshot
+         or new.product_name_snapshot <> old.product_name_snapshot
+         or new.variant_sku_snapshot <> old.variant_sku_snapshot
+         or new.variant_label_snapshot <> old.variant_label_snapshot
+         or new.supplier_id <> old.supplier_id
+         or new.quantity <> old.quantity
+         or new.unit_price_snapshot <> old.unit_price_snapshot
+         or new.order_id <> old.order_id then
+        raise exception 'LOCKED_ITEM_IMMUTABLE: Cannot modify commercial fields of locked order item (id: %).', old.id;
+      end if;
+    end if;
+    return new;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_guard_locked_order_item_immutability on public.order_items;
+create trigger trg_guard_locked_order_item_immutability
+before update or delete on public.order_items
+for each row execute function public.pt_guard_locked_order_item_immutability();
+
+create unique index if not exists uq_quote_versions_single_accepted
+on public.quote_versions (order_id)
+where status = 'accepted';
+
 
