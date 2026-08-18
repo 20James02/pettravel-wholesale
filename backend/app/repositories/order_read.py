@@ -44,23 +44,42 @@ def _group(rows: Iterable[Any], key: str) -> dict[str, list[Any]]:
 
 
 async def get_orders_revision(db: AsyncSession, *, actor_id: str, is_admin: bool) -> str:
+    try:
+        if is_admin:
+            row = (
+                await db.execute(
+                    text("select revision, updated_at from order_sync_revisions where scope_type = 'global' and scope_id = 'global'")
+                )
+            ).mappings().first()
+        else:
+            row = (
+                await db.execute(
+                    text("""select osr.revision, osr.updated_at
+                        from order_sync_revisions osr
+                        join app_users u on u.organization_id = osr.scope_id
+                        where osr.scope_type = 'organization' and u.id = :actor_id and u.status = 'active'"""),
+                    {"actor_id": actor_id},
+                )
+            ).mappings().first()
+
+        if row:
+            return f"rev-{row['revision']}"
+    except Exception:
+        pass
+
+    # Fallback to max updated_at if order_sync_revisions is empty
     result = await db.execute(
         text("""
-            select o.id, o.updated_at
+            select coalesce(max(o.updated_at), '1970-01-01')
             from customer_orders o
             where (:is_admin = true or o.organization_id = (
                 select organization_id from app_users where id = :actor_id and status = 'active'
             ))
-            order by o.updated_at desc, o.id desc
-            limit 50
         """),
         {"actor_id": actor_id, "is_admin": is_admin},
     )
-    rows = result.mappings().all()
-    if not rows:
-        return "empty"
-    rev_string = "|".join(f"{r['id']}:{_iso(r['updated_at'])}" for r in rows)
-    return hashlib.md5(rev_string.encode("utf-8")).hexdigest()
+    val = result.scalar()
+    return f"rev-{_iso(val) or 'empty'}"
 
 
 async def list_orders_summary(

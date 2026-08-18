@@ -75,20 +75,21 @@ async def canonical_db_session() -> AsyncSession:
             payment_status text not null default 'unrequested', fulfillment_status text not null default 'not_started',
             payment_intent text not null, invoice_requested boolean not null default 0,
             current_quote_version integer not null default 0, recipient_name text, recipient_phone text,
-            recipient_address text, assigned_staff_id text, updated_at timestamp not null default current_timestamp,
+            recipient_address text, customer_tax_code text, customer_note text, assigned_staff_id text,
+            updated_at timestamp not null default current_timestamp,
             created_at timestamp not null default current_timestamp
         )""",
         """create table order_items (
             id text primary key, order_id text not null, product_code_snapshot text not null,
             product_name_snapshot text not null, variant_sku_snapshot text not null,
-            variant_label_snapshot text not null, supplier_id text not null, quantity integer not null,
+            variant_label_snapshot text not null, variant_image text, supplier_id text not null, quantity integer not null,
             unit_price_snapshot numeric not null, locked boolean not null default 0
         )""",
         """create table quote_versions (
             id text primary key, order_id text not null, version integer not null, status text not null,
             subtotal numeric not null, final_total numeric not null, deposit_amount numeric not null,
             cod_remaining numeric not null, expires_at timestamp not null, published_by text,
-            accepted_by text, created_at timestamp default current_timestamp
+            accepted_by text, accepted_at timestamp, created_at timestamp default current_timestamp
         )""",
         """create table quote_adjustments (
             id text primary key, quote_id text not null, type text not null, label text not null,
@@ -122,6 +123,20 @@ async def canonical_db_session() -> AsyncSession:
         """create table order_comments (
             id text primary key, order_id text not null, author_id text not null, audience text not null,
             message text not null, created_at timestamp default current_timestamp
+        )""",
+        """create table order_revision_history (
+            id text primary key, order_id text not null, revision_no integer not null,
+            actor_id text not null, actor_name text not null, actor_role text not null,
+            action_type text not null, from_commercial_status text not null,
+            to_commercial_status text not null, items_snapshot json default '[]',
+            quote_snapshot json default '[]', shipping_snapshot json default '{}',
+            note text, created_at timestamp default current_timestamp,
+            unique (order_id, revision_no)
+        )""",
+        """create table order_sync_revisions (
+            scope_type text not null, scope_id text not null,
+            revision integer not null default 1, updated_at timestamp default current_timestamp,
+            primary key (scope_type, scope_id)
         )""",
         """create table inventory_balances (
             id text primary key, organization_id text not null, warehouse_id text,

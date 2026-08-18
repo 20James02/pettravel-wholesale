@@ -21,7 +21,6 @@ import type {
 import { formatVnd } from "@/lib/money";
 import {
   fullNameSchema,
-  emailSchema,
   loginIdentifierSchema,
   passwordSchema,
   loginPasswordSchema,
@@ -34,7 +33,7 @@ import { getValidationErrorMessage } from "@/lib/validation";
 import type { AppMode, TabKey, ApiUser } from "./types";
 import { TAB_ROUTE_MAP, ROUTE_TAB_MAP } from "./types";
 import { entityStore } from "@/lib/cache/entity-store";
-import { prefetchRouteData, scheduleIdlePrediction } from "@/lib/prefetch/prefetch-engine";
+import { scheduleIdlePrediction } from "@/lib/prefetch/prefetch-engine";
 
 // Import custom subcomponents
 import { Topbar } from "./components/shared/Topbar";

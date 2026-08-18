@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { PackageSearch, Sparkles, Filter } from "lucide-react";
+import { PackageSearch, Filter } from "lucide-react";
 import type { Product } from "@/lib/domain";
 import { ProductCard } from "./ProductCard";
 import { ProductSkeletonGrid } from "../ui/ProductSkeleton";
@@ -26,7 +26,6 @@ export function Catalog({
   categoryFilter = "Tất cả",
   setCategoryFilter,
   searchQuery = "",
-  setSearchQuery,
   isLoggedIn,
   onSelectProduct,
   isLoading = false,

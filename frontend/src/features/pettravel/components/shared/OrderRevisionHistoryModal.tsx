@@ -12,11 +12,9 @@ import {
   Edit3, 
   User, 
   Clock, 
-  Package, 
   ChevronDown, 
   ChevronUp, 
-  Loader2,
-  X
+  Loader2
 } from "lucide-react";
 import type { OrderRevisionRecord, Product, OrderItem } from "@/lib/domain";
 import { formatVnd } from "@/lib/money";
@@ -46,36 +44,37 @@ export function OrderRevisionHistoryModal({
     if (!isOpen || !orderId) return;
 
     let isMounted = true;
-    setIsLoading(true);
-    setError(null);
-
-    fetch(`/api/orders/history?order_id=${encodeURIComponent(orderId)}`)
-      .then(async (res) => {
+    const loadHistory = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/orders/history?order_id=${encodeURIComponent(orderId)}`);
         if (!res.ok) {
           const err = await res.json();
           throw new Error(err.error || "Không thể tải lịch sử duyệt đơn.");
         }
-        return res.json();
-      })
-      .then((data) => {
+        const data = await res.json();
         if (isMounted) {
           const revs = (data.history || []) as OrderRevisionRecord[];
           setHistory(revs);
-          // Expand the latest revision by default
           if (revs.length > 0) {
             setExpandedRevs({ [revs[revs.length - 1].id]: true });
           }
         }
-      })
-      .catch((err) => {
-        if (isMounted) setError(err.message);
-      })
-      .finally(() => {
+      } catch (err: unknown) {
+        if (isMounted) {
+          const msg = err instanceof Error ? err.message : "Lỗi tải lịch sử";
+          setError(msg);
+        }
+      } finally {
         if (isMounted) setIsLoading(false);
-      });
+      }
+    };
 
+    const timer = setTimeout(loadHistory, 0);
     return () => {
       isMounted = false;
+      clearTimeout(timer);
     };
   }, [isOpen, orderId]);
 

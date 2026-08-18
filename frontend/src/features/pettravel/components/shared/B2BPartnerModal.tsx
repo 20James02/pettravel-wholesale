@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { Modal } from "../ui/Modal";
-import { Sparkles, Building2, Phone, User, MapPin, CheckCircle2, Gift, Send, ShieldCheck } from "lucide-react";
+import { Building2, Phone, User, MapPin, CheckCircle2, Gift, Send, ShieldCheck } from "lucide-react";
 import { useToast } from "../ui/Toast";
 
 interface B2BPartnerModalProps {

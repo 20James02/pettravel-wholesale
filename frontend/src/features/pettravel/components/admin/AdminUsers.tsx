@@ -21,7 +21,6 @@ interface AdminUsersProps {
 
 export function AdminUsers({ isAdmin, currentUser, userList, fetchUsers }: AdminUsersProps) {
   const userModalRef = useRef<HTMLDivElement>(null);
-  const deleteModalRef = useRef<HTMLDivElement>(null);
 
   const [showUserForm, setShowUserForm] = useState(false);
   const [createFullName, setCreateFullName] = useState("");

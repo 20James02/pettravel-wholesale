@@ -9,7 +9,7 @@
  * - Request SingleFlight Promise coalescing
  */
 
-import type { CustomerOrder, Product, Supplier, OrderItem } from "@/lib/domain";
+import type { CustomerOrder, Product, Supplier } from "@/lib/domain";
 import type { ApiUser } from "@/features/pettravel/types";
 
 export interface OrderSummaryDTO {

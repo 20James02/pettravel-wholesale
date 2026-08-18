@@ -138,6 +138,8 @@ create table customer_orders (
   recipient_name text,
   recipient_phone text,
   recipient_address text,
+  customer_tax_code text,
+  customer_note text,
   assigned_staff_id text references app_users(id) on delete set null,
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
@@ -150,6 +152,7 @@ create table order_items (
   product_name_snapshot text not null,
   variant_sku_snapshot text not null,
   variant_label_snapshot text not null,
+  variant_image text,
   supplier_id text not null references suppliers(id),
   quantity integer not null check (quantity > 0),
   unit_price_snapshot numeric(14, 0) not null check (unit_price_snapshot >= 0),
@@ -168,6 +171,7 @@ create table quote_versions (
   expires_at timestamptz not null,
   published_by text references app_users(id),
   accepted_by text references app_users(id),
+  accepted_at timestamptz,
   created_at timestamptz not null default now(),
   unique (order_id, version)
 );
@@ -230,6 +234,8 @@ create table shipments (
   order_id text not null references customer_orders(id) on delete cascade,
   carrier text not null,
   tracking_code text not null,
+  carrier text not null,
+  tracking_code text not null,
   shipping_fee numeric(14, 0) not null default 0,
   eta date,
   note text,
@@ -245,6 +251,42 @@ create table order_comments (
   message text not null check (char_length(message) <= 2000),
   created_at timestamptz not null default now()
 );
+
+create table order_revision_history (
+  id text primary key default gen_random_uuid()::text,
+  order_id text not null references customer_orders(id) on delete cascade,
+  revision_no integer not null,
+  actor_id text not null references app_users(id),
+  actor_name text not null,
+  actor_role text not null,
+  action_type text not null,
+  from_commercial_status text not null,
+  to_commercial_status text not null,
+  items_snapshot jsonb not null default '[]'::jsonb,
+  quote_snapshot jsonb not null default '[]'::jsonb,
+  shipping_snapshot jsonb not null default '{}'::jsonb,
+  note text,
+  created_at timestamptz not null default now(),
+  constraint uq_order_revision unique (order_id, revision_no)
+);
+
+create table order_sync_revisions (
+  scope_type text not null,
+  scope_id text not null,
+  revision bigint not null default 1,
+  updated_at timestamptz not null default now(),
+  primary key (scope_type, scope_id)
+);
+
+create unique index if not exists uq_customer_orders_active_org
+  on customer_orders (organization_id)
+  where commercial_status not in ('cancelled') and fulfillment_status not in ('delivered');
+
+create index if not exists idx_order_revision_history_order_rev
+  on order_revision_history (order_id, revision_no desc);
+
+create index if not exists idx_customer_orders_org_updated
+  on customer_orders (organization_id, updated_at desc, id desc);
 
 create table audit_log (
   id text primary key default gen_random_uuid()::text,
@@ -883,3 +925,86 @@ $$;
 create trigger trg_protect_posted_journal_lines
 before update or delete on journal_lines
 for each row execute function protect_posted_journal_lines();
+
+-- Guard: Prevent mutation or deletion of accepted quote versions
+create or replace function public.pt_guard_accepted_quote_immutability()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE' then
+    if old.status = 'accepted' then
+      raise exception 'ACCEPTED_QUOTE_IMMUTABLE: Cannot delete an accepted quote version (id: %).', old.id;
+    end if;
+    return old;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    if old.status = 'accepted' then
+      if new.subtotal <> old.subtotal
+         or new.final_total <> old.final_total
+         or new.deposit_amount <> old.deposit_amount
+         or new.cod_remaining <> old.cod_remaining
+         or new.expires_at <> old.expires_at
+         or new.version <> old.version
+         or new.order_id <> old.order_id then
+        raise exception 'ACCEPTED_QUOTE_IMMUTABLE: Cannot modify commercial snapshot of accepted quote version (id: %).', old.id;
+      end if;
+    end if;
+    return new;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_guard_accepted_quote_immutability on public.quote_versions;
+create trigger trg_guard_accepted_quote_immutability
+before update or delete on public.quote_versions
+for each row execute function public.pt_guard_accepted_quote_immutability();
+
+-- Guard: Prevent mutation of adjustments belonging to accepted quotes
+create or replace function public.pt_guard_accepted_adjustment_immutability()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_quote_status text;
+begin
+  if tg_op = 'INSERT' then
+    select status into v_quote_status from public.quote_versions where id = new.quote_id;
+    if v_quote_status = 'accepted' then
+      raise exception 'ACCEPTED_QUOTE_ADJUSTMENT_IMMUTABLE: Cannot add adjustments to an accepted quote version (quote_id: %).', new.quote_id;
+    end if;
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    select status into v_quote_status from public.quote_versions where id = old.quote_id;
+    if v_quote_status = 'accepted' then
+      raise exception 'ACCEPTED_QUOTE_ADJUSTMENT_IMMUTABLE: Cannot modify adjustments of an accepted quote version (quote_id: %).', old.quote_id;
+    end if;
+    return new;
+  end if;
+
+  if tg_op = 'DELETE' then
+    select status into v_quote_status from public.quote_versions where id = old.quote_id;
+    if v_quote_status = 'accepted' then
+      raise exception 'ACCEPTED_QUOTE_ADJUSTMENT_IMMUTABLE: Cannot delete adjustments from an accepted quote version (quote_id: %).', old.quote_id;
+    end if;
+    return old;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_guard_accepted_adjustment_immutability on public.quote_adjustments;
+create trigger trg_guard_accepted_adjustment_immutability
+before insert or update or delete on public.quote_adjustments
+for each row execute function public.pt_guard_accepted_adjustment_immutability();
+

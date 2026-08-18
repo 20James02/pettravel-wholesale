@@ -15,7 +15,6 @@ import {
   MessageSquareQuote,
   Edit3,
   CheckCircle2,
-  FileText,
   AlertTriangle,
   RotateCcw,
   History
@@ -131,7 +130,7 @@ export function OrderTimeline({
         purpose: isDeposit ? ("deposit" as const) : ("full" as const),
         reference: ref,
         qrPayload: `00020101021238540010A00000072701240006970422011219036888888880208QRIBFTTA5303704540${amount}5802VN62${ref.length.toString().padStart(2, "0")}${ref}6304`,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        expiresAt: quote.expiresAt || "",
         status: "active" as const
       };
     }

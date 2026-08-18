@@ -11,10 +11,13 @@ export const AnnouncementBanner: React.FC<AnnouncementBannerProps> = ({ onOpenPa
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
-    const isDismissed = localStorage.getItem("pettravel_dismissed_announcement_v2");
-    if (!isDismissed) {
-      setIsVisible(true);
-    }
+    const timer = setTimeout(() => {
+      const isDismissed = localStorage.getItem("pettravel_dismissed_announcement_v2") === "true";
+      if (!isDismissed) {
+        setIsVisible(true);
+      }
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   const handleDismiss = () => {

@@ -18,15 +18,15 @@ def stock_command_for_transition(
     before_fulfillment: str,
     after_fulfillment: str,
 ) -> StockCommand | None:
-    """Return the single inventory command implied by an order transition."""
+    """
+    Return the single inventory command implied by an order transition.
+    Source of truth: ADR-017 (Quote acceptance & stock reservation atomic).
+    """
     if after_commercial == "cancelled" and before_commercial != "cancelled":
         return "cancel_order"
     if after_fulfillment == "shipped" and before_fulfillment != "shipped":
         return "consume_order"
-    if (
-        after_commercial == "locked"
-        and before_commercial != "locked"
-    ):
+    if after_commercial == "customer_accepted" and before_commercial != "customer_accepted":
         return "reserve_order"
     return None
 
@@ -42,12 +42,62 @@ async def execute_stock_command(
     if db.get_bind().dialect.name != "postgresql":
         return None
 
+    reserving_actor = actor_id
     if command == "reserve_order":
+        # If the actor is a customer buyer, resolve the internal seller/staff actor
+        # who published the quote or is assigned to manage order inventory.
+        is_internal = (
+            await db.execute(
+                text("""select 1 from user_roles ur
+                    join role_permissions rp on rp.role_id = ur.role_id
+                    where ur.user_id = :actor_id
+                      and rp.permission_key in ('operations.write', 'order.quote')
+                    limit 1"""),
+                {"actor_id": actor_id},
+            )
+        ).scalar()
+        if not is_internal:
+            internal_actor = (
+                await db.execute(
+                    text("""select q.published_by
+                        from quote_versions q
+                        join app_users u on u.id = q.published_by
+                        where q.order_id = :order_id and q.status in ('published', 'accepted')
+                          and u.status = 'active'
+                        order by q.version desc limit 1"""),
+                    {"order_id": order_id},
+                )
+            ).scalar()
+            if not internal_actor:
+                internal_actor = (
+                    await db.execute(
+                        text("""select o.assigned_staff_id
+                            from customer_orders o
+                            join app_users u on u.id = o.assigned_staff_id
+                            where o.id = :order_id and u.status = 'active'"""),
+                        {"order_id": order_id},
+                    )
+                ).scalar()
+            if not internal_actor:
+                internal_actor = (
+                    await db.execute(
+                        text("""select ur.user_id
+                            from user_roles ur
+                            join role_permissions rp on rp.role_id = ur.role_id
+                            join app_users u on u.id = ur.user_id
+                            where rp.permission_key in ('operations.write', 'order.quote')
+                              and u.status = 'active'
+                            limit 1""")
+                    )
+                ).scalar()
+            if internal_actor:
+                reserving_actor = str(internal_actor)
+
         result = await db.execute(
             text("select pt_reserve_order_stock(:order_id, :actor_id, :expires_at)"),
             {
                 "order_id": order_id,
-                "actor_id": actor_id,
+                "actor_id": reserving_actor,
                 "expires_at": datetime.now(timezone.utc) + timedelta(hours=72),
             },
         )
@@ -66,27 +116,4 @@ async def execute_stock_command(
     payload = result.scalar()
     if isinstance(payload, str):
         payload = json.loads(payload)
-    if command == "consume_order" and int((payload or {}).get("lineCount", 0)) == 0:
-        await db.execute(
-            text("select pt_reserve_order_stock(:order_id, :actor_id, :expires_at)"),
-            {
-                "order_id": order_id,
-                "actor_id": actor_id,
-                "expires_at": datetime.now(timezone.utc) + timedelta(hours=72),
-            },
-        )
-        result2 = await db.execute(
-            text("""select pt_transition_order_stock_reservations(
-                :order_id, :actor_id, :action, :reason)"""),
-            {
-                "order_id": order_id,
-                "actor_id": actor_id,
-                "action": command,
-                "reason": f"Automatic order workflow transition: {command}",
-            },
-        )
-        payload2 = result2.scalar()
-        if isinstance(payload2, str):
-            payload2 = json.loads(payload2)
-        return payload2
     return payload

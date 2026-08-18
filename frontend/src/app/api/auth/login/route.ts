@@ -4,7 +4,6 @@ import type { RoleKey } from "@/lib/domain";
 import { encodeSession, requireSameOrigin } from "@/server/auth";
 import { getBackendHeaders, getBackendUrl } from "@/server/backend-client";
 import {
-  emailSchema,
   loginIdentifierSchema,
   getValidationErrorMessage,
   loginPasswordSchema

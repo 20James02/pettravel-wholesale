@@ -14,7 +14,6 @@
  */
 
 import type { TabKey } from "@/features/pettravel/types";
-import { TAB_ROUTE_MAP } from "@/features/pettravel/types";
 
 // Static Transition Probability Matrix for Idle Prediction (Tier 3)
 const ROUTE_TRANSITION_PROBABILITIES: Record<string, Record<string, number>> = {
