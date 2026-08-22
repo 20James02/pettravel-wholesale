@@ -46,6 +46,7 @@ export function MobileBottomNav({
       {!isAdmin && (
         <button
           type="button"
+          data-cart-animation-target="true"
           className="mobile-nav-item relative"
           data-active={activeTab === "cart"}
           onClick={() => {

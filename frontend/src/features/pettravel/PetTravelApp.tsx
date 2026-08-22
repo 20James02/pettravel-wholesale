@@ -30,6 +30,12 @@ import {
   type CatalogAccessScope
 } from "@/lib/cache/catalog-access";
 import { scheduleIdlePrediction } from "@/lib/prefetch/prefetch-engine";
+import {
+  cartStorageKeyForUser,
+  legacyCartStorageKeyForUser,
+  restoreCartItems
+} from "@/lib/cart/cart-state";
+import { animateProductToCart } from "@/lib/motion/cart-fly-motion";
 
 // Import custom subcomponents
 import { Topbar } from "./components/shared/Topbar";
@@ -228,6 +234,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
 
   // Customer Shopping Cart state
   const [cartItems, setCartItems] = useState<CustomerOrder["items"]>([]);
+  const [cartPaymentIntent, setCartPaymentIntent] = useState<"deposit_cod" | "pay_full">("deposit_cod");
 
   // Customer info & Profile states
   const [recipientName, setRecipientName] = useState<string>("");
@@ -261,6 +268,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
 
   // --- REFERENCES ---
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const productFlySourceRef = useRef<HTMLDivElement>(null);
 
   // Compute states
   const isLoggedIn = currentUser !== null;
@@ -293,7 +301,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   }, [adminDiscount, workingOrder.quoteVersions, adminPolicy]);
 
   // Persist cart to localStorage per user
-  const cartStorageKey = currentUser ? `ptw_cart_${currentUser.id}` : null;
+  const cartStorageKey = currentUser ? cartStorageKeyForUser(currentUser.id) : null;
 
   useEffect(() => {
     if (!cartStorageKey) return;
@@ -346,12 +354,9 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
             );
             setActiveTab(resolvePostLoginTab(requestedTab, Boolean(data.user.isAdmin)));
             // Restore user's cart from localStorage
-            const savedCart = localStorage.getItem(`ptw_cart_${data.user.id}`);
-            if (savedCart) {
-              try {
-                setCartItems(JSON.parse(savedCart));
-              } catch { /* silent */ }
-            }
+            const savedCart = localStorage.getItem(cartStorageKeyForUser(data.user.id));
+            localStorage.removeItem(legacyCartStorageKeyForUser(data.user.id));
+            setCartItems(restoreCartItems(savedCart));
           }
         }
       } catch { /* silent */ }
@@ -440,12 +445,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
           setSelectedOrderId(targetOrder.id);
           setWorkingOrder(targetOrder);
           setAdminOrderItems(targetOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
-          setCartItems(targetOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
         } else {
           setWorkingOrder(targetOrder);
-          if (targetOrder.commercialStatus !== "draft") {
-            setCartItems(targetOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
-          }
         }
       }
     } catch { /* silent */ }
@@ -861,6 +862,9 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       }
       setCurrentUser(data.user);
       setMode(data.user.isAdmin ? "admin" : "customer");
+      const savedCart = localStorage.getItem(cartStorageKeyForUser(data.user.id));
+      localStorage.removeItem(legacyCartStorageKeyForUser(data.user.id));
+      setCartItems(restoreCartItems(savedCart));
       setActiveTab(resolvePostLoginTab(pendingPostLoginTab, Boolean(data.user.isAdmin)));
       setPendingPostLoginTab("catalog");
       setLoadedTabs(new Set());
@@ -887,7 +891,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       return;
     }
     if (currentUser) {
-      localStorage.removeItem(`ptw_cart_${currentUser.id}`);
+      localStorage.removeItem(cartStorageKeyForUser(currentUser.id));
+      localStorage.removeItem(legacyCartStorageKeyForUser(currentUser.id));
     }
     setMode("guest");
     setCurrentUser(null);
@@ -1294,6 +1299,27 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     });
   }
 
+  function handleAddSelectedProductToCart(activeVariant: ProductVariant) {
+    if (!selectedProduct) return;
+
+    const variantImage = activeVariant.imageUrl || selectedProduct.imageUrl;
+    addToCart(
+      activeVariant.sku,
+      selectedProduct.code,
+      selectedProduct.name,
+      activeVariant.label,
+      activeVariant.wholesalePrice ?? 0,
+      activeVariant.supplierId || "sup_pettravel",
+      modalQty,
+      variantImage
+    );
+    void animateProductToCart({
+      sourceElement: productFlySourceRef.current,
+      imageUrl: variantImage
+    });
+    setSelectedProduct(null);
+  }
+
   function updateCartQty(sku: string, delta: number) {
     setCartItems((prev) =>
       prev
@@ -1326,81 +1352,35 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       return;
     }
 
-    const subtotal = cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
-    const isDeposit = workingOrder.paymentIntent === "deposit_cod";
-    const initialDeposit = isDeposit ? Math.round(subtotal * adminPolicy.defaultDepositRate) : subtotal;
-
-    if (workingOrder.id !== "") {
-      const nextVersion = workingOrder.quoteVersions.length + 1;
-      const nextQuote = {
-        id: `q_${nextVersion}_${Date.now()}`,
-        version: nextVersion,
-        status: "published" as const,
-        subtotal,
-        adjustments: [],
-        finalTotal: subtotal,
-        depositAmount: initialDeposit,
-        codRemaining: isDeposit ? subtotal - initialDeposit : 0,
-        shippingFeeOption: "included" as const,
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-      };
-
-      const updatedOrder: CustomerOrder = {
-        ...workingOrder,
-        recipientName: recipientName.trim(),
-        recipientPhone: recipientPhone.trim(),
-        recipientAddress: recipientAddress.trim(),
-        customerTaxCode: customerTaxCode.trim(),
-        customerNote: customerNote.trim(),
-        commercialStatus: "submitted",
-        items: cartItems.map((item) => ({ ...item })),
-        quoteVersions: [...workingOrder.quoteVersions.map((q) => ({ ...q, status: "superseded" as const })), nextQuote],
-        comments: [
-          {
-            id: `c_sub_${Date.now()}`,
-            author: workingOrder.customerName,
-            audience: "customer_visible",
-            message: `Đại lý đã gửi danh sách đề xuất cập nhật đơn hàng sỉ mới (lần ${nextVersion}). Vui lòng thẩm định báo giá mới.`,
-            createdAt: new Date().toISOString()
-          },
-          ...workingOrder.comments
-        ],
-        updatedAt: new Date().toISOString()
-      };
-
-      await syncOrder(updatedOrder);
+    try {
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: cartItems.map((item) => ({ ...item })),
+          paymentIntent: cartPaymentIntent,
+          recipientName: recipientName.trim(),
+          recipientPhone: recipientPhone.trim(),
+          recipientAddress: recipientAddress.trim(),
+          customerTaxCode: customerTaxCode.trim(),
+          customerNote: customerNote.trim()
+        })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        alert(errData?.error || "Không thể tạo đơn hàng. Vui lòng thử lại.");
+        return;
+      }
+      const data = (await res.json()) as OrderMutationResponse;
+      setWorkingOrder(data.order);
+      setAllOrders((prev) => [data.order, ...prev]);
+      setSelectedOrderId(data.order.id);
+      setCartItems([]);
+      setCartPaymentIntent("deposit_cod");
       setShowCheckoutModal(false);
       setActiveTab("order");
-    } else {
-      try {
-        const res = await fetch("/api/orders", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            items: cartItems.map((item) => ({ ...item })),
-            paymentIntent: workingOrder.paymentIntent,
-            recipientName: recipientName.trim(),
-            recipientPhone: recipientPhone.trim(),
-            recipientAddress: recipientAddress.trim(),
-            customerTaxCode: customerTaxCode.trim(),
-            customerNote: customerNote.trim()
-          })
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => null);
-          alert(errData?.error || "Không thể tạo đơn hàng. Vui lòng thử lại.");
-          return;
-        }
-        const data = (await res.json()) as OrderMutationResponse;
-        setWorkingOrder(data.order);
-        setAllOrders((prev) => [data.order, ...prev]);
-        setSelectedOrderId(data.order.id);
-        setCartItems(data.order.items.map((item) => ({ ...item })));
-        setShowCheckoutModal(false);
-        setActiveTab("order");
-      } catch {
-        alert("Lỗi kết nối. Vui lòng kiểm tra mạng và thử lại.");
-      }
+    } catch {
+      alert("Lỗi kết nối. Vui lòng kiểm tra mạng và thử lại.");
     }
   }
 
@@ -1752,13 +1732,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
             cartCategoryFilter={cartCategoryFilter}
             setCartCategoryFilter={setCartCategoryFilter}
             cartTotalVal={cartItems.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0)}
-            workingOrder={workingOrder}
-            changePaymentIntent={(intent) => {
-              setWorkingOrder((prev) => ({
-                ...prev,
-                paymentIntent: intent
-              }));
-            }}
+            paymentIntent={cartPaymentIntent}
+            changePaymentIntent={setCartPaymentIntent}
             updateCartQty={updateCartQty}
             removeCartItem={removeCartItem}
             onSubmitCartProposal={handleSubmitCartProposal}
@@ -1941,7 +1916,6 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
                                   onClick={() => {
                                     setSelectedOrderId(ord.id);
                                     setWorkingOrder(ord);
-                                    setCartItems(ord.items.map((item) => ({ ...item })));
                                     setActiveTab("order");
                                   }}
                                 >
@@ -2110,7 +2084,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
               {/* Upper 2-column section: Gallery (left) + Variant selection & CTA (right) */}
               <div className="flex flex-col md:flex-row gap-5">
                 {/* Product Gallery with Multi-Image, Swipe & Variant Sync */}
-                <div className="md:w-1/2">
+                <div ref={productFlySourceRef} className="md:w-1/2">
                   <ProductGallery product={selectedProduct} activeVariant={activeVariant} />
                 </div>
 
@@ -2257,21 +2231,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
                           <button
                             type="button"
                             className="primary-button font-bold text-xs py-3 px-6 flex-[2] justify-center bg-orange-500 hover:bg-orange-600 text-white rounded-xl cursor-pointer shadow-lg flex items-center gap-1.5"
-                            disabled={stock <= 0}
-                            onClick={() => {
-                              addToCart(
-                                activeVariant.sku,
-                                selectedProduct.code,
-                                selectedProduct.name,
-                                activeVariant.label,
-                                activeVariant.wholesalePrice ?? 0,
-                                activeVariant.supplierId || "sup_pettravel",
-                                modalQty,
-                                activeVariant.imageUrl || selectedProduct.imageUrl
-                              );
-                              setSelectedProduct(null);
-                              setActiveTab("cart");
-                            }}
+                            disabled={stock <= 0 || wholesalePrice <= 0}
+                            onClick={() => handleAddSelectedProductToCart(activeVariant)}
                           >
                             <PackagePlus size={16} />
                             <span>Thêm vào đơn sỉ</span>

@@ -46,6 +46,7 @@ export function Topbar({
         {/* Tab 2: Giỏ hàng & Báo giá */}
         <button
           type="button"
+          data-cart-animation-target="true"
           className={`liquid-glass-tab ${activeTab === "cart" ? "active" : ""}`}
           onClick={() => (isLoggedIn ? setActiveTab("cart") : onRequireLogin("cart"))}
           aria-current={activeTab === "cart" ? "page" : undefined}

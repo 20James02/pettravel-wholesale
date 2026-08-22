@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import Image from "next/image";
 import { AlertCircle, ArrowRight, CheckCircle2, ShieldCheck, ShoppingCart, Trash2, Truck } from "lucide-react";
-import type { CustomerOrder, OrderItem, Product } from "@/lib/domain";
+import type { OrderItem, Product } from "@/lib/domain";
 import { formatVnd } from "@/lib/money";
 import { BottomSheet } from "../ui/BottomSheet";
 
@@ -14,7 +14,7 @@ interface CartProps {
   cartCategoryFilter: string;
   setCartCategoryFilter: (cat: string) => void;
   cartTotalVal: number;
-  workingOrder: CustomerOrder;
+  paymentIntent: "deposit_cod" | "pay_full";
   changePaymentIntent: (intent: "deposit_cod" | "pay_full") => void;
   updateCartQty: (sku: string, delta: number) => void;
   removeCartItem: (sku: string) => void;
@@ -41,7 +41,7 @@ export function Cart({
   cartCategoryFilter,
   setCartCategoryFilter,
   cartTotalVal,
-  workingOrder,
+  paymentIntent,
   changePaymentIntent,
   updateCartQty,
   removeCartItem,
@@ -329,7 +329,7 @@ export function Cart({
               {/* Option 1: Cọc 30% + COD */}
               <label
                 className={`p-3.5 border-2 rounded-2xl flex items-start gap-3 cursor-pointer transition-all ${
-                  workingOrder.paymentIntent === "deposit_cod"
+                  paymentIntent === "deposit_cod"
                     ? "border-orange-500 bg-orange-50/40 shadow-sm"
                     : "border-orange-100 bg-[#FFFDF9] hover:border-orange-200"
                 }`}
@@ -338,7 +338,7 @@ export function Cart({
                   type="radio"
                   name="payment_intent"
                   className="mt-1 text-orange-500 focus:ring-orange-500 h-4 w-4"
-                  checked={workingOrder.paymentIntent === "deposit_cod"}
+                  checked={paymentIntent === "deposit_cod"}
                   onChange={() => changePaymentIntent("deposit_cod")}
                 />
                 <div>
@@ -354,7 +354,7 @@ export function Cart({
               {/* Option 2: Thanh toán 100% */}
               <label
                 className={`p-3.5 border-2 rounded-2xl flex items-start gap-3 cursor-pointer transition-all ${
-                  workingOrder.paymentIntent === "pay_full"
+                  paymentIntent === "pay_full"
                     ? "border-orange-500 bg-orange-50/40 shadow-sm"
                     : "border-orange-100 bg-[#FFFDF9] hover:border-orange-200"
                 }`}
@@ -363,7 +363,7 @@ export function Cart({
                   type="radio"
                   name="payment_intent"
                   className="mt-1 text-orange-500 focus:ring-orange-500 h-4 w-4"
-                  checked={workingOrder.paymentIntent === "pay_full"}
+                  checked={paymentIntent === "pay_full"}
                   onChange={() => changePaymentIntent("pay_full")}
                 />
                 <div>
@@ -389,7 +389,7 @@ export function Cart({
                 disabled={cartItems.length === 0}
                 onClick={onSubmitCartProposal}
               >
-                <span>{workingOrder.id ? "Cập nhật yêu cầu báo giá sỉ" : "Gửi yêu cầu báo giá sỉ"}</span>
+                <span>Gửi yêu cầu báo giá sỉ</span>
                 <ArrowRight size={16} />
               </button>
             </div>
