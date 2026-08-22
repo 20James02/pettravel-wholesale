@@ -4,6 +4,7 @@ from sqlalchemy.future import select
 from typing import List, Dict, Any
 from app.core.db import get_db
 from app.models.wholesale import AppSetting
+from app.schemas.policy import DEFAULT_PROMOTIONS_POLICY, PromotionsPolicy
 
 router = APIRouter()
 
@@ -43,7 +44,7 @@ async def save_categories(payload: Dict[str, Any], db: AsyncSession = Depends(ge
     await db.commit()
     return {"status": "success", "message": "Lưu danh mục thành công."}
 
-@router.get("/policy", response_model=Dict[str, Any])
+@router.get("/policy", response_model=PromotionsPolicy)
 async def get_policy(db: AsyncSession = Depends(get_db)):
     """
     Truy xuất chính sách hệ thống (admin_policy).
@@ -51,34 +52,21 @@ async def get_policy(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(AppSetting).filter(AppSetting.key == "admin_policy"))
     setting = result.scalars().first()
     if not setting:
-        return {
-            "freeShippingThreshold": 5000000,
-            "defaultDepositRate": 0.3,
-            "maxOperatorDiscountRate": 0.08,
-            "requireManagerApprovalAbove": 500000
-        }
-    val = setting.value
-    return {
-        "freeShippingThreshold": val.get("freeShippingThreshold", 5000000),
-        "defaultDepositRate": val.get("defaultDepositRate", 0.3),
-        "maxOperatorDiscountRate": val.get("maxOperatorDiscountRate", 0.08),
-        "requireManagerApprovalAbove": val.get("requireManagerApprovalAbove", 500000)
-    }
+        return DEFAULT_PROMOTIONS_POLICY
+    try:
+        return PromotionsPolicy.model_validate(setting.value)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="POLICY_CONFIGURATION_INVALID") from exc
 
 @router.post("/policy", response_model=Dict[str, Any])
-async def save_policy(payload: Dict[str, Any], db: AsyncSession = Depends(get_db)):
+async def save_policy(payload: PromotionsPolicy, db: AsyncSession = Depends(get_db)):
     """
     Cập nhật chính sách hệ thống (admin_policy).
     """
     result = await db.execute(select(AppSetting).filter(AppSetting.key == "admin_policy"))
     setting = result.scalars().first()
     
-    policy_data = {
-        "freeShippingThreshold": payload.get("freeShippingThreshold", 5000000),
-        "defaultDepositRate": payload.get("defaultDepositRate", 0.3),
-        "maxOperatorDiscountRate": payload.get("maxOperatorDiscountRate", 0.08),
-        "requireManagerApprovalAbove": payload.get("requireManagerApprovalAbove", 500000)
-    }
+    policy_data = payload.model_dump()
     
     if not setting:
         setting = AppSetting(

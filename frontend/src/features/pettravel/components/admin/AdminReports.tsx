@@ -8,59 +8,12 @@ import {
   Sparkles,
   Wallet,
   ArrowUpRight,
-  Copy,
   X,
   FileSpreadsheet
 } from "lucide-react";
 import type { AdminReportsOverview, CustomerOrder, Product } from "@/lib/domain";
 import type { TabKey } from "../../types";
 import { formatVnd } from "@/lib/money";
-
-interface BankAccountInfo {
-  id: string;
-  label: string;
-  bankName: string;
-  accountNo: string;
-  balanceVnd: number;
-}
-
-const BANK_ACCOUNTS: BankAccountInfo[] = [
-  {
-    id: "vcb",
-    label: "Vietcombank",
-    bankName: "Ngân hàng Ngoại thương Việt Nam (VCB)",
-    accountNo: "1028391829",
-    balanceVnd: 186540000
-  },
-  {
-    id: "mbb",
-    label: "MB Bank",
-    bankName: "Ngân hàng TMCP Quân Đội (MB)",
-    accountNo: "0988776655",
-    balanceVnd: 94250000
-  },
-  {
-    id: "tcb",
-    label: "Techcombank",
-    bankName: "Ngân hàng Kỹ Thương VN (TCB)",
-    accountNo: "19038271625",
-    balanceVnd: 142800000
-  },
-  {
-    id: "vpb",
-    label: "VPBank",
-    bankName: "Ngân hàng Việt Nam Thịnh Vượng",
-    accountNo: "9876543210",
-    balanceVnd: 68400000
-  },
-  {
-    id: "tech_payout",
-    label: "Tech Payout",
-    bankName: "Cổng Thanh toán B2B Payout Gateway",
-    accountNo: "PAYOUT-PTW-889",
-    balanceVnd: 51200000
-  }
-];
 
 interface AdminReportsProps {
   isAdmin: boolean;
@@ -89,11 +42,9 @@ export function AdminReports({
   const cashflowModalRef = useRef<HTMLDivElement>(null);
   const turnaroundModalRef = useRef<HTMLDivElement>(null);
 
-  const [selectedChannel, setSelectedChannel] = useState<string>("vcb");
   const [isLiquidityModalOpen, setIsLiquidityModalOpen] = useState<boolean>(false);
   const [isCashflowModalOpen, setIsCashflowModalOpen] = useState<boolean>(false);
   const [isTurnaroundModalOpen, setIsTurnaroundModalOpen] = useState<boolean>(false);
-  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
   // Lock body scroll and active scroll to top when popup opens
   useEffect(() => {
@@ -125,8 +76,6 @@ export function AdminReports({
     }
   }, [isTurnaroundModalOpen]);
 
-  const activeBank = BANK_ACCOUNTS.find((b) => b.id === selectedChannel) || BANK_ACCOUNTS[0];
-
   // Real-time client side metrics calculations
   const dynamicKpis = useMemo(() => {
     const totalOrders = allOrders.length;
@@ -144,9 +93,12 @@ export function AdminReports({
       const q = o.quoteVersions?.[o.quoteVersions.length - 1];
       if (q) {
         estimatedSalesVnd += q.finalTotal;
-        if (o.paymentStatus === "paid" || o.paymentStatus === "full_uploaded") {
+        if (o.paymentStatus === "paid") {
           paymentConfirmedVnd += q.finalTotal;
-        } else if (o.paymentStatus === "deposit_confirmed" || o.paymentStatus === "deposit_uploaded") {
+        } else if (
+          o.paymentIntent === "deposit_cod" &&
+          ["deposit_confirmed", "cod_remaining"].includes(o.paymentStatus)
+        ) {
           paymentConfirmedVnd += q.depositAmount || 0;
         }
       }
@@ -234,12 +186,6 @@ export function AdminReports({
     }));
   }, [allProducts]);
 
-  const handleCopyText = (text: string, label: string) => {
-    navigator.clipboard?.writeText(text);
-    setCopyFeedback(label);
-    setTimeout(() => setCopyFeedback(null), 2500);
-  };
-
   const handleExportCsv = () => {
     const headers = "Trạng thái,Số đơn,Giá trị VND\n";
     const rows = statusBreakdown.map((r) => `"${r.label}",${r.quantity},${r.amountVnd}`).join("\n");
@@ -262,6 +208,10 @@ export function AdminReports({
     paymentPendingProofVnd: 0,
     receivableOpenVnd: dynamicKpis.receivableOpenVnd,
     receivableOverdueVnd: dynamicKpis.receivableOpenVnd,
+    reconciliationMatchedVnd: 0,
+    reconciliationUnmatchedVnd: 0,
+    openReconciliationBatches: 0,
+    unmatchedBankTransactions: 0,
     trialBalanceDifferenceVnd: 0
   };
 
@@ -478,20 +428,20 @@ export function AdminReports({
           </div>
         </div>
 
-        {/* CARD 4: AVAILABLE LIQUIDITY + MULTI-BANK SELECTOR */}
+        {/* CARD 4: REAL BANK RECONCILIATION STATUS */}
         <div
           className={`admin-kpi-card p-5 flex flex-col justify-between cursor-pointer hover:scale-[1.01] transition ${
             theme === "dark" ? "bg-[#161b30] border-[#293256] text-white" : ""
           }`}
           onClick={() => setIsLiquidityModalOpen(true)}
-          title="Nhấn để mở cổng thanh toán và quản lý số dư ngân hàng"
+          title="Nhấn để xem số liệu đối soát ngân hàng đã ghi nhận"
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-              Thanh khoản ngân hàng (112)
+              Đối soát ngân hàng
             </span>
             <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-              Hoạt động
+              Dữ liệu sổ thật
             </span>
           </div>
 
@@ -499,34 +449,16 @@ export function AdminReports({
             <div className={`text-2xl font-black font-mono tracking-tight ${
               theme === "dark" ? "text-white" : "text-[#121528]"
             }`}>
-              {formatVnd(activeBank.balanceVnd)}
+              {activeKpis.unmatchedBankTransactions ?? 0}
             </div>
             <span className="text-[11px] text-gray-400 font-medium">
-              TK: {activeBank.label}
+              giao dịch ngân hàng chưa khớp
             </span>
           </div>
 
-          {/* Bank Pills Selector Strip */}
-          <div
-            className="flex items-center gap-1 pt-2 border-t border-gray-200/40 overflow-x-auto no-scrollbar"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {BANK_ACCOUNTS.map((bank) => (
-              <button
-                key={bank.id}
-                type="button"
-                className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold transition cursor-pointer ${
-                  selectedChannel === bank.id
-                    ? "bg-[#4f46e5] text-white shadow-xs"
-                    : theme === "dark"
-                    ? "bg-[#1f2646] text-gray-300 hover:bg-[#28315a]"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                }`}
-                onClick={() => setSelectedChannel(bank.id)}
-              >
-                {bank.label}
-              </button>
-            ))}
+          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-200/40 text-[9px] font-bold">
+            <span className="text-emerald-400">Đã khớp: {formatVnd(activeKpis.reconciliationMatchedVnd ?? 0)}</span>
+            <span className="text-amber-400 text-right">Chênh lệch: {formatVnd(activeKpis.reconciliationUnmatchedVnd ?? 0)}</span>
           </div>
         </div>
       </div>
@@ -651,14 +583,14 @@ export function AdminReports({
       {/* 4. MODALS (LIQUIDITY, CASHFLOW, TURNAROUND) */}
       {/* ========================================================================= */}
 
-      {/* LIQUIDITY & BANK TRANSFER MODAL */}
+      {/* BANK RECONCILIATION MODAL */}
       {isLiquidityModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
           <div ref={liquidityModalRef} className="bg-[#14182b] border border-[#272e4e] rounded-3xl p-6 max-w-lg w-full shadow-2xl flex flex-col gap-4 text-white max-h-[90vh] overflow-y-auto admin-dark-scroll">
             <div className="flex items-center justify-between border-b border-[#232a48] pb-3">
               <div className="flex items-center gap-2">
                 <Wallet size={18} className="text-emerald-400" />
-                <h3 className="font-extrabold text-white text-base m-0">Chi tiết Thanh khoản & Số dư Ngân hàng</h3>
+                <h3 className="font-extrabold text-white text-base m-0">Chi tiết đối soát ngân hàng</h3>
               </div>
               <button
                 type="button"
@@ -669,22 +601,53 @@ export function AdminReports({
               </button>
             </div>
 
-            <div className="p-4 rounded-2xl bg-[#1c223c] border border-[#2e375e] flex flex-col gap-2">
-              <div className="text-xs text-gray-400 font-bold uppercase">Tài khoản được chọn</div>
-              <div className="text-xl font-black text-emerald-400 font-mono">
-                {formatVnd(activeBank.balanceVnd)}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 rounded-2xl bg-[#1c223c] border border-[#2e375e]">
+                <div className="text-[10px] text-gray-400 font-bold uppercase">Giao dịch chưa khớp</div>
+                <div className="mt-1 text-xl font-black text-amber-400 font-mono">
+                  {activeKpis.unmatchedBankTransactions ?? 0}
+                </div>
               </div>
-              <div className="text-xs text-white font-bold">{activeBank.bankName}</div>
-              <div className="flex items-center justify-between mt-2 pt-2 border-t border-[#2a3356] text-xs">
-                <span className="font-mono text-gray-300">STK: {activeBank.accountNo}</span>
-                <button
-                  type="button"
-                  className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer"
-                  onClick={() => handleCopyText(activeBank.accountNo, "Đã sao chép số tài khoản!")}
-                >
-                  <Copy size={13} /> {copyFeedback || "Sao chép"}
-                </button>
+              <div className="p-3 rounded-2xl bg-[#1c223c] border border-[#2e375e]">
+                <div className="text-[10px] text-gray-400 font-bold uppercase">Batch đang mở</div>
+                <div className="mt-1 text-xl font-black text-sky-400 font-mono">
+                  {activeKpis.openReconciliationBatches ?? 0}
+                </div>
               </div>
+              <div className="col-span-2 p-3 rounded-2xl bg-[#1c223c] border border-[#2e375e] flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] text-gray-400 font-bold uppercase">Giá trị đã khớp</div>
+                  <div className="mt-1 text-sm font-black text-emerald-400 font-mono">
+                    {formatVnd(activeKpis.reconciliationMatchedVnd ?? 0)}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] text-gray-400 font-bold uppercase">Chênh lệch cần xử lý</div>
+                  <div className="mt-1 text-sm font-black text-rose-400 font-mono">
+                    {formatVnd(activeKpis.reconciliationUnmatchedVnd ?? 0)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-[#2e375e] overflow-hidden">
+              {(reportsOverview?.reconciliationByType ?? []).map((row) => (
+                <div key={row.key} className="flex items-center justify-between gap-3 border-b border-[#2e375e] last:border-b-0 px-3 py-2.5 text-xs">
+                  <div>
+                    <div className="font-bold text-white">{row.label}</div>
+                    <div className="text-[10px] text-gray-400">{row.quantity ?? 0} batch</div>
+                  </div>
+                  <div className="text-right font-mono">
+                    <div className="font-bold text-emerald-400">{formatVnd(row.amountVnd)}</div>
+                    <div className="text-[10px] text-amber-400">Lệch {formatVnd(row.secondaryAmountVnd ?? 0)}</div>
+                  </div>
+                </div>
+              ))}
+              {(reportsOverview?.reconciliationByType ?? []).length === 0 && (
+                <div className="px-3 py-5 text-center text-xs text-gray-400">
+                  Chưa có batch đối soát nào trong cơ sở dữ liệu.
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-2.5 mt-2 border-t border-[#232a48] pt-3 text-xs">
@@ -699,11 +662,11 @@ export function AdminReports({
                 type="button"
                 className="admin-pill-btn-white py-2 px-5 text-xs"
                 onClick={() => {
-                  alert(`Đã tạo lệnh đối soát tức thời cho tài khoản ${activeBank.label}!`);
                   setIsLiquidityModalOpen(false);
+                  setActiveTab?.("admin_accounting");
                 }}
               >
-                Tạo lệnh đối soát số dư
+                Mở sổ kế toán
               </button>
             </div>
           </div>

@@ -3,7 +3,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
 from typing import Dict, Any, List
-from app.models.wholesale import JournalEntry, JournalLine, Order, QuoteVersion, ProductVariant
+from app.models.wholesale import JournalEntry, JournalLine, Order, QuoteVersion
 import uuid
 
 async def create_journal_entry(
@@ -111,7 +111,12 @@ async def post_order_deposit_receipt(order_id: str, db: AsyncSession) -> Journal
         posted=True # Ghi sổ ngay lập tức khi bank khớp tiền
     )
 
-async def post_order_sales_and_cost(order_id: str, db: AsyncSession) -> List[JournalEntry]:
+async def post_order_sales_and_cost(
+    order_id: str,
+    db: AsyncSession,
+    *,
+    unit_cost_by_sku: Dict[str, int],
+) -> List[JournalEntry]:
     """
     Sinh bút toán ghi nhận doanh thu sỉ và giá vốn hàng bán khi xuất kho.
     1. Bút toán doanh thu: Nợ 131 (Phải thu đại lý) / Có 511 (Doanh thu bán hàng sỉ).
@@ -133,10 +138,17 @@ async def post_order_sales_and_cost(order_id: str, db: AsyncSession) -> List[Jou
     if not quote:
         raise ValueError("Đơn hàng chưa có báo giá chính thức.")
         
-    # Tính tổng giá vốn thực tế dựa vào giá vốn sỉ snapshot tại thời điểm bán (ở đây giả lập 65% wholesale_price)
+    # COGS must come from an authoritative inventory snapshot supplied by the
+    # caller. Never infer cost from a selling price or an arbitrary margin.
     cost_total = 0
     for item in order.items:
-        cost_total += int(item.quantity * item.unit_price_snapshot * 0.65)
+        sku = str(item.variant_sku)
+        unit_cost = unit_cost_by_sku.get(sku)
+        if isinstance(unit_cost, bool) or not isinstance(unit_cost, int) or unit_cost <= 0:
+            raise ValueError(
+                f"ACCOUNTING_COGS_SOURCE_REQUIRED: Thiếu giá vốn tồn kho thực tế cho SKU {sku}."
+            )
+        cost_total += item.quantity * unit_cost
         
     entries = []
     

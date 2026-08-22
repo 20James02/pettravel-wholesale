@@ -134,8 +134,16 @@ async def test_order_sales_and_cost_posting(db_session):
     db_session.add(item)
     await db_session.commit()
     
-    # 2. Hạch toán doanh thu và giá vốn
-    entries = await post_order_sales_and_cost("ord_2", db_session)
+    # 2. Không được suy diễn giá vốn từ giá bán khi thiếu snapshot tồn kho thật.
+    with pytest.raises(ValueError, match="ACCOUNTING_COGS_SOURCE_REQUIRED"):
+        await post_order_sales_and_cost("ord_2", db_session, unit_cost_by_sku={})
+
+    # 3. Hạch toán doanh thu và giá vốn bằng snapshot giá vốn thực tế do kho cung cấp.
+    entries = await post_order_sales_and_cost(
+        "ord_2",
+        db_session,
+        unit_cost_by_sku={"SKU-BOWL-RED": 420000},
+    )
     assert len(entries) == 2
     
     # Bút toán 1: Doanh thu (131 / 511)
@@ -154,5 +162,6 @@ async def test_order_sales_and_cost_posting(db_session):
     cost_lines = cost_lines_res.scalars().all()
     assert len(cost_lines) == 2
     assert cost_lines[0].account_code == "632"
+    assert cost_lines[0].debit_amount_vnd == 4200000
     assert cost_lines[1].account_code == "156"
-
+    assert cost_lines[1].credit_amount_vnd == 4200000

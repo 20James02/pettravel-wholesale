@@ -215,10 +215,11 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     freeShippingThreshold: 5000000,
     defaultDepositRate: 0.3,
     maxOperatorDiscountRate: 0.08,
-    requireManagerApprovalAbove: 500000,
-    giftThreshold: 10000000,
-    giftName: "Bát ăn inox cao cấp chống trượt"
+    requireManagerApprovalAbove: 500000
   });
+  const [isPromotionsPolicyLoading, setIsPromotionsPolicyLoading] = useState<boolean>(false);
+  const [isPromotionsPolicyVerified, setIsPromotionsPolicyVerified] = useState<boolean>(false);
+  const [promotionsPolicyError, setPromotionsPolicyError] = useState<string>("");
 
   // Admin adjustments states (discounts, shipping fee, etc.)
   const [adminDiscount, setAdminDiscount] = useState<number>(0);
@@ -572,21 +573,32 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   }, []);
 
   const fetchPromotions = useCallback(async () => {
+    setIsPromotionsPolicyLoading(true);
+    setPromotionsPolicyError("");
     try {
       const res = await fetch("/api/admin/promotions");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.policy) {
-          setPromotionsPolicy(data.policy);
-          setAdminPolicy({
-            freeShippingThreshold: data.policy.freeShippingThreshold,
-            defaultDepositRate: data.policy.defaultDepositRate,
-            maxOperatorDiscountRate: data.policy.maxOperatorDiscountRate,
-            requireManagerApprovalAbove: data.policy.requireManagerApprovalAbove
-          });
-        }
+      const data = await res.json();
+      if (!res.ok || !data.policy) {
+        throw new Error(data.error || "Không thể tải chính sách giá.");
       }
-    } catch { /* silent */ }
+      const { promotionsPolicySchema } = await import("@/lib/validation");
+      const policy = promotionsPolicySchema.parse(data.policy);
+      setPromotionsPolicy(policy);
+      setAdminPolicy({
+        freeShippingThreshold: policy.freeShippingThreshold,
+        defaultDepositRate: policy.defaultDepositRate,
+        maxOperatorDiscountRate: policy.maxOperatorDiscountRate,
+        requireManagerApprovalAbove: policy.requireManagerApprovalAbove
+      });
+      setIsPromotionsPolicyVerified(true);
+      return policy;
+    } catch (error) {
+      setIsPromotionsPolicyVerified(false);
+      setPromotionsPolicyError(error instanceof Error ? error.message : "Không thể tải chính sách giá.");
+      return null;
+    } finally {
+      setIsPromotionsPolicyLoading(false);
+    }
   }, []);
 
   const fetchAccountingOverview = useCallback(async () => {
@@ -697,6 +709,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       fetchOrders();
       fetchProducts();
       fetchCategories();
+      fetchPromotions();
     } else if (currentTab === "admin_accounting") {
       fetchAccountingOverview();
       fetchAccountingJournalEntries();
@@ -999,6 +1012,11 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   // Publish quote to customer for acceptance
   async function handlePublishQuote(customNote?: string): Promise<boolean> {
     if (!workingOrder?.id) return false;
+    const quotePolicy = isPromotionsPolicyVerified ? promotionsPolicy : await fetchPromotions();
+    if (!quotePolicy) {
+      alert(promotionsPolicyError || "Chưa xác thực được chính sách giá. Vui lòng tải lại trước khi phát hành báo giá.");
+      return false;
+    }
     try {
       const itemsToQuote = adminOrderItems.map((item) => ({ ...item }));
       if (itemsToQuote.length === 0) {
@@ -1027,7 +1045,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       }
 
       const finalTotal = subtotal - adminDiscount + (shippingFeeOption === "included" ? adminShippingFee : 0);
-      const depositRate = promotionsPolicy.defaultDepositRate;
+      const depositRate = quotePolicy.defaultDepositRate;
       const depositAmount = customDepositInput.trim() ? Math.round(Number(customDepositInput)) : Math.round(finalTotal * depositRate);
       const codRemaining = finalTotal - depositAmount;
 
@@ -2085,6 +2103,9 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
             accountingError={accountingError}
             promotionsPolicy={promotionsPolicy}
             setPromotionsPolicy={setPromotionsPolicy}
+            isPromotionsPolicyLoading={isPromotionsPolicyLoading}
+            isPromotionsPolicyVerified={isPromotionsPolicyVerified}
+            promotionsPolicyError={promotionsPolicyError}
             fetchAccountingOverview={fetchAccountingOverview}
             fetchAccountingJournalEntries={fetchAccountingJournalEntries}
             fetchPromotions={fetchPromotions}
