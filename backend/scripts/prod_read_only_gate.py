@@ -27,10 +27,10 @@ async def prod_preflight():
         assert tcount >= 25, f"Missing base tables: found {tcount}"
 
         # 3. Active queries and locks
-        active_q = await conn.fetch("SELECT pid, now() - xact_start as duration, query, state FROM pg_stat_activity WHERE state != 'idle' AND pid != pg_backend_pid();")
+        active_q = await conn.fetch("SELECT pid, now() - xact_start as duration, state FROM pg_stat_activity WHERE state != 'idle' AND pid != pg_backend_pid();")
         print(f"Active non-idle queries: {len(active_q)}")
         for q in active_q:
-            print(f"  - PID {q['pid']}: {q['duration']} | state={q['state']} | query={q['query'][:60]}")
+            print(f"  - PID {q['pid']}: {q['duration']} | state={q['state']}")
 
         # 4. Old V10 Function Fingerprints
         funcs = await conn.fetch("""
@@ -44,7 +44,10 @@ async def prod_preflight():
             sha = hashlib.sha256(f['def'].strip().encode('utf-8')).hexdigest()
             print(f"  - {f['proname']}: prosecdef={f['prosecdef']}, search_path={f['proconfig']}, SHA256={sha}")
             
-        print("\n-> PRODUCTION PRE-FLIGHT COMPLETED CLEANLY: ZERO LOCK CONTENTION, ALL CONSTRAINTS VERIFIED.")
+        print(
+            "\n-> PRODUCTION READ-ONLY PRE-FLIGHT COMPLETED: "
+            "identity, table baseline, active-query count, and procedure fingerprints inspected."
+        )
     finally:
         await conn.close()
 
