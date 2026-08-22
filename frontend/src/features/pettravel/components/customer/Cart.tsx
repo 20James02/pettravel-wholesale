@@ -106,7 +106,7 @@ export function Cart({
         {/* Cột trái: Danh sách hàng sỉ */}
         <div className="panel flex flex-col gap-4 p-4 sm:p-6 bg-white border-2 border-orange-100 rounded-3xl">
           <div className="section-title flex justify-between items-center pb-3 border-b border-dashed border-orange-100">
-            <h3 className="text-base sm:text-lg font-bold text-[#331B08] font-['Varela_Round'] flex items-center gap-2">
+            <h3 className="text-base sm:text-lg font-bold text-[#331B08] font-heading flex items-center gap-2">
               <ShoppingCart size={20} className="text-orange-500" /> Danh sách hàng sỉ đã chọn
             </h3>
             <span className="bg-orange-100 text-orange-800 text-xs px-2.5 py-0.5 rounded-full font-bold font-mono">
@@ -154,7 +154,7 @@ export function Cart({
                         <Image src={group.productImage} alt={group.productName} fill sizes="44px" className="object-cover" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <strong className="text-xs sm:text-sm text-[#331B08] block truncate font-['Varela_Round']">
+                        <strong className="text-xs sm:text-sm text-[#331B08] block truncate font-heading">
                           {group.productName}
                         </strong>
                         <span className="text-[10px] text-orange-900/60 font-mono font-bold uppercase">
@@ -251,7 +251,7 @@ export function Cart({
           <div className="panel flex flex-col gap-4 p-4 sm:p-6 bg-white border-2 border-orange-100 rounded-3xl shadow-sm">
             {/* 1. Form Nhập Thông Tin Giao Nhận Ngay Tại Giỏ Hàng */}
             <div className="section-title pb-2 border-b border-dashed border-orange-100">
-              <h3 className="text-base sm:text-lg font-bold text-[#331B08] font-['Varela_Round'] flex items-center gap-2">
+              <h3 className="text-base sm:text-lg font-bold text-[#331B08] font-heading flex items-center gap-2">
                 <Truck size={20} className="text-orange-500" /> Thông tin Nhận hàng & Xuất HĐ
               </h3>
             </div>
@@ -320,7 +320,7 @@ export function Cart({
 
             {/* 2. Phương án thanh toán */}
             <div className="section-title pb-2 pt-2 border-b border-t border-dashed border-orange-100">
-              <h3 className="text-sm sm:text-base font-bold text-[#331B08] font-['Varela_Round'] flex items-center gap-2">
+              <h3 className="text-sm sm:text-base font-bold text-[#331B08] font-heading flex items-center gap-2">
                 <ShieldCheck size={18} className="text-orange-500" /> Chọn Hình thức Thanh toán
               </h3>
             </div>

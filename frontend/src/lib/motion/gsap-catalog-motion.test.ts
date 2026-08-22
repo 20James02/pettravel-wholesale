@@ -15,6 +15,8 @@ describe("GSAP catalog integration", () => {
     assert.ok(motionSource.includes('media.revert()'));
     assert.ok(motionSource.includes('context.revert()'));
     assert.ok(motionSource.includes('prefers-reduced-motion: reduce'));
+    assert.ok(motionSource.includes("MAX_STAGGERED_PRODUCT_CARDS"));
+    assert.ok(motionSource.includes("gsap.set(remainingCards"));
     assert.ok(catalogSource.includes('import("@/lib/motion/gsap-catalog-motion")'));
   });
 

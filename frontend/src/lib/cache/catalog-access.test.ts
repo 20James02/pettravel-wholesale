@@ -1,7 +1,12 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 
-import { catalogCacheKey, resolveCatalogAccessScope } from "./catalog-access.ts";
+import {
+  catalogCacheKey,
+  catalogResponseCacheControl,
+  resolveCatalogAccessScope,
+  sanitizeLegacyCatalogImages
+} from "./catalog-access.ts";
 import { entityStore } from "./entity-store.ts";
 
 describe("catalog access cache contract", () => {
@@ -31,5 +36,40 @@ describe("catalog access cache contract", () => {
     assert.equal(resolveCatalogAccessScope(null), "guest");
     assert.equal(resolveCatalogAccessScope({ isAdmin: false }), "customer");
     assert.equal(resolveCatalogAccessScope({ isAdmin: true }), "admin");
+    assert.match(catalogResponseCacheControl("guest"), /^public,/);
+    assert.equal(catalogResponseCacheControl("customer"), "private, no-store");
+    assert.equal(catalogResponseCacheControl("admin"), "private, no-store");
+  });
+
+  it("removes legacy base64 images before catalog data reaches the browser", () => {
+    const legacyImage = "data:image/png;base64,iVBORw0KGgo=";
+    const [product] = sanitizeLegacyCatalogImages([
+      {
+        id: "product-legacy",
+        code: "LEGACY-1",
+        name: "Legacy product",
+        brand: "Pet Travel",
+        category: "Carrier",
+        description: "",
+        imageUrl: legacyImage,
+        images: [legacyImage, "https://cdn.example.com/gallery.webp"],
+        tags: [],
+        variants: [
+          {
+            id: "variant-legacy",
+            sku: "LEGACY-1-A",
+            label: "A",
+            stock: 2,
+            minOrderQty: 1,
+            imageUrl: legacyImage
+          }
+        ]
+      }
+    ]);
+
+    assert.equal(product.imageUrl, "/product-food.svg");
+    assert.deepEqual(product.images, ["https://cdn.example.com/gallery.webp"]);
+    assert.equal(product.variants[0].imageUrl, "/product-food.svg");
+    assert.ok(!JSON.stringify(product).includes("data:image"));
   });
 });

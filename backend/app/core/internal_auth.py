@@ -14,11 +14,12 @@ PUBLIC_API_PATHS = {
 
 
 def is_public_api_path(path: str, method: str = "GET") -> bool:
-    if path in {"/api/v1/products", "/api/v1/categories"} and method.upper() not in {"GET", "HEAD"}:
+    normalized_path = path.rstrip("/") or "/"
+    if normalized_path in {"/api/v1/products", "/api/v1/categories"} and method.upper() not in {"GET", "HEAD"}:
         return False
-    if path == "/api/v1/orders/webhook/vietqr" and method.upper() != "POST":
+    if normalized_path == "/api/v1/orders/webhook/vietqr" and method.upper() != "POST":
         return False
-    return path in PUBLIC_API_PATHS
+    return normalized_path in PUBLIC_API_PATHS
 
 
 def get_internal_secret() -> str:

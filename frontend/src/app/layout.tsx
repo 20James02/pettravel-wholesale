@@ -1,8 +1,20 @@
 import type { Metadata, Viewport } from "next";
+import { Nunito_Sans, Varela_Round } from "next/font/google";
 import { getSiteUrl } from "@/lib/site";
 import "./globals.css";
 
 const siteUrl = getSiteUrl();
+const nunitoSans = Nunito_Sans({
+  subsets: ["latin", "vietnamese"],
+  variable: "--font-nunito-sans",
+  display: "swap"
+});
+const varelaRound = Varela_Round({
+  weight: "400",
+  subsets: ["latin", "vietnamese"],
+  variable: "--font-varela-round",
+  display: "swap"
+});
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -103,7 +115,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="vi" className="scroll-smooth">
+    <html
+      lang="vi"
+      className={`scroll-smooth ${nunitoSans.variable} ${varelaRound.variable}`}
+    >
       <head>
         <script
           type="application/ld+json"

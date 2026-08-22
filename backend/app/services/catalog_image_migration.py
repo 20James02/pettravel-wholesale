@@ -11,8 +11,6 @@ from urllib.parse import urlsplit
 from botocore.exceptions import ClientError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024

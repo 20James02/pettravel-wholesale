@@ -1776,7 +1776,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Profile setup form */}
               <div className="panel flex flex-col gap-4 bg-white border border-orange-100 rounded-3xl p-6">
-                <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2 font-['Varela_Round']">
+                <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2 font-heading">
                   Thông tin cá nhân & Bảo mật
                 </h3>
                 <p className="muted text-xs font-semibold">Cập nhật họ tên đối tác, ảnh đại diện và thay đổi mật khẩu đăng nhập cổng sỉ.</p>
@@ -1847,7 +1847,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
 
               {/* Order list history */}
               <div className="panel lg:col-span-2 flex flex-col gap-4 bg-white border border-orange-100 rounded-3xl p-6">
-                <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2 font-['Varela_Round']">
+                <h3 className="text-lg font-bold text-[#331B08] flex items-center gap-2 font-heading">
                   Lịch sử Đơn sỉ & Vận chuyển
                 </h3>
                 <p className="muted text-xs font-semibold">Theo dõi tiến độ duyệt giá, tình trạng cọc VietQR, hóa đơn VAT đỏ và mã vận đơn thực tế của các đơn sỉ.</p>
@@ -2096,7 +2096,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
                 <div className="md:w-1/2 flex flex-col justify-between text-xs gap-4">
                   <div className="flex flex-col gap-3">
                     <div>
-                      <h2 className="text-base sm:text-lg font-bold text-[#331B08] font-['Varela_Round'] leading-snug m-0">
+                      <h2 className="text-base sm:text-lg font-bold text-[#331B08] font-heading leading-snug m-0">
                         {selectedProduct.name}
                       </h2>
                     </div>
@@ -2250,7 +2250,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
 
               {/* Lower Section: Product Description & Specifications Placed Underneath */}
               <div className="border-t-2 border-dashed border-orange-100 pt-4 mt-1 flex flex-col gap-3">
-                <h3 className="text-xs font-bold text-orange-950 uppercase tracking-wider flex items-center gap-1.5 font-['Varela_Round']">
+                <h3 className="text-xs font-bold text-orange-950 uppercase tracking-wider flex items-center gap-1.5 font-heading">
                   <Sparkles size={14} className="text-orange-500" /> Mô tả chi tiết & Thông số sản phẩm
                 </h3>
                 <div className="bg-[#FFFDF9] p-4 rounded-2xl border border-orange-100/80 text-xs text-gray-700 leading-relaxed font-medium whitespace-pre-line shadow-inner">

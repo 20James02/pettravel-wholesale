@@ -55,7 +55,7 @@ export function ProductCard({ product, isLoggedIn, onClick }: ProductCardProps) 
       <div className="product-body p-3 flex flex-col justify-between flex-1 gap-2 bg-white">
         <div className="flex flex-col gap-0.5">
           <p className="muted m-0 text-[10px] font-mono font-bold uppercase tracking-wider">{product.code}</p>
-          <h3 className="m-0 text-xs sm:text-sm font-bold text-[#331B08] line-clamp-2 leading-snug font-['Varela_Round'] group-hover:text-orange-600 transition-colors">
+          <h3 className="m-0 text-xs sm:text-sm font-bold text-[#331B08] line-clamp-2 leading-snug font-heading group-hover:text-orange-600 transition-colors">
             {product.name}
           </h3>
         </div>

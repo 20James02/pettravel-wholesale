@@ -13,7 +13,7 @@ export function StatusPill({ tone = "success", children }: StatusPillProps) {
   };
 
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold font-['Varela_Round'] ${styles[tone]}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold font-heading ${styles[tone]}`}>
       {children}
     </span>
   );

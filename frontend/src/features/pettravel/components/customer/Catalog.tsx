@@ -159,7 +159,7 @@ export function Catalog({
             <PackageSearch size={32} />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-[#331B08] m-0 font-['Varela_Round']">
+            <h3 className="text-lg font-bold text-[#331B08] m-0 font-heading">
               Không tìm thấy sản phẩm phù hợp
             </h3>
             <p className="muted text-xs mt-1 m-0 max-w-sm">

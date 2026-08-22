@@ -54,7 +54,7 @@ export function Modal({
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b-2 border-dashed border-brand-line pb-4 mb-4">
-          <h3 className="text-xl font-['Varela_Round'] text-brand-ink m-0">{title}</h3>
+          <h3 className="text-xl font-heading text-brand-ink m-0">{title}</h3>
           <SpringButton variant="icon" onClick={onClose} className="min-h-[32px] p-1">
             <X className="w-5 h-5" />
           </SpringButton>

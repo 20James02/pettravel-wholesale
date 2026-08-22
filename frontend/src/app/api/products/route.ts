@@ -3,6 +3,10 @@ import { getSessionUser, requirePermission, requireSameOrigin } from "@/server/a
 import { deleteProduct, getProducts, saveProduct } from "@/server/db";
 import { getValidationErrorMessage, idSchema, productSchema } from "@/lib/validation";
 import type { Product } from "@/lib/domain";
+import {
+  catalogResponseCacheControl,
+  sanitizeLegacyCatalogImages
+} from "@/lib/cache/catalog-access";
 
 export const runtime = "nodejs";
 
@@ -36,8 +40,18 @@ export async function GET() {
     role = "customer";
   }
 
-  const data = sanitizeProductsForResponse(await getProducts(role), role);
-  return NextResponse.json({ products: data, role });
+  const data = sanitizeLegacyCatalogImages(
+    sanitizeProductsForResponse(await getProducts(role), role)
+  );
+  return NextResponse.json(
+    { products: data, role },
+    {
+      headers: {
+        "Cache-Control": catalogResponseCacheControl(role),
+        Vary: "Cookie"
+      }
+    }
+  );
 }
 
 export async function POST(req: Request) {

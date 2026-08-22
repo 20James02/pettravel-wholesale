@@ -214,7 +214,7 @@ export function OrderTimeline({
           <div className="panel p-4 sm:p-6 bg-white border-2 border-orange-100 rounded-3xl flex flex-col gap-4 shadow-sm">
             <div className="section-title flex flex-wrap justify-between items-center pb-3 border-b border-dashed border-orange-100 gap-2">
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-base sm:text-lg font-bold text-[#331B08] font-['Varela_Round'] flex items-center gap-2">
+                <h3 className="text-base sm:text-lg font-bold text-[#331B08] font-heading flex items-center gap-2">
                   <PackageCheck size={20} className="text-orange-500" /> Tiến độ đơn hàng sỉ #{workingOrder.number || "001"}
                 </h3>
                 <button
@@ -342,7 +342,7 @@ export function OrderTimeline({
 
           {/* Danh sách mặt hàng sỉ với ảnh phân loại tương ứng */}
           <div className="panel p-4 sm:p-6 bg-white border-2 border-orange-100 rounded-3xl flex flex-col gap-3 shadow-sm">
-            <h3 className="text-sm sm:text-base font-bold text-[#331B08] border-b border-dashed border-orange-100 pb-2.5 font-['Varela_Round'] flex items-center gap-2">
+            <h3 className="text-sm sm:text-base font-bold text-[#331B08] border-b border-dashed border-orange-100 pb-2.5 font-heading flex items-center gap-2">
               <Package size={18} className="text-orange-500" /> Danh mục sản phẩm trong đơn sỉ ({workingOrder.items?.length || 0} sản phẩm)
             </h3>
 
@@ -396,7 +396,7 @@ export function OrderTimeline({
           {/* Thẻ báo giá */}
           <div className="panel p-4 sm:p-6 bg-white border-2 border-orange-100 rounded-3xl flex flex-col gap-4 shadow-sm">
             <div className="flex justify-between items-center border-b border-dashed border-orange-100 pb-3">
-              <h3 className="text-base sm:text-lg font-bold text-[#331B08] font-['Varela_Round'] flex items-center gap-2">
+              <h3 className="text-base sm:text-lg font-bold text-[#331B08] font-heading flex items-center gap-2">
                 <CreditCard size={18} className="text-orange-500" /> Chi tiết Báo giá ({quote.version > 0 ? `Lần ${quote.version}` : "Dự kiến"})
               </h3>
               <StatusPill tone={quote.status === "accepted" ? "success" : quote.status === "published" ? "warning" : "info"}>
@@ -619,7 +619,7 @@ export function OrderTimeline({
           {/* Thông tin giao nhận & Xuất hóa đơn (kèm nút sửa nếu chưa hoàn tất) */}
           <div className="panel p-4 sm:p-5 bg-white border-2 border-orange-100 rounded-3xl flex flex-col gap-3 shadow-sm">
             <div className="section-title pb-2 border-b border-dashed border-orange-100 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-[#331B08] flex items-center gap-1.5 font-['Varela_Round']">
+              <h3 className="text-sm font-bold text-[#331B08] flex items-center gap-1.5 font-heading">
                 <MapPin size={16} className="text-orange-500" /> Thông tin nhận hàng & Xuất HĐ
               </h3>
               {canEditShipping && (

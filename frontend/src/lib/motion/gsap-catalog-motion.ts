@@ -1,6 +1,7 @@
 type MotionCleanup = () => void;
 
 const noCleanup: MotionCleanup = () => undefined;
+const MAX_STAGGERED_PRODUCT_CARDS = 12;
 
 export async function mountCatalogIntroMotion(root: HTMLElement): Promise<MotionCleanup> {
   if (!root.isConnected || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -54,8 +55,14 @@ export async function mountCatalogProductMotion(root: HTMLElement): Promise<Moti
   if (!root.isConnected) return noCleanup;
 
   const context = gsap.context(() => {
+    const productCards = Array.from(
+      root.querySelectorAll<HTMLElement>('[data-gsap="product-card"]')
+    );
+    const animatedCards = productCards.slice(0, MAX_STAGGERED_PRODUCT_CARDS);
+    const remainingCards = productCards.slice(MAX_STAGGERED_PRODUCT_CARDS);
+    gsap.set(remainingCards, { autoAlpha: 1, y: 0, scale: 1 });
     gsap.fromTo(
-      '[data-gsap="product-card"]',
+      animatedCards,
       { autoAlpha: 0, y: 18, scale: 0.985 },
       {
         autoAlpha: 1,

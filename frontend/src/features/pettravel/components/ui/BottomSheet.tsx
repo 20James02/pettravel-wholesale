@@ -84,7 +84,7 @@ export function BottomSheet({
                 <h3
                   className={`text-base md:text-lg font-bold ${
                     isDark ? "text-white" : "text-[#331B08]"
-                  } m-0 font-['Varela_Round'] leading-tight`}
+                  } m-0 font-heading leading-tight`}
                 >
                   {title}
                 </h3>

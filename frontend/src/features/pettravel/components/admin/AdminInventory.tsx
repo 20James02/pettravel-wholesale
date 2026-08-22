@@ -885,7 +885,7 @@ export function AdminInventory({
         <div className="flex flex-col gap-6 w-full">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h2 className="text-xl font-bold text-[#331B08] font-['Varela_Round']">🏷️ Quản lý Danh mục Sản phẩm sỉ</h2>
+              <h2 className="text-xl font-bold text-[#331B08] font-heading">🏷️ Quản lý Danh mục Sản phẩm sỉ</h2>
               <p className="muted text-xs font-semibold">
                 Quản lý danh sách các danh mục hàng sỉ (Thức ăn, Túi vận chuyển, Đồ chơi...).
               </p>
@@ -967,7 +967,7 @@ export function AdminInventory({
         <div className="flex flex-col gap-6 w-full">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-xl font-bold text-[#331B08] font-['Varela_Round']">🏢 Quản lý Đối tác Nhà cung cấp sỉ</h2>
+              <h2 className="text-xl font-bold text-[#331B08] font-heading">🏢 Quản lý Đối tác Nhà cung cấp sỉ</h2>
               <p className="muted text-xs font-semibold">
                 Quản lý các nhà cung cấp sỉ, thời gian chuẩn bị hàng (lead time) và cài đặt hiển thị.
               </p>
@@ -1063,7 +1063,7 @@ export function AdminInventory({
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <PackageCheck size={22} className="text-orange-600" />
-                <h2 className="text-xl font-bold text-[#331B08] font-['Varela_Round']">Kho & Mua hàng</h2>
+                <h2 className="text-xl font-bold text-[#331B08] font-heading">Kho & Mua hàng</h2>
               </div>
               <p className="muted text-xs font-semibold">
                 Quản lý nghiệp vụ nhập hàng, tồn kho, hàng lỗi, hóa đơn bán hàng và chi phí phát sinh trước khi ghi sổ kế toán.
@@ -1213,7 +1213,7 @@ export function AdminInventory({
             style={{ borderRadius: "1.75rem" }}
           >
             <div className="flex justify-between items-center border-b pb-2 border-orange-100">
-              <h3 className="text-lg font-bold text-orange-950 m-0 font-['Varela_Round']">
+              <h3 className="text-lg font-bold text-orange-950 m-0 font-heading">
                 {editingProduct ? `Cập nhật sản phẩm: ${editingProduct.name}` : "Thêm sản phẩm sỉ mới"}
               </h3>
               <button
@@ -1668,7 +1668,7 @@ export function AdminInventory({
             style={{ borderRadius: "1.75rem" }}
           >
             <div className="flex justify-between items-center border-b pb-2 border-orange-100">
-              <h3 className="text-base font-bold text-orange-950 m-0 font-['Varela_Round']">Thêm danh mục sỉ mới</h3>
+              <h3 className="text-base font-bold text-orange-950 m-0 font-heading">Thêm danh mục sỉ mới</h3>
               <button
                 type="button"
                 className="w-6 h-6 rounded-full bg-orange-50 text-orange-700 flex items-center justify-center text-xs font-bold hover:bg-orange-100 transition cursor-pointer"
@@ -1711,7 +1711,7 @@ export function AdminInventory({
             style={{ borderRadius: "1.75rem" }}
           >
             <div className="flex justify-between items-center border-b pb-2 border-orange-100">
-              <h3 className="text-base font-bold text-orange-950 m-0 font-['Varela_Round']">
+              <h3 className="text-base font-bold text-orange-950 m-0 font-heading">
                 {editingSupplier ? `Cập nhật nhà cung cấp: ${editingSupplier.name}` : "Thêm nhà cung cấp sỉ mới"}
               </h3>
               <button
@@ -1802,7 +1802,7 @@ export function AdminInventory({
           >
             <div className="flex justify-between items-center border-b pb-2 border-orange-100">
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-orange-950 m-0 font-['Varela_Round']">Lập chứng từ vận hành mới</h3>
+                <h3 className="text-base font-bold text-orange-950 m-0 font-heading">Lập chứng từ vận hành mới</h3>
                 <StatusPill tone={operationPostNow ? "warning" : "info"}>
                   {operationPostNow ? "Post ngay" : "Lưu nháp"}
                 </StatusPill>

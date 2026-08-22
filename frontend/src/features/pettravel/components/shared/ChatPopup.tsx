@@ -74,7 +74,7 @@ export function ChatPopup({
           {/* Header */}
           <div className="flex items-center justify-between border-b border-dashed border-orange-100 pb-3 mb-3">
             <div>
-              <h3 className="m-0 text-sm font-bold text-[#331B08] flex items-center gap-1.5 font-['Varela_Round']">
+              <h3 className="m-0 text-sm font-bold text-[#331B08] flex items-center gap-1.5 font-heading">
                 <MessageSquare size={16} className="text-orange-500" /> Trao đổi Đơn sỉ #{workingOrder.number || "001"}
               </h3>
               <span className="text-[11px] text-orange-900/60 font-mono font-bold">

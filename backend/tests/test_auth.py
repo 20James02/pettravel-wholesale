@@ -35,6 +35,27 @@ def test_backend_login_endpoints_require_internal_bff_authentication(monkeypatch
     assert response.status_code == 401
 
 
+@pytest.mark.parametrize(
+    ("path", "method"),
+    [
+        ("/api/v1/products", "GET"),
+        ("/api/v1/products/", "GET"),
+        ("/api/v1/categories", "HEAD"),
+        ("/api/v1/categories/", "HEAD"),
+    ],
+)
+def test_public_catalog_paths_accept_an_optional_trailing_slash(path, method):
+    assert is_public_api_path(path, method)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/v1/products", "/api/v1/products/", "/api/v1/categories", "/api/v1/categories/"],
+)
+def test_public_catalog_mutations_still_require_internal_authentication(path):
+    assert not is_public_api_path(path, "POST")
+
+
 def test_access_token_round_trip_uses_hs256():
     token = create_access_token("u_token_probe", expires_delta=timedelta(minutes=5))
     header_part, payload_part, signature_part = token.split(".")

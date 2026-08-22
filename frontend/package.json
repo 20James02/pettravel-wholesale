@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "type-check": "tsc --noEmit",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/server/accounting/engine.test.ts src/server/accounting/order-financials.test.ts src/server/authorization.test.ts src/server/order-authorization.test.ts src/server/order-bff-acceptance.test.ts src/server/rate-limit.test.ts src/lib/cache/catalog-access.test.ts src/lib/cart/cart-state.test.ts src/lib/upload/image-upload-manager.test.ts src/lib/validation.test.ts src/lib/motion/gsap-catalog-motion.test.ts src/features/pettravel/navigation-contract.test.ts src/features/pettravel/cart-interaction-contract.test.ts src/features/pettravel/order-confirmation-contract.test.ts",
+    "test:e2e:production": "node scripts/production-smoke.mjs",
     "preflight:production": "node scripts/check-production-env.mjs"
   },
   "dependencies": {
@@ -31,6 +32,7 @@
     "@types/react-dom": "^19.0.0",
     "eslint": "^9.11.1",
     "eslint-config-next": "^16.2.10",
+    "playwright-core": "^1.55.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2"
   }

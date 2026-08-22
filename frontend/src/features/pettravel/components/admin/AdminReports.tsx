@@ -280,7 +280,7 @@ export function AdminReports({
       {/* ========================================================================= */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 className={`text-2xl sm:text-3xl font-black tracking-tight m-0 font-['Varela_Round'] ${
+          <h1 className={`text-2xl sm:text-3xl font-black tracking-tight m-0 font-heading ${
             theme === "dark" ? "text-white" : "text-[#121528]"
           }`}>
             Tổng quan Hiệu suất Kinh doanh & Tài chính

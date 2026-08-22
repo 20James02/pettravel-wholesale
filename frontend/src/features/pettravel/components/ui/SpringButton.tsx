@@ -6,7 +6,7 @@ interface SpringButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export function SpringButton({ variant = "primary", children, className = "", ...props }: SpringButtonProps) {
-  const baseStyle = "min-height-[46px] rounded-btn border-2 border-transparent inline-flex items-center justify-center gap-2 px-4 font-bold font-['Varela_Round'] transition-all duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50";
+  const baseStyle = "min-height-[46px] rounded-btn border-2 border-transparent inline-flex items-center justify-center gap-2 px-4 font-bold font-heading transition-all duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50";
   
   const variants = {
     primary: "bg-primary text-white border-primary-strong shadow-clay-btn hover:bg-orange-600 hover:-translate-y-0.5",
