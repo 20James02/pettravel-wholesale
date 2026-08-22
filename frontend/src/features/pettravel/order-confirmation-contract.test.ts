@@ -60,4 +60,39 @@ describe("two-way quote confirmation pending states", () => {
     assert.ok(chatPopupSource.includes("Đang gửi..."));
     assert.ok(appSource.includes("message: string): Promise<boolean>"));
   });
+
+  it("serializes admin confirmation actions and exposes their pending state", () => {
+    assert.ok(adminOrdersSource.includes("const pendingAdminActionRef = useRef"));
+    assert.ok(adminOrdersSource.includes("if (pendingAdminActionRef.current) return false"));
+    assert.ok(adminOrdersSource.includes('runAdminAction("confirm_payment", confirmDeposit)'));
+    assert.ok(adminOrdersSource.includes('runAdminAction("reject_payment", rejectPaymentProof)'));
+    assert.ok(adminOrdersSource.includes('runAdminAction("reissue_payment", reissuePaymentRequest)'));
+    assert.ok(adminOrdersSource.includes('runAdminAction("advance_fulfillment"'));
+    assert.ok(adminOrdersSource.includes('runAdminAction("post_accounting"'));
+    assert.ok(adminOrdersSource.includes("Đang đối soát..."));
+    assert.ok(adminOrdersSource.includes("Đang cập nhật..."));
+    assert.ok(adminOrdersSource.includes("Đang ghi sổ..."));
+    assert.ok(appSource.includes("async function confirmDeposit(): Promise<boolean>"));
+    assert.ok(appSource.includes("async function rejectPaymentProof(): Promise<boolean>"));
+    assert.ok(appSource.includes("async function reissuePaymentRequest(): Promise<boolean>"));
+  });
+
+  it("waits for server persistence before showing a new staff assignment", () => {
+    const start = adminOrdersSource.indexOf("const handleStaffSelect");
+    const end = adminOrdersSource.indexOf("// Latest Quote calculation", start);
+    const handlerSource = adminOrdersSource.slice(start, end);
+
+    assert.ok(handlerSource.includes('runAdminAction("assign_staff", () => syncOrder(updatedOrder))'));
+    assert.ok(handlerSource.indexOf("setWorkingOrder(updatedOrder)") > handlerSource.indexOf("} else {"));
+    assert.ok(adminOrdersSource.includes("Đang lưu phân công..."));
+  });
+
+  it("keeps one realtime stream across order selection and refreshes the selected detail", () => {
+    assert.ok(appSource.includes("const selectedOrderIdRef = useRef<string | null>(null)"));
+    assert.ok(appSource.includes("const isOrderModifiedRef = useRef<boolean>(false)"));
+    assert.ok(appSource.includes("const currentSelectedOrderId = selectedOrderIdRef.current"));
+    assert.ok(appSource.includes("const selectedOrder = nextOrders.find"));
+    assert.ok(appSource.includes("if (selectedOrder && !isOrderModifiedRef.current)"));
+    assert.ok(appSource.includes("}, [currentUser, fetchOrders])"));
+  });
 });

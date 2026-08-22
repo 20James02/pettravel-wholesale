@@ -72,10 +72,10 @@ interface AdminOrdersProps {
   handleAdminQtyChange: (itemId: string, qty: number) => void;
   handleAdminItemsChange: (items: OrderItem[]) => void;
   handlePublishQuote: (customNote?: string) => Promise<boolean>;
-  confirmDeposit: () => void;
-  rejectPaymentProof: () => void;
-  reissuePaymentRequest: () => void;
-  advanceFulfillment: (nextStatus: FulfillmentStatus, shipment?: Pick<Shipment, "carrier" | "trackingCode" | "eta">) => void;
+  confirmDeposit: () => Promise<boolean>;
+  rejectPaymentProof: () => Promise<boolean>;
+  reissuePaymentRequest: () => Promise<boolean>;
+  advanceFulfillment: (nextStatus: FulfillmentStatus, shipment?: Pick<Shipment, "carrier" | "trackingCode" | "eta">) => Promise<boolean>;
   handlePostOrderAccounting: (action: "post_all" | "post_confirmed_payments") => Promise<boolean>;
   addComment: (audience: "customer_visible" | "internal", message: string) => Promise<boolean>;
 }
@@ -124,6 +124,10 @@ export function AdminOrders({
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isPublishingQuote, setIsPublishingQuote] = useState<boolean>(false);
+  const [pendingAdminAction, setPendingAdminAction] = useState<
+    "assign_staff" | "confirm_payment" | "reject_payment" | "reissue_payment" | "advance_fulfillment" | "post_accounting" | null
+  >(null);
+  const pendingAdminActionRef = useRef<typeof pendingAdminAction>(null);
   const [shipmentCarrier, setShipmentCarrier] = useState(() => workingOrder.shipment?.carrier ?? "");
   const [shipmentTrackingCode, setShipmentTrackingCode] = useState(() => workingOrder.shipment?.trackingCode ?? "");
   const [shipmentEta, setShipmentEta] = useState(() => workingOrder.shipment?.eta ?? "");
@@ -200,19 +204,20 @@ export function AdminOrders({
   };
 
   const handleStaffSelect = async (staffId: string) => {
+    if (pendingAdminActionRef.current) return;
     const staff = staffList.find((s) => s.id === staffId);
     const updatedOrder: CustomerOrder = {
       ...activeOrder,
       assignedStaffId: staffId || undefined,
       assignedStaffName: staff ? staff.name : undefined
     };
-    setWorkingOrder(updatedOrder);
     if (syncOrder) {
-      const ok = await syncOrder(updatedOrder);
+      const ok = await runAdminAction("assign_staff", () => syncOrder(updatedOrder));
       if (ok) {
         showToast(staff ? `Đã phân bổ đơn cho: ${staff.name} (${getStaffRoleTitle(staff.role)})` : "Đã hủy phân bổ nhân viên");
       }
     } else {
+      setWorkingOrder(updatedOrder);
       showToast(staff ? `Đã chọn: ${staff.name}` : "Đã hủy chọn");
     }
   };
@@ -324,6 +329,23 @@ export function AdminOrders({
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 2500);
   };
+
+  const runAdminAction = async (
+    action: NonNullable<typeof pendingAdminAction>,
+    operation: () => Promise<boolean>
+  ): Promise<boolean> => {
+    if (pendingAdminActionRef.current) return false;
+    pendingAdminActionRef.current = action;
+    setPendingAdminAction(action);
+    try {
+      return await operation();
+    } finally {
+      pendingAdminActionRef.current = null;
+      setPendingAdminAction(null);
+    }
+  };
+
+  const isAdminActionPending = pendingAdminAction !== null;
 
   // Add Item to Order Handler
   const handleAddItemToOrder = () => {
@@ -471,14 +493,16 @@ export function AdminOrders({
               const isSelected = ord.id === activeOrder.id;
 
               return (
-                <div
+                <button
+                  type="button"
                   key={ord.id}
-                  className={`p-3 rounded-2xl transition-all duration-200 cursor-pointer flex flex-col gap-2 ${
+                  className={`w-full p-3 rounded-2xl transition-all duration-200 cursor-pointer flex flex-col gap-2 text-left disabled:cursor-wait disabled:opacity-70 ${
                     isSelected
                       ? "bg-[#4f46e5] text-white shadow-[0_8px_24px_rgba(79,70,229,0.45)] scale-[1.01]"
                       : "bg-[#181d33] hover:bg-[#1f2542] text-gray-200 border border-[#272e4e]"
                   }`}
                   onClick={() => selectOrder(ord.id)}
+                  disabled={isAdminActionPending}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
@@ -521,7 +545,7 @@ export function AdminOrders({
                       {formatVnd(q.finalTotal)}
                     </span>
                   </div>
-                </div>
+                </button>
               );
             })
           )}
@@ -653,8 +677,9 @@ export function AdminOrders({
                   <select
                     className="w-full bg-[#1e2440] border border-[#303960] rounded-xl py-1.5 px-2 text-white text-xs font-semibold focus:ring-1 focus:ring-indigo-500"
                     value={activeOrder.assignedStaffId || ""}
-                    onChange={(e) => handleStaffSelect(e.target.value)}
-                    disabled={quoteEditingDisabled}
+                    onChange={(e) => void handleStaffSelect(e.target.value)}
+                    disabled={quoteEditingDisabled || isAdminActionPending}
+                    aria-busy={pendingAdminAction === "assign_staff"}
                     title={quoteEditingDisabled ? "Bạn không có quyền nhận hoặc phân công phần báo giá này." : undefined}
                   >
                     <option value="">-- Chưa phân bổ --</option>
@@ -664,6 +689,11 @@ export function AdminOrders({
                       </option>
                     ))}
                   </select>
+                  {pendingAdminAction === "assign_staff" && (
+                    <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300">
+                      <LoaderCircle size={11} className="animate-spin" /> Đang lưu phân công...
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -967,12 +997,17 @@ export function AdminOrders({
                   </a>
                   <button
                     type="button"
-                    onClick={rejectPaymentProof}
-                    disabled={!canConfirmPayment}
+                    onClick={() => void runAdminAction("reject_payment", rejectPaymentProof)}
+                    disabled={!canConfirmPayment || isAdminActionPending}
+                    aria-busy={pendingAdminAction === "reject_payment"}
                     title={!canConfirmPayment ? "Thiếu quyền đối soát thanh toán." : undefined}
                     className="inline-flex items-center gap-1.5 rounded-xl border border-rose-400/40 bg-rose-500/15 px-3 py-2 text-[11px] font-bold text-rose-100 hover:bg-rose-500/25 disabled:opacity-50"
                   >
-                    <X size={13} /> Từ chối chứng từ
+                    {pendingAdminAction === "reject_payment" ? (
+                      <><LoaderCircle size={13} className="animate-spin" /> Đang từ chối...</>
+                    ) : (
+                      <><X size={13} /> Từ chối chứng từ</>
+                    )}
                   </button>
                 </div>
               )}
@@ -987,6 +1022,7 @@ export function AdminOrders({
                   value={shipmentCarrier}
                   onChange={(event) => setShipmentCarrier(event.target.value)}
                   maxLength={160}
+                  disabled={isAdminActionPending}
                   placeholder="Ví dụ: GHN, Viettel Post"
                   className="mt-1 w-full rounded-xl border border-emerald-400/30 bg-[#171d34] px-3 py-2 text-xs font-normal normal-case text-white"
                 />
@@ -997,6 +1033,7 @@ export function AdminOrders({
                   value={shipmentTrackingCode}
                   onChange={(event) => setShipmentTrackingCode(event.target.value)}
                   maxLength={160}
+                  disabled={isAdminActionPending}
                   placeholder="Nhập mã từ hãng vận chuyển"
                   className="mt-1 w-full rounded-xl border border-emerald-400/30 bg-[#171d34] px-3 py-2 text-xs font-normal normal-case text-white"
                 />
@@ -1007,6 +1044,7 @@ export function AdminOrders({
                   value={shipmentEta}
                   onChange={(event) => setShipmentEta(event.target.value)}
                   maxLength={80}
+                  disabled={isAdminActionPending}
                   placeholder="Ví dụ: 2-3 ngày làm việc"
                   className="mt-1 w-full rounded-xl border border-emerald-400/30 bg-[#171d34] px-3 py-2 text-xs font-normal normal-case text-white"
                 />
@@ -1109,24 +1147,30 @@ export function AdminOrders({
                 <button
                   type="button"
                   className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
-                  onClick={reissuePaymentRequest}
-                  disabled={!canConfirmPayment}
+                  onClick={() => void runAdminAction("reissue_payment", reissuePaymentRequest)}
+                  disabled={!canConfirmPayment || isAdminActionPending}
+                  aria-busy={pendingAdminAction === "reissue_payment"}
                 >
-                  Phát hành lại yêu cầu thanh toán
+                  {pendingAdminAction === "reissue_payment" ? (
+                    <><LoaderCircle size={14} className="animate-spin" /> Đang phát hành...</>
+                  ) : "Phát hành lại yêu cầu thanh toán"}
                 </button>
               ) : !isPaymentConfirmed ? (
                 <button
                   type="button"
                   className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
-                  onClick={confirmDeposit}
-                  disabled={!canConfirmPayment || !pendingPaymentProof}
+                  onClick={() => void runAdminAction("confirm_payment", confirmDeposit)}
+                  disabled={!canConfirmPayment || !pendingPaymentProof || isAdminActionPending}
+                  aria-busy={pendingAdminAction === "confirm_payment"}
                   title={!canConfirmPayment
                     ? "Thiếu quyền đối soát thanh toán."
                     : !pendingPaymentProof
                       ? "Cần minh chứng thanh toán hợp lệ trước khi đối soát"
                       : undefined}
                 >
-                  {pendingPaymentProof ? "Đối soát & xác nhận tiền" : "Chờ minh chứng thanh toán"}
+                  {pendingAdminAction === "confirm_payment" ? (
+                    <><LoaderCircle size={14} className="animate-spin" /> Đang đối soát...</>
+                  ) : pendingPaymentProof ? "Đối soát & xác nhận tiền" : "Chờ minh chứng thanh toán"}
                 </button>
               ) : nextFulfillmentStatus ? (
                 <button
@@ -1134,30 +1178,37 @@ export function AdminOrders({
                   className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
                   onClick={() => {
                     if (nextFulfillmentStatus === "shipped") {
-                      advanceFulfillment(nextFulfillmentStatus, {
-                        carrier: shipmentCarrier.trim(),
-                        trackingCode: shipmentTrackingCode.trim(),
-                        eta: shipmentEta.trim()
-                      });
+                      void runAdminAction("advance_fulfillment", () => advanceFulfillment(nextFulfillmentStatus, {
+                          carrier: shipmentCarrier.trim(),
+                          trackingCode: shipmentTrackingCode.trim(),
+                          eta: shipmentEta.trim()
+                        }));
                       return;
                     }
-                    advanceFulfillment(nextFulfillmentStatus);
+                    void runAdminAction("advance_fulfillment", () => advanceFulfillment(nextFulfillmentStatus));
                   }}
                   disabled={
                     !canAdvanceFulfillment ||
+                    isAdminActionPending ||
                     (nextFulfillmentStatus === "shipped" && (!shipmentCarrier.trim() || !shipmentTrackingCode.trim()))
                   }
+                  aria-busy={pendingAdminAction === "advance_fulfillment"}
                 >
-                  {fulfillmentActionLabels[nextFulfillmentStatus] ?? "Chuyển bước xử lý"}
+                  {pendingAdminAction === "advance_fulfillment" ? (
+                    <><LoaderCircle size={14} className="animate-spin" /> Đang cập nhật...</>
+                  ) : fulfillmentActionLabels[nextFulfillmentStatus] ?? "Chuyển bước xử lý"}
                 </button>
               ) : (
                 <button
                   type="button"
                   className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
-                  onClick={() => void handlePostOrderAccounting("post_all")}
-                  disabled={!canPostAccounting}
+                  onClick={() => void runAdminAction("post_accounting", () => handlePostOrderAccounting("post_all"))}
+                  disabled={!canPostAccounting || isAdminActionPending}
+                  aria-busy={pendingAdminAction === "post_accounting"}
                 >
-                  Ghi sổ & hoàn tất đơn
+                  {pendingAdminAction === "post_accounting" ? (
+                    <><LoaderCircle size={14} className="animate-spin" /> Đang ghi sổ...</>
+                  ) : "Ghi sổ & hoàn tất đơn"}
                 </button>
               )}
             </div>

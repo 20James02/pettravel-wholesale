@@ -190,6 +190,16 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   const [workingOrder, setWorkingOrder] = useState<CustomerOrder>(EMPTY_ORDER);
   const [adminOrderItems, setAdminOrderItems] = useState<CustomerOrder["items"]>([]);
   const [isOrderModified, setIsOrderModified] = useState<boolean>(false);
+  const selectedOrderIdRef = useRef<string | null>(null);
+  const isOrderModifiedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    selectedOrderIdRef.current = selectedOrderId;
+  }, [selectedOrderId]);
+
+  useEffect(() => {
+    isOrderModifiedRef.current = isOrderModified;
+  }, [isOrderModified]);
 
   // Search & filter states
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -443,17 +453,24 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       });
       setAllOrders(data);
       if (data.length > 0) {
-        const targetOrder = (selectedOrderId ? data.find((o) => o.id === selectedOrderId) : null) || data[0];
-        if (!selectedOrderId || !data.some((o) => o.id === selectedOrderId)) {
+        const currentSelectedOrderId = selectedOrderIdRef.current;
+        const targetOrder = (currentSelectedOrderId ? data.find((o) => o.id === currentSelectedOrderId) : null) || data[0];
+        if (!currentSelectedOrderId || !data.some((o) => o.id === currentSelectedOrderId)) {
+          selectedOrderIdRef.current = targetOrder.id;
+          isOrderModifiedRef.current = false;
           setSelectedOrderId(targetOrder.id);
           setWorkingOrder(targetOrder);
           setAdminOrderItems(targetOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
+          setIsOrderModified(false);
         } else {
-          setWorkingOrder(targetOrder);
+          setWorkingOrder((current) => current.id === targetOrder.id && !isOrderModifiedRef.current ? targetOrder : current);
+          if (!isOrderModifiedRef.current) {
+            setAdminOrderItems(targetOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
+          }
         }
       }
     } catch { /* silent */ }
-  }, [selectedOrderId]);
+  }, []);
 
   const lastRevisionRef = useRef<string>("");
 
@@ -465,7 +482,13 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
         const payload = JSON.parse(e.data);
         if (payload?.type === "order.delta" && payload?.orderId && payload?.patch) {
           entityStore.patchOrder(payload.orderId, payload.patch);
-          setAllOrders(entityStore.getAllOrders());
+          const nextOrders = entityStore.getAllOrders();
+          setAllOrders(nextOrders);
+          const selectedOrder = nextOrders.find((order) => order.id === selectedOrderIdRef.current);
+          if (selectedOrder && !isOrderModifiedRef.current) {
+            setWorkingOrder(selectedOrder);
+            setAdminOrderItems(selectedOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
+          }
         } else if (payload?.revision && payload.revision !== lastRevisionRef.current) {
           lastRevisionRef.current = payload.revision;
           entityStore.invalidate("orders");
@@ -736,6 +759,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   const selectOrder = (orderId: string) => {
     const order = allOrders.find((o) => o.id === orderId);
     if (order) {
+      selectedOrderIdRef.current = orderId;
+      isOrderModifiedRef.current = false;
       setSelectedOrderId(orderId);
       setWorkingOrder(order);
       setAdminOrderItems(order.items.map((i) => ({ ...i })));
@@ -789,8 +814,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       });
       if (res.ok) {
         const data = (await res.json()) as { order: CustomerOrder };
-        setWorkingOrder(data.order);
-        setAdminOrderItems(data.order.items || []);
+        if (selectedOrderIdRef.current === data.order.id) {
+          setWorkingOrder(data.order);
+          setAdminOrderItems(data.order.items || []);
+        }
         setAllOrders((prev) => prev.map((o) => (o.id === data.order.id ? data.order : o)));
         return true;
       } else {
@@ -901,7 +928,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     setCurrentUser(null);
     setCartItems([]);
     setWorkingOrder(EMPTY_ORDER);
+    selectedOrderIdRef.current = null;
+    isOrderModifiedRef.current = false;
     setSelectedOrderId(null);
+    setIsOrderModified(false);
     setLoadedTabs(new Set());
     setPendingPostLoginTab("catalog");
     setActiveTab("catalog");
@@ -953,6 +983,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       .filter((item) => item.quantity > 0);
     setAdminOrderItems(nextItems);
     setWorkingOrder((prev) => ({ ...prev, items: nextItems }));
+    isOrderModifiedRef.current = true;
     setIsOrderModified(true);
   }
 
@@ -961,6 +992,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     const clonedItems = nextItems.map((item) => ({ ...item }));
     setAdminOrderItems(clonedItems);
     setWorkingOrder((prev) => ({ ...prev, items: clonedItems }));
+    isOrderModifiedRef.current = true;
     setIsOrderModified(true);
   }
 
@@ -1043,6 +1075,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
 
       const success = await syncOrder(updatedOrder);
       if (success) {
+        isOrderModifiedRef.current = false;
         setIsOrderModified(false);
         setIsManagerApproved(false);
         alert("Đã phát hành báo giá chính thức cho đại lý!");
@@ -1055,8 +1088,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   }
 
   // Accept payment/deposit proof and confirm money in bank
-  async function confirmDeposit() {
-    if (!workingOrder?.id) return;
+  async function confirmDeposit(): Promise<boolean> {
+    if (!workingOrder?.id) return false;
     const pendingProof = workingOrder.paymentProofs.find(
       (proof) =>
         proof.status === "pending_admin_confirmation" &&
@@ -1067,10 +1100,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     const paymentRequest = workingOrder.paymentRequests.find((request) => request.id === pendingProof?.paymentRequestId);
     if (!pendingProof || !paymentRequest) {
       alert("Không có minh chứng hợp lệ gắn với yêu cầu thanh toán đang chờ đối soát.");
-      return;
+      return false;
     }
     if (!window.confirm(`Xác nhận đã kiểm tra tài khoản ngân hàng và nhận đủ ${formatVnd(paymentRequest.amount)}?`)) {
-      return;
+      return false;
     }
 
     const isDeposit = paymentRequest.purpose === "deposit";
@@ -1107,11 +1140,13 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
           ? "Đã xác nhận giao dịch và ghi nhận khoản thu vào sổ kế toán."
           : "Đã xác nhận giao dịch, nhưng chưa ghi được sổ kế toán. Vui lòng xử lý lại tại màn hình Kế toán."
       );
+      return true;
     }
+    return false;
   }
 
-  async function rejectPaymentProof() {
-    if (!workingOrder?.id) return;
+  async function rejectPaymentProof(): Promise<boolean> {
+    if (!workingOrder?.id) return false;
     const pendingProof = workingOrder.paymentProofs.find(
       (proof) =>
         proof.status === "pending_admin_confirmation" &&
@@ -1122,10 +1157,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     const paymentRequest = workingOrder.paymentRequests.find((request) => request.id === pendingProof?.paymentRequestId);
     if (!pendingProof || !paymentRequest) {
       alert("Không có minh chứng hợp lệ đang chờ duyệt.");
-      return;
+      return false;
     }
     if (!window.confirm("Từ chối minh chứng này? Khách hàng sẽ được yêu cầu tải lại chứng từ hợp lệ.")) {
-      return;
+      return false;
     }
 
     const requestStillValid = new Date(paymentRequest.expiresAt).getTime() > Date.now();
@@ -1161,12 +1196,14 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     };
     if (await syncOrder(updatedOrder)) {
       alert(requestStillValid ? "Đã từ chối minh chứng; khách hàng có thể tải lại." : "Đã từ chối minh chứng; cần phát hành yêu cầu mới.");
+      return true;
     }
+    return false;
   }
 
-  async function reissuePaymentRequest() {
-    if (!workingOrder?.id) return;
-    if (!window.confirm("Phát hành mã thanh toán mới và vô hiệu hóa các mã cũ đã hết hạn?")) return;
+  async function reissuePaymentRequest(): Promise<boolean> {
+    if (!workingOrder?.id) return false;
+    if (!window.confirm("Phát hành mã thanh toán mới và vô hiệu hóa các mã cũ đã hết hạn?")) return false;
     try {
       const response = await fetch("/api/orders/payment-request", {
         method: "POST",
@@ -1176,26 +1213,28 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       const payload = (await response.json().catch(() => ({}))) as { error?: string; paymentRequest?: { reissued?: boolean } };
       if (!response.ok) {
         alert(payload.error || "Không thể phát hành lại yêu cầu thanh toán.");
-        return;
+        return false;
       }
       entityStore.invalidate("orders");
       await fetchOrders();
       alert(payload.paymentRequest?.reissued === false
         ? "Yêu cầu thanh toán hiện tại vẫn còn hiệu lực."
         : "Đã phát hành yêu cầu thanh toán mới và đồng bộ cho khách hàng.");
+      return true;
     } catch {
       alert("Lỗi kết nối khi phát hành lại yêu cầu thanh toán.");
+      return false;
     }
   }
 
   async function advanceFulfillment(
     nextStatus: FulfillmentStatus,
     shipmentInput?: Pick<Shipment, "carrier" | "trackingCode" | "eta">
-  ) {
-    if (!workingOrder?.id) return;
+  ): Promise<boolean> {
+    if (!workingOrder?.id) return false;
     if (nextStatus === "shipped" && (!shipmentInput?.carrier.trim() || !shipmentInput.trackingCode.trim())) {
       alert("Cần nhập đơn vị vận chuyển và mã vận đơn thực tế trước khi xuất kho.");
-      return;
+      return false;
     }
 
     const statusLabels: Record<FulfillmentStatus, string> = {
@@ -1246,7 +1285,9 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     if (await syncOrder(updatedOrder)) {
       await Promise.all([fetchOperationsOverview(), fetchReportsOverview()]);
       alert(`Đã chuyển đơn sang: ${statusLabels[nextStatus]}.`);
+      return true;
     }
+    return false;
   }
 
   // Record accounting journal entries on server
@@ -1389,6 +1430,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
         return;
       }
       const data = (await res.json()) as OrderMutationResponse;
+      selectedOrderIdRef.current = data.order.id;
+      isOrderModifiedRef.current = false;
       setWorkingOrder(data.order);
       setAllOrders((prev) => [data.order, ...prev]);
       setSelectedOrderId(data.order.id);
@@ -1945,6 +1988,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
                                   type="button"
                                   className="text-[10px] font-bold py-1 px-3 bg-orange-100 hover:bg-orange-200 text-orange-850 rounded-lg cursor-pointer transition border border-orange-200"
                                   onClick={() => {
+                                    selectedOrderIdRef.current = ord.id;
+                                    isOrderModifiedRef.current = false;
                                     setSelectedOrderId(ord.id);
                                     setWorkingOrder(ord);
                                     setActiveTab("order");

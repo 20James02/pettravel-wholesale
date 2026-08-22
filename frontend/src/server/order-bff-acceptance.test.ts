@@ -279,9 +279,9 @@ test("BFF Role Workflow: quote ownership never blocks accounting or warehouse mu
   assert.ok(adminSource.includes('hasPermission("order.confirm_payment")'));
   assert.ok(adminSource.includes('hasPermission("order.ship")'));
   assert.ok(adminSource.includes('hasPermission("accounting.post")'));
-  assert.ok(adminSource.includes("disabled={!canConfirmPayment || !pendingPaymentProof}"));
+  assert.ok(adminSource.includes("disabled={!canConfirmPayment || !pendingPaymentProof || isAdminActionPending}"));
   assert.ok(adminSource.includes("!canAdvanceFulfillment ||"));
-  assert.ok(adminSource.includes("disabled={!canPostAccounting}"));
+  assert.ok(adminSource.includes("disabled={!canPostAccounting || isAdminActionPending}"));
 });
 
 test("Realtime efficiency: SSE changes trigger fetches without a duplicate four-second full poll", () => {
