@@ -36,6 +36,7 @@ import {
   restoreCartItems
 } from "@/lib/cart/cart-state";
 import { animateProductToCart } from "@/lib/motion/cart-fly-motion";
+import { findCurrentTradingOrder } from "@/lib/order-live-selection";
 
 // Import custom subcomponents
 import { Topbar } from "./components/shared/Topbar";
@@ -188,10 +189,13 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   // Core working order & selected order states
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [workingOrder, setWorkingOrder] = useState<CustomerOrder>(EMPTY_ORDER);
+  const [isOrdersLoading, setIsOrdersLoading] = useState<boolean>(false);
+  const [ordersError, setOrdersError] = useState<string>("");
   const [adminOrderItems, setAdminOrderItems] = useState<CustomerOrder["items"]>([]);
   const [isOrderModified, setIsOrderModified] = useState<boolean>(false);
   const selectedOrderIdRef = useRef<string | null>(null);
   const isOrderModifiedRef = useRef<boolean>(false);
+  const activeOrderScopeRef = useRef<string>("");
 
   useEffect(() => {
     selectedOrderIdRef.current = selectedOrderId;
@@ -441,10 +445,29 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   }, [catalogAccessScope]);
 
   const fetchOrders = useCallback(async () => {
+    if (!currentUser) return;
+    const orderScope = `${currentUser.id}:${currentUser.isAdmin ? "admin" : "customer"}`;
+    const scopeChanged = activeOrderScopeRef.current !== orderScope;
+    if (scopeChanged) {
+      activeOrderScopeRef.current = orderScope;
+      entityStore.clearOrders();
+      selectedOrderIdRef.current = null;
+      isOrderModifiedRef.current = false;
+      setAllOrders([]);
+      setSelectedOrderId(null);
+      setWorkingOrder(EMPTY_ORDER);
+      setAdminOrderItems([]);
+      setIsOrderModified(false);
+    }
+    setIsOrdersLoading(true);
+    setOrdersError("");
     try {
-      const { data } = await entityStore.swrFetch("orders", async () => {
+      const { data } = await entityStore.swrFetch(`orders:${orderScope}`, async () => {
         const res = await fetch("/api/orders");
-        if (!res.ok) throw new Error();
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error || "Không thể tải đơn hàng.");
+        }
         const json = await res.json();
         const list = (json.orders ?? []) as CustomerOrder[];
         entityStore.setOrders(list);
@@ -455,7 +478,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       setAllOrders(data);
       if (data.length > 0) {
         const currentSelectedOrderId = selectedOrderIdRef.current;
-        const targetOrder = (currentSelectedOrderId ? data.find((o) => o.id === currentSelectedOrderId) : null) || data[0];
+        const targetOrder =
+          (currentSelectedOrderId ? data.find((o) => o.id === currentSelectedOrderId) : null) ||
+          findCurrentTradingOrder(data) ||
+          data[0];
         if (!currentSelectedOrderId || !data.some((o) => o.id === currentSelectedOrderId)) {
           selectedOrderIdRef.current = targetOrder.id;
           isOrderModifiedRef.current = false;
@@ -469,9 +495,20 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
             setAdminOrderItems(targetOrder.items?.map((item: OrderItem) => ({ ...item })) ?? []);
           }
         }
+      } else {
+        selectedOrderIdRef.current = null;
+        isOrderModifiedRef.current = false;
+        setSelectedOrderId(null);
+        setWorkingOrder(EMPTY_ORDER);
+        setAdminOrderItems([]);
+        setIsOrderModified(false);
       }
-    } catch { /* silent */ }
-  }, []);
+    } catch (error) {
+      setOrdersError(error instanceof Error ? error.message : "Không thể tải đơn hàng.");
+    } finally {
+      setIsOrdersLoading(false);
+    }
+  }, [currentUser]);
 
   const lastRevisionRef = useRef<string>("");
 
@@ -792,6 +829,14 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     }
   };
 
+  const navigateCustomerTab = (tab: TabKey) => {
+    if (tab === "order") {
+      const orderToOpen = findCurrentTradingOrder(allOrders) ?? allOrders[0];
+      if (orderToOpen) selectOrder(orderToOpen.id);
+    }
+    setActiveTab(tab);
+  };
+
   // Sync mutated order state back to server database
   async function syncOrder(updatedOrder: CustomerOrder): Promise<boolean> {
     try {
@@ -938,8 +983,11 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       localStorage.removeItem(legacyCartStorageKeyForUser(currentUser.id));
     }
     setMode("guest");
+    entityStore.clearOrders();
+    activeOrderScopeRef.current = "";
     setCurrentUser(null);
     setCartItems([]);
+    setAllOrders([]);
     setWorkingOrder(EMPTY_ORDER);
     selectedOrderIdRef.current = null;
     isOrderModifiedRef.current = false;
@@ -1765,7 +1813,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
               activeUser={currentUser}
               isAdmin={isAdmin}
               activeTab={activeTab}
-              setActiveTab={setActiveTab}
+              setActiveTab={navigateCustomerTab}
               onRequireLogin={(tab) => {
                 setPendingPostLoginTab(tab);
                 setShowLoginModal(true);
@@ -1845,7 +1893,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
           />
         )}
 
-        {activeTab === "order" && (
+        {activeTab === "order" && workingOrder.id && (
           <OrderTimeline
             isLoggedIn={isLoggedIn}
             mode={mode}
@@ -1857,6 +1905,21 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
             onRequestOrderChange={handleCustomerRequestChange}
             onUpdateRecipientInfo={handleUpdateRecipientInfo}
           />
+        )}
+
+        {activeTab === "order" && !workingOrder.id && (
+          <div className="panel min-h-56 rounded-3xl border border-orange-100 bg-white p-8 flex items-center justify-center text-center">
+            <div>
+              <div className="text-base font-bold text-[#331B08]">
+                {isOrdersLoading ? "Đang tải giao dịch hiện tại…" : ordersError || "Chưa có đơn hàng đang giao dịch."}
+              </div>
+              {!isOrdersLoading && ordersError && (
+                <button type="button" className="mt-3 font-bold text-orange-600 underline" onClick={() => void fetchOrders()}>
+                  Thử tải lại
+                </button>
+              )}
+            </div>
+          </div>
         )}
 
         {activeTab === "profile" && isLoggedIn && !isAdmin && (

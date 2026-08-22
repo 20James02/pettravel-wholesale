@@ -55,9 +55,16 @@ class NormalizedEntityStore {
   // ── ORDER ENTITIES ──────────────────────────────────────────
 
   setOrders(ordersList: CustomerOrder[]): void {
+    this.orders.clear();
     for (const order of ordersList) {
       this.orders.set(order.id, order);
     }
+  }
+
+  clearOrders(): void {
+    this.orders.clear();
+    this.orderSummaries = [];
+    this.invalidate("orders:");
   }
 
   getOrder(id: string): CustomerOrder | undefined {

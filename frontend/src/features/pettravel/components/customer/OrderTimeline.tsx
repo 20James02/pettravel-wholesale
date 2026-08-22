@@ -237,7 +237,7 @@ export function OrderTimeline({
             <div className="section-title flex flex-wrap justify-between items-center pb-3 border-b border-dashed border-orange-100 gap-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-base sm:text-lg font-bold text-[#331B08] font-heading flex items-center gap-2">
-                  <PackageCheck size={20} className="text-orange-500" /> Tiến độ đơn hàng sỉ #{workingOrder.number || "001"}
+                  <PackageCheck size={20} className="text-orange-500" /> Tiến độ đơn hàng sỉ #{workingOrder.number}
                 </h3>
                 <button
                   type="button"
