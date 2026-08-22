@@ -80,3 +80,19 @@ def test_production_configuration_validates_payment_secrets_and_urls(monkeypatch
         production_settings(FRONTEND_URL="https://user:pass@example.com").validate_production_configuration()
     with pytest.raises(RuntimeError, match="R2_PRIVATE_BUCKET"):
         production_settings(R2_PRIVATE_BUCKET="pettravel-wholesale").validate_production_configuration()
+
+
+def test_environment_values_strip_accidental_platform_whitespace(monkeypatch):
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    settings = production_settings(
+        R2_BUCKET="\n pettravel-wholesale \r\n",
+        R2_PRIVATE_BUCKET=" pettravel-wholesale-private\n",
+        PAYMENT_QR_BANK_CODE=" MB\n",
+        FRONTEND_URL=" https://wholesale.pettravel.vn/ \n",
+    )
+
+    assert settings.R2_BUCKET == "pettravel-wholesale"
+    assert settings.R2_PRIVATE_BUCKET == "pettravel-wholesale-private"
+    assert settings.PAYMENT_QR_BANK_CODE == "MB"
+    assert settings.FRONTEND_URL == "https://wholesale.pettravel.vn/"
+    settings.validate_production_configuration()

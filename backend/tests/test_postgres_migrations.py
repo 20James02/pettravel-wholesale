@@ -508,3 +508,75 @@ async def test_v15_distributed_auth_rate_limit_migrates_idempotently_and_fail_cl
             """)
     finally:
         await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_v16_advisor_hardening_is_idempotent_and_least_privilege():
+    supabase_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "supabase"))
+    schema_file = os.path.join(supabase_dir, "schema.sql")
+    v16_file = os.path.join(supabase_dir, "update_v16_database_security_performance.sql")
+
+    db_name = "pettravel_v16_advisor_hardening"
+    await create_isolated_database(db_name)
+    conn = await asyncpg.connect(
+        user=POSTGRES_TEST_USER,
+        password=POSTGRES_TEST_PASS,
+        host=POSTGRES_TEST_HOST,
+        port=POSTGRES_TEST_PORT,
+        database=db_name,
+    )
+    try:
+        await run_sql_file(conn, schema_file)
+        await run_sql_file(conn, v16_file)
+        await run_sql_file(conn, v16_file)
+
+        anon_can_post = await conn.fetchval(
+            "SELECT has_function_privilege('anon', 'public.post_journal_entry(text,text)', 'EXECUTE')"
+        )
+        authenticated_can_read_identity = await conn.fetchval(
+            "SELECT has_function_privilege('authenticated', 'public.current_app_user_id()', 'EXECUTE')"
+        )
+        anon_can_read_identity = await conn.fetchval(
+            "SELECT has_function_privilege('anon', 'public.current_app_user_id()', 'EXECUTE')"
+        )
+        trigger_config = await conn.fetchval(
+            "SELECT proconfig FROM pg_proc WHERE oid = 'public.protect_posted_journal_lines()'::regprocedure"
+        )
+        revision_policy = await conn.fetchval(
+            "SELECT count(*) FROM pg_policies WHERE schemaname='public' AND tablename='order_revision_history'"
+        )
+        sync_policy = await conn.fetchval(
+            "SELECT count(*) FROM pg_policies WHERE schemaname='public' AND tablename='order_sync_revisions'"
+        )
+        duplicate_index = await conn.fetchval(
+            "SELECT to_regclass('public.idx_order_rev_history_order_id')"
+        )
+        missing_fk_indexes = await conn.fetchval(
+            """
+            SELECT count(*)
+            FROM pg_constraint c
+            JOIN pg_class t ON t.oid = c.conrelid
+            JOIN pg_namespace n ON n.oid = t.relnamespace
+            WHERE c.contype = 'f'
+              AND n.nspname = 'public'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM pg_index i
+                WHERE i.indrelid = c.conrelid
+                  AND i.indisvalid
+                  AND (i.indkey::smallint[])[0:cardinality(c.conkey) - 1] = c.conkey
+              )
+            """
+        )
+
+        assert anon_can_post is False
+        assert authenticated_can_read_identity is True
+        assert anon_can_read_identity is False
+        assert trigger_config is not None
+        assert any("search_path=pg_catalog, public" in value for value in trigger_config)
+        assert revision_policy == 1
+        assert sync_policy == 1
+        assert duplicate_index is None
+        assert missing_fk_indexes == 0
+    finally:
+        await conn.close()

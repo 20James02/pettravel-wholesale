@@ -1,6 +1,7 @@
 import re
 from urllib.parse import urlparse
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -54,6 +55,34 @@ class Settings(BaseSettings):
     PAYMENT_QR_ACCOUNT_NAME: str = "PET TRAVEL WHOLESALE"
     VIETQR_WEBHOOK_SECRET: str = ""
     PAYMENT_SYSTEM_ACTOR_ID: str = ""
+
+    @field_validator(
+        "ENVIRONMENT",
+        "SECRET_KEY",
+        "JWT_SECRET",
+        "BACKEND_INTERNAL_SECRET",
+        "DATABASE_URL",
+        "POSTGRES_URL",
+        "DB_SSL_MODE",
+        "DB_SSL_ROOT_CERT",
+        "R2_ACCOUNT_ID",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+        "R2_BUCKET",
+        "R2_PRIVATE_BUCKET",
+        "R2_PUBLIC_BASE_URL",
+        "PAYMENT_QR_BANK_CODE",
+        "PAYMENT_QR_ACCOUNT_NO",
+        "PAYMENT_QR_ACCOUNT_NAME",
+        "VIETQR_WEBHOOK_SECRET",
+        "PAYMENT_SYSTEM_ACTOR_ID",
+        "FRONTEND_URL",
+        mode="before",
+    )
+    @classmethod
+    def strip_environment_whitespace(cls, value: object) -> object:
+        """Normalize copy/pasted platform env values without altering internal spaces."""
+        return value.strip() if isinstance(value, str) else value
 
     @property
     def async_database_url(self) -> str:

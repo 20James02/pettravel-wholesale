@@ -69,3 +69,20 @@ def test_v15_distributed_auth_rate_limit_is_private_and_pii_safe():
     assert "email" not in migration
     assert "phone" not in migration
     assert "ip_address" not in migration
+
+
+def test_v16_hardens_supabase_advisor_findings_idempotently():
+    migration = (
+        REPO_ROOT / "supabase" / "update_v16_database_security_performance.sql"
+    ).read_text(encoding="utf-8").lower()
+
+    assert "revoke execute on function public.current_app_user_id() from public, anon" in migration
+    assert "grant execute on function public.current_app_user_id() to authenticated, service_role" in migration
+    assert "revoke execute on function public.post_journal_entry(text, text) from public, anon, authenticated" in migration
+    assert "alter function public.protect_posted_journal_lines() set search_path = pg_catalog, public" in migration
+    assert "select auth.uid()" in migration
+    assert 'create policy "customers can read own order revision history"' in migration
+    assert 'create policy "users can read scoped order sync revisions"' in migration
+    assert "drop index if exists public.idx_order_rev_history_order_id" in migration
+    assert "create index if not exists" in migration
+    assert "pg_constraint" in migration
