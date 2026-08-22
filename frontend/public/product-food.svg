@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" fill="none" role="img" aria-label="Ảnh sản phẩm Pet Travel">
+  <rect width="640" height="360" rx="32" fill="#FFF7ED"/>
+  <ellipse cx="320" cy="276" rx="210" ry="36" fill="#FED7AA"/>
+  <path d="M154 142h332c-8 92-58 146-166 146s-158-54-166-146Z" fill="#F97316"/>
+  <path d="M178 143c13 45 65 76 142 76s129-31 142-76" stroke="#FFFBEB" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="276" cy="112" r="18" fill="#2563EB"/>
+  <circle cx="320" cy="96" r="20" fill="#2563EB"/>
+  <circle cx="364" cy="112" r="18" fill="#2563EB"/>
+  <path d="M288 142c0-26 14-43 32-43s32 17 32 43c0 18-14 31-32 31s-32-13-32-31Z" fill="#2563EB"/>
+</svg>
