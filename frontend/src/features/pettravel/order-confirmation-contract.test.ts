@@ -95,4 +95,13 @@ describe("two-way quote confirmation pending states", () => {
     assert.ok(appSource.includes("if (selectedOrder && !isOrderModifiedRef.current)"));
     assert.ok(appSource.includes("}, [currentUser, fetchOrders])"));
   });
+
+  it("loads role permissions before enabling the admin order workspace", () => {
+    const adminTabStart = appSource.indexOf('} else if (currentTab === "admin") {');
+    const nextTabBranch = appSource.indexOf('} else if (currentTab === "admin_accounting")', adminTabStart);
+    const adminTabLoader = appSource.slice(adminTabStart, nextTabBranch);
+
+    assert.ok(adminTabStart >= 0);
+    assert.ok(adminTabLoader.includes("fetchAdminData()"));
+  });
 });

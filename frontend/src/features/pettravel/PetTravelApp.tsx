@@ -747,6 +747,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       fetchProducts();
       fetchCategories();
       fetchPromotions();
+      fetchAdminData();
     } else if (currentTab === "admin_accounting") {
       fetchAccountingOverview();
       fetchAccountingJournalEntries();

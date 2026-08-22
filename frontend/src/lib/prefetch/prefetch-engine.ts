@@ -98,6 +98,8 @@ export async function prefetchRouteData(tab: TabKey, options: { priority?: "high
         fetchPromises.push(deduplicatedFetch("/api/categories", abortController.signal));
         break;
       case "order":
+        fetchPromises.push(deduplicatedFetch("/api/orders/summary?limit=25", abortController.signal));
+        break;
       case "admin":
         fetchPromises.push(deduplicatedFetch("/api/orders/summary?limit=25", abortController.signal));
         fetchPromises.push(deduplicatedFetch("/api/admin/policy", abortController.signal));
