@@ -604,6 +604,7 @@ async def _update_order(
             "order.quote": (
                 order.get("commercialStatus", current["commercial_status"]) != current["commercial_status"]
                 or order.get("assignedStaffId", current["assigned_staff_id"]) != current["assigned_staff_id"]
+                or order.get("items") is not None
                 or order.get("quoteVersions") is not None
             ),
             "order.confirm_payment": (
@@ -793,7 +794,7 @@ async def _update_order(
                 raise ValueError(f"SKU_OR_SUPPLIER_INVALID: Sản phẩm ({sku}) hoặc nhà cung cấp ({supplier_id}) không hợp lệ hoặc đã ngừng hoạt động.")
 
             min_order_qty = int(catalog_row.get("min_order_qty") or 1)
-            if quantity < min_order_qty:
+            if not internal and quantity < min_order_qty:
                 raise ValueError(f"MOQ_NOT_MET: Số lượng ({quantity}) nhỏ hơn số lượng tối thiểu ({min_order_qty}) của phân loại {sku}.")
 
             unit_price = int(catalog_row["wholesale_price"])

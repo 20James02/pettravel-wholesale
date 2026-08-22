@@ -63,6 +63,18 @@ async def test_create_order_uses_server_catalog_snapshot_and_generated_number(ca
     )
     await canonical_db_session.commit()
 
+    with pytest.raises(ValueError, match="không đáp ứng MOQ"):
+        await save_order(
+            canonical_db_session,
+            actor_id="user_1",
+            order={
+                "id": "order_below_moq",
+                "paymentIntent": "deposit_cod",
+                "items": [{"variantSku": "SKU-1", "supplierId": "sup_1", "quantity": 1}],
+            },
+        )
+    await canonical_db_session.rollback()
+
     result = await save_order(
         canonical_db_session,
         actor_id="user_1",
@@ -79,6 +91,86 @@ async def test_create_order_uses_server_catalog_snapshot_and_generated_number(ca
     orders = await list_orders(canonical_db_session, actor_id="user_1", is_admin=False)
     assert orders[0]["number"] != "CLIENT-CONTROLLED"
     assert orders[0]["items"][0]["unitPriceSnapshot"] == 100000
+
+
+@pytest.mark.asyncio
+async def test_internal_admin_can_adjust_order_item_below_catalog_moq(canonical_db_session):
+    await canonical_db_session.execute(
+        text("insert into organizations (id, name) values ('org_customer', 'Đại lý'), ('org_internal', 'Pet Travel')")
+    )
+    await canonical_db_session.execute(
+        text("""insert into app_users (id, organization_id, full_name, email, status) values
+            ('customer_moq', 'org_customer', 'Khách MOQ', 'customer-moq@example.com', 'active'),
+            ('admin_moq', 'org_internal', 'Admin MOQ', 'admin-moq@example.com', 'active'),
+            ('admin_no_quote', 'org_internal', 'Nội bộ không có quyền báo giá', 'admin-no-quote@example.com', 'active')""")
+    )
+    await canonical_db_session.execute(
+        text("""insert into user_roles (user_id, role_id) values
+            ('admin_moq', 'role_super_admin'), ('admin_no_quote', 'role_admin')""")
+    )
+    await canonical_db_session.execute(
+        text("insert into suppliers (id, code, name, active) values ('sup_moq', 'SUP-MOQ', 'Nhà cung cấp MOQ', 1)")
+    )
+    await canonical_db_session.execute(
+        text("""insert into products (id, code, name, brand, category, active)
+            values ('prod_moq', 'P-MOQ', 'Sản phẩm MOQ', 'Pet Travel', 'Phụ kiện', 1)""")
+    )
+    await canonical_db_session.execute(
+        text("""insert into product_variants (id, product_id, sku, label, active)
+            values ('var_moq', 'prod_moq', 'SKU-MOQ', 'Túi 5kg', 1)""")
+    )
+    await canonical_db_session.execute(
+        text("""insert into supplier_offers
+            (id, supplier_id, product_variant_id, wholesale_price, min_order_qty, stock_qty, active)
+            values ('offer_moq', 'sup_moq', 'var_moq', 420000, 10, 50, 1)""")
+    )
+    await canonical_db_session.execute(
+        text("""insert into customer_orders
+            (id, order_number, organization_id, created_by, commercial_status, payment_intent)
+            values ('order_moq', 'PTW-MOQ', 'org_customer', 'customer_moq', 'admin_review', 'deposit_cod')""")
+    )
+    await canonical_db_session.execute(
+        text("""insert into order_items
+            (id, order_id, product_code_snapshot, product_name_snapshot, variant_sku_snapshot,
+             variant_label_snapshot, supplier_id, quantity, unit_price_snapshot, locked)
+            values ('item_moq', 'order_moq', 'P-MOQ', 'Sản phẩm MOQ', 'SKU-MOQ',
+                    'Túi 5kg', 'sup_moq', 10, 420000, 0)""")
+    )
+    await canonical_db_session.commit()
+
+    await save_order(
+        canonical_db_session,
+        actor_id="admin_moq",
+        order={
+            "id": "order_moq",
+            "items": [{
+                "id": "item_moq",
+                "variantSku": "SKU-MOQ",
+                "supplierId": "sup_moq",
+                "quantity": 6,
+            }],
+        },
+    )
+
+    saved_quantity = (
+        await canonical_db_session.execute(text("select quantity from order_items where id = 'item_moq'"))
+    ).scalar_one()
+    assert saved_quantity == 6
+
+    with pytest.raises(ValueError, match="order.quote"):
+        await save_order(
+            canonical_db_session,
+            actor_id="admin_no_quote",
+            order={
+                "id": "order_moq",
+                "items": [{
+                    "id": "item_moq",
+                    "variantSku": "SKU-MOQ",
+                    "supplierId": "sup_moq",
+                    "quantity": 5,
+                }],
+            },
+        )
 
 
 @pytest.mark.asyncio

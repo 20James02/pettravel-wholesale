@@ -954,8 +954,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   }
 
   // Publish quote to customer for acceptance
-  async function handlePublishQuote(customNote?: string) {
-    if (!workingOrder?.id) return;
+  async function handlePublishQuote(customNote?: string): Promise<boolean> {
+    if (!workingOrder?.id) return false;
     try {
       const itemsToQuote = adminOrderItems.length > 0 ? adminOrderItems : (workingOrder.items || []);
       const subtotal = itemsToQuote.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
@@ -1032,8 +1032,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
         setIsManagerApproved(false);
         alert("Đã phát hành báo giá chính thức cho đại lý!");
       }
+      return success;
     } catch {
       alert("Không thể phát hành báo giá.");
+      return false;
     }
   }
 
@@ -1384,10 +1386,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     }
   }
 
-  async function handleCustomerAcceptQuote() {
-    if (!workingOrder?.id) return;
+  async function handleCustomerAcceptQuote(): Promise<boolean> {
+    if (!workingOrder?.id) return false;
     const activeQuote = workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1];
-    if (!activeQuote) return;
+    if (!activeQuote) return false;
 
     try {
       const updatedOrder: CustomerOrder = {
@@ -1412,8 +1414,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       if (accepted) {
         alert("Đã chấp thuận báo giá! Yêu cầu thanh toán VietQR chính thức đã được phát hành.");
       }
+      return accepted;
     } catch {
       alert("Lỗi kết nối khi chấp thuận báo giá.");
+      return false;
     }
   }
 

@@ -26,7 +26,8 @@ import {
   CreditCard,
   AlertTriangle,
   Edit3,
-  History
+  History,
+  LoaderCircle
 } from "lucide-react";
 import type { CustomerOrder, FulfillmentStatus, Shipment, Supplier, Product, OrderItem, PermissionKey } from "@/lib/domain";
 import type { ApiUser } from "../../types";
@@ -64,7 +65,7 @@ interface AdminOrdersProps {
   setWorkingOrder: (order: CustomerOrder) => void;
   syncOrder?: (order: CustomerOrder) => Promise<boolean>;
   handleAdminQtyChange: (itemId: string, qty: number) => void;
-  handlePublishQuote: (customNote?: string) => void;
+  handlePublishQuote: (customNote?: string) => Promise<boolean>;
   confirmDeposit: () => void;
   rejectPaymentProof: () => void;
   reissuePaymentRequest: () => void;
@@ -114,6 +115,7 @@ export function AdminOrders({
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isPublishingQuote, setIsPublishingQuote] = useState<boolean>(false);
   const [shipmentCarrier, setShipmentCarrier] = useState(() => workingOrder.shipment?.carrier ?? "");
   const [shipmentTrackingCode, setShipmentTrackingCode] = useState(() => workingOrder.shipment?.trackingCode ?? "");
   const [shipmentEta, setShipmentEta] = useState(() => workingOrder.shipment?.eta ?? "");
@@ -361,9 +363,15 @@ export function AdminOrders({
   };
 
   // Publish Quote with Customer Note
-  const onPublishQuoteWithNote = () => {
-    handlePublishQuote(quoteCustomerNote.trim() || undefined);
-    setQuoteCustomerNote("");
+  const onPublishQuoteWithNote = async () => {
+    if (isPublishingQuote) return;
+    setIsPublishingQuote(true);
+    try {
+      const published = await handlePublishQuote(quoteCustomerNote.trim() || undefined);
+      if (published) setQuoteCustomerNote("");
+    } finally {
+      setIsPublishingQuote(false);
+    }
   };
 
   // Filtered Products for Add Item Modal
@@ -664,10 +672,15 @@ export function AdminOrders({
                   <button
                     type="button"
                     onClick={onPublishQuoteWithNote}
-                    disabled={quoteEditingDisabled}
+                    disabled={quoteEditingDisabled || isPublishingQuote}
+                    aria-busy={isPublishingQuote}
                     className="px-4 py-2 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-600 hover:to-indigo-700 text-white font-black rounded-xl shadow flex items-center gap-2 cursor-pointer transition text-xs whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <Send size={14} /> Gửi xác nhận lại khách (Báo giá mới)
+                    {isPublishingQuote ? (
+                      <><LoaderCircle size={14} className="animate-spin" /> Đang gửi báo giá...</>
+                    ) : (
+                      <><Send size={14} /> Gửi xác nhận lại khách (Báo giá mới)</>
+                    )}
                   </button>
                 </div>
               )}
@@ -1067,11 +1080,16 @@ export function AdminOrders({
               {activeOrder.commercialStatus === "draft" || activeOrder.commercialStatus === "submitted" || activeOrder.commercialStatus === "admin_review" || isOrderModified ? (
                 <button
                   type="button"
-                  className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
+                  className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6 inline-flex items-center gap-2"
                   onClick={onPublishQuoteWithNote}
-                  disabled={quoteEditingDisabled}
+                  disabled={quoteEditingDisabled || isPublishingQuote}
+                  aria-busy={isPublishingQuote}
                 >
-                  Publish Quote (Gửi Báo Giá)
+                  {isPublishingQuote ? (
+                    <><LoaderCircle size={14} className="animate-spin" /> Đang gửi báo giá...</>
+                  ) : (
+                    "Publish Quote (Gửi Báo Giá)"
+                  )}
                 </button>
               ) : activeOrder.commercialStatus === "cancelled" ? (
                 <button type="button" className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6" disabled>

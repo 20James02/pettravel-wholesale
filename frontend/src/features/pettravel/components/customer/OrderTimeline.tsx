@@ -17,7 +17,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   RotateCcw,
-  History
+  History,
+  LoaderCircle
 } from "lucide-react";
 import type { CustomerOrder, Product } from "@/lib/domain";
 import { formatVnd } from "@/lib/money";
@@ -32,7 +33,7 @@ interface OrderTimelineProps {
   allProducts?: Product[];
   onPayNowClick: () => void;
   onUploadProof: (file: File) => void;
-  onAcceptQuote?: () => void;
+  onAcceptQuote?: () => Promise<boolean>;
   onRequestOrderChange?: (reason: string) => void;
   onUpdateRecipientInfo?: (info: {
     recipientName: string;
@@ -56,11 +57,27 @@ export function OrderTimeline({
 }: OrderTimelineProps) {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [isAcceptingQuote, setIsAcceptingQuote] = useState<boolean>(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  const handleAcceptQuoteClick = async () => {
+    if (!onAcceptQuote) {
+      onPayNowClick();
+      return;
+    }
+    if (isAcceptingQuote) return;
+
+    setIsAcceptingQuote(true);
+    try {
+      await onAcceptQuote();
+    } finally {
+      setIsAcceptingQuote(false);
+    }
+  };
 
   // Modal edit recipient info state
   const [isEditRecipientOpen, setIsEditRecipientOpen] = useState(false);
@@ -418,12 +435,17 @@ export function OrderTimeline({
             {mode === "customer" && workingOrder.commercialStatus === "quoted" && (
               <div className="flex flex-col gap-2.5 w-full mt-2 pt-3 border-t border-dashed border-orange-200">
                 <button
-                  className="primary-button text-xs sm:text-sm py-3.5 justify-center w-full font-bold bg-orange-500 hover:bg-orange-600 text-white rounded-2xl shadow-lg cursor-pointer flex items-center gap-2"
+                  className="primary-button text-xs sm:text-sm py-3.5 justify-center w-full font-bold bg-orange-500 hover:bg-orange-600 text-white rounded-2xl shadow-lg cursor-pointer flex items-center gap-2 disabled:cursor-wait disabled:opacity-70"
                   type="button"
-                  onClick={onAcceptQuote || onPayNowClick}
+                  onClick={handleAcceptQuoteClick}
+                  disabled={isAcceptingQuote}
+                  aria-busy={isAcceptingQuote}
                 >
-                  <CheckCircle2 size={18} />
-                  <span>Xác nhận chấp thuận báo giá & Đặt cọc</span>
+                  {isAcceptingQuote ? (
+                    <><LoaderCircle size={18} className="animate-spin" /><span>Đang xác nhận...</span></>
+                  ) : (
+                    <><CheckCircle2 size={18} /><span>Xác nhận chấp thuận báo giá & Đặt cọc</span></>
+                  )}
                 </button>
 
                 <button
