@@ -4,6 +4,18 @@ function changed<T>(left: T, right: T): boolean {
   return JSON.stringify(left) !== JSON.stringify(right);
 }
 
+export function hasQuoteOwnershipWork(
+  before: CustomerOrder,
+  after: CustomerOrder
+): boolean {
+  return (
+    changed(before.items, after.items) ||
+    changed(before.quoteVersions, after.quoteVersions) ||
+    before.commercialStatus !== after.commercialStatus ||
+    before.assignedStaffId !== after.assignedStaffId
+  );
+}
+
 export function getMissingOrderPermissions(
   before: CustomerOrder,
   after: CustomerOrder,
@@ -12,12 +24,7 @@ export function getMissingOrderPermissions(
   if (user.role === "super_admin") return [];
   const required = new Set<PermissionKey>();
 
-  if (
-    changed(before.items, after.items) ||
-    changed(before.quoteVersions, after.quoteVersions) ||
-    before.commercialStatus !== after.commercialStatus ||
-    before.assignedStaffId !== after.assignedStaffId
-  ) {
+  if (hasQuoteOwnershipWork(before, after)) {
     required.add("order.quote");
   }
   if (

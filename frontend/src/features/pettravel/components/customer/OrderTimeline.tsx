@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Image from "next/image";
 import { 
   Check, 
@@ -31,7 +31,6 @@ interface OrderTimelineProps {
   workingOrder: CustomerOrder;
   allProducts?: Product[];
   onPayNowClick: () => void;
-  onBuyMore: () => void;
   onUploadProof: (file: File) => void;
   onAcceptQuote?: () => void;
   onRequestOrderChange?: (reason: string) => void;
@@ -50,13 +49,18 @@ export function OrderTimeline({
   workingOrder,
   allProducts = [],
   onPayNowClick,
-  onBuyMore,
   onUploadProof,
   onAcceptQuote,
   onRequestOrderChange,
   onUpdateRecipientInfo
 }: OrderTimelineProps) {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Modal edit recipient info state
   const [isEditRecipientOpen, setIsEditRecipientOpen] = useState(false);
@@ -109,49 +113,33 @@ export function OrderTimeline({
     return pubNote?.message || workingOrder.customerNote || null;
   }, [workingOrder.comments, workingOrder.customerNote, workingOrder.commercialStatus]);
 
-  // Lấy payment request hoạt động cuối cùng (kèm fallback tức thì khi khách vừa chốt đơn)
+  // Payment data must come from the authoritative request persisted by the backend.
   const activeReq = useMemo(() => {
-    if (workingOrder.paymentRequests && workingOrder.paymentRequests.length > 0) {
-      const active = workingOrder.paymentRequests.find((r) => r.status === "active") || workingOrder.paymentRequests[workingOrder.paymentRequests.length - 1];
-      if (active) return active;
-    }
-    // Fallback tức thì khi order ở trạng thái khách đã chốt hoặc đang yêu cầu thanh toán
-    if (
-      (workingOrder.commercialStatus === "customer_accepted" || workingOrder.paymentStatus.includes("requested")) &&
-      quote.finalTotal > 0
-    ) {
-      const isDeposit = workingOrder.paymentIntent === "deposit_cod";
-      const amount = isDeposit ? (quote.depositAmount > 0 ? quote.depositAmount : Math.round(quote.finalTotal * 0.3)) : quote.finalTotal;
-      const ref = `PTW-${workingOrder.number || "ORDER"}-${isDeposit ? "DEP" : "FULL"}`;
-      return {
-        id: `pay_req_auto_${workingOrder.id}`,
-        quoteVersion: quote.version,
-        amount,
-        purpose: isDeposit ? ("deposit" as const) : ("full" as const),
-        reference: ref,
-        qrPayload: `00020101021238540010A00000072701240006970422011219036888888880208QRIBFTTA5303704540${amount}5802VN62${ref.length.toString().padStart(2, "0")}${ref}6304`,
-        expiresAt: quote.expiresAt || "",
-        status: "active" as const
-      };
-    }
-    return null;
-  }, [workingOrder.paymentRequests, workingOrder.commercialStatus, workingOrder.paymentStatus, workingOrder.paymentIntent, workingOrder.number, workingOrder.id, quote]);
+    return [...(workingOrder.paymentRequests ?? [])]
+      .reverse()
+      .find(
+        (request) =>
+          request.status === "uploaded" ||
+          (request.status === "active" && new Date(request.expiresAt).getTime() > nowMs)
+      ) ?? null;
+  }, [workingOrder.paymentRequests, nowMs]);
 
   const paymentDetails = useMemo(() => {
-    const fields = new Map(
-      (activeReq?.qrPayload ?? "")
-        .split("|")
-        .slice(1)
-        .map((part) => {
-          const separator = part.indexOf("=");
-          return separator > 0 ? [part.slice(0, separator), part.slice(separator + 1)] : [part, ""];
-        })
-    );
-    return {
-      account: fields.get("account") || "1903688888888",
-      name: fields.get("name") || "PET TRAVEL WHOLESALE"
-    };
-  }, [activeReq?.qrPayload]);
+    if (!activeReq?.qrPayload) return null;
+    try {
+      const qrUrl = new URL(activeReq.qrPayload);
+      if (qrUrl.protocol !== "https:" || qrUrl.hostname !== "img.vietqr.io") return null;
+      const match = qrUrl.pathname.match(/^\/image\/[A-Z0-9]+-([A-Z0-9]+)-compact2\.png$/i);
+      if (!match) return null;
+      return {
+        account: match[1],
+        name: qrUrl.searchParams.get("accountName") || "Pet Travel Wholesale",
+        qrImageUrl: qrUrl.toString()
+      };
+    } catch {
+      return null;
+    }
+  }, [activeReq]);
 
   const handleOpenEditRecipient = () => {
     setEditName(workingOrder.recipientName || "");
@@ -198,7 +186,8 @@ export function OrderTimeline({
     setChangeReason("");
   };
 
-  const canEditShipping = workingOrder.commercialStatus !== "locked" && workingOrder.commercialStatus !== "cancelled";
+  const canEditShipping = !["customer_accepted", "locked", "cancelled"].includes(workingOrder.commercialStatus)
+    && workingOrder.fulfillmentStatus === "not_started";
 
   return (
     <>
@@ -276,14 +265,14 @@ export function OrderTimeline({
               <div className="flex items-center gap-2 shrink-0">
                 <span
                   className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                    workingOrder.paymentStatus.includes("confirmed") || workingOrder.paymentStatus === "paid"
+                    activeReq || workingOrder.paymentStatus.includes("confirmed") || workingOrder.paymentStatus === "paid"
                       ? "bg-orange-500 text-white shadow-sm"
                       : "bg-orange-100 text-orange-800"
                   }`}
                 >
                   3
                 </span>
-                <span className={`text-xs ${workingOrder.paymentStatus.includes("uploaded") ? "text-orange-600 font-bold" : "text-gray-500 font-medium"}`}>
+                <span className={`text-xs ${activeReq || workingOrder.paymentStatus.includes("uploaded") ? "text-orange-600 font-bold" : "text-gray-500 font-medium"}`}>
                   Thanh toán
                 </span>
               </div>
@@ -446,47 +435,54 @@ export function OrderTimeline({
                   <span>Yêu cầu điều chỉnh lại đơn sỉ</span>
                 </button>
 
-                <button
-                  className="tab-button text-xs py-2 px-3 border border-orange-200 hover:bg-orange-50 text-orange-900 rounded-xl justify-center font-bold cursor-pointer"
-                  type="button"
-                  onClick={onBuyMore}
-                >
-                  🛍️ Chọn thêm hàng sỉ khác
-                </button>
               </div>
             )}
 
             {mode === "customer" && workingOrder.commercialStatus === "customer_accepted" && (
               <div className="flex flex-col gap-2.5 w-full mt-1">
-                <button
-                  className="primary-button text-sm py-3.5 justify-center w-full font-bold bg-orange-500 hover:bg-orange-600 text-white rounded-2xl shadow-lg cursor-pointer flex items-center gap-2"
-                  type="button"
-                  onClick={onPayNowClick}
-                >
-                  <QrCode size={18} />
-                  <span>Thanh toán VietQR ngay</span>
-                </button>
+                {activeReq ? (
+                  <button
+                    className="primary-button text-sm py-3.5 justify-center w-full font-bold bg-orange-500 hover:bg-orange-600 text-white rounded-2xl shadow-lg cursor-pointer flex items-center gap-2"
+                    type="button"
+                    onClick={onPayNowClick}
+                  >
+                    <QrCode size={18} />
+                    <span>{activeReq.status === "uploaded" ? "Xem trạng thái đối soát" : "Thanh toán VietQR ngay"}</span>
+                  </button>
+                ) : workingOrder.paymentStatus !== "deposit_confirmed" && workingOrder.paymentStatus !== "paid" ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-center text-xs font-bold text-amber-900">
+                    Yêu cầu thanh toán đã hết hạn hoặc chưa được phát hành. Bộ phận vận hành đang tạo mã mới.
+                  </div>
+                ) : null}
               </div>
             )}
 
             {/* Khung thanh toán VietQR với nút sao chép 1-chạm */}
-            {isLoggedIn && activeReq && (
-              <div className="p-4 border-2 border-orange-200 bg-[#FFFDF9] rounded-2xl flex flex-col items-center gap-3 mt-1 shadow-sm">
+            {isLoggedIn && activeReq && paymentDetails && (
+              <div id="payment-request-panel" className="p-4 border-2 border-orange-200 bg-[#FFFDF9] rounded-2xl flex flex-col items-center gap-3 mt-1 shadow-sm">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-orange-950 border-b border-dashed border-orange-100 pb-2 w-full justify-center">
-                  <QrCode size={16} className="text-orange-500" /> Quét VietQR Chuyển khoản Tự động
+                  <QrCode size={16} className="text-orange-500" />
+                  {activeReq.purpose === "remaining"
+                    ? "Thanh toán phần COD còn lại sau giao hàng"
+                    : activeReq.purpose === "deposit"
+                      ? "Thanh toán khoản cọc đơn hàng"
+                      : "Thanh toán toàn bộ đơn hàng"}
                 </div>
 
-                {/* VietQR Mockup Frame */}
+                {/* Authoritative VietQR frame */}
                 <div className="w-52 p-3 bg-gradient-to-b from-blue-50/90 to-orange-50/90 border-2 border-orange-200 rounded-2xl flex flex-col items-center text-center relative overflow-hidden shadow-sm">
                   <span className="text-[10px] text-blue-900 font-bold tracking-wider mb-2 bg-blue-100/80 px-3 py-0.5 rounded-full border border-blue-200">
                     VIETQR · NAPAS 247
                   </span>
 
                   <div className="w-36 h-36 bg-white border border-orange-100 rounded-xl flex items-center justify-center p-1 relative shadow-inner overflow-hidden">
-                    <img
-                      src={`https://img.vietqr.io/image/970422-${paymentDetails.account}-compact2.png?amount=${activeReq.amount}&addInfo=${encodeURIComponent(activeReq.reference)}&accountName=${encodeURIComponent(paymentDetails.name)}`}
+                    <Image
+                      src={paymentDetails.qrImageUrl}
                       alt="Mã VietQR thanh toán tự động"
-                      className="w-full h-full object-contain"
+                      width={144}
+                      height={144}
+                      sizes="144px"
+                      className="h-full w-full object-contain"
                     />
                   </div>
 
@@ -557,24 +553,14 @@ export function OrderTimeline({
                   <div className="w-full p-3 bg-amber-50 border border-amber-300 rounded-2xl flex flex-col gap-1.5 text-xs text-amber-900 shadow-sm animate-fade-in">
                     <div className="flex items-center gap-2 font-bold text-amber-950">
                       <CheckCircle2 size={16} className="text-amber-600 shrink-0" />
-                      <span>Đã gửi hóa đơn chuyển khoản</span>
+                      <span>Đã gửi minh chứng chuyển khoản</span>
                     </div>
                     <p className="text-[11px] text-amber-800 m-0">
                       Minh chứng chuyển khoản của bạn đã được tiếp nhận. Kế toán Pet Travel đang đối soát để xác nhận đơn hàng!
                     </p>
-                    <label className="text-[11px] text-amber-900 font-bold underline cursor-pointer hover:text-orange-600 mt-1 flex items-center gap-1">
-                      <Camera size={13} /> Tải lại ảnh khác nếu cần thay đổi
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="sr-only"
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-                          if (file) onUploadProof(file);
-                          event.currentTarget.value = "";
-                        }}
-                      />
-                    </label>
+                    <p className="text-[11px] text-amber-800 m-0">
+                      Để tránh đối soát trùng, hệ thống chỉ nhận một minh chứng cho mỗi lần duyệt. Nếu bị từ chối, nút tải lại sẽ tự mở.
+                    </p>
                   </div>
                 )}
 
@@ -587,14 +573,14 @@ export function OrderTimeline({
                 )}
 
                 {/* Nút gửi ảnh xác nhận chuyển khoản hỗ trợ mở camera trực tiếp */}
-                {workingOrder.paymentStatus.includes("requested") && (
+                {activeReq.status === "active" && (
                   <label
                     className="tab-button text-xs py-3 w-full justify-center bg-orange-500 text-white border-orange-600 hover:bg-orange-600 cursor-pointer font-bold rounded-2xl mt-1 flex items-center gap-2 shadow-md"
                   >
-                    <Camera size={16} /> Tải ảnh / Chụp hóa đơn chuyển khoản
+                    <Camera size={16} /> Tải ảnh, PDF / Chụp minh chứng chuyển khoản
                     <input
                       type="file"
-                      accept="image/*"
+                      accept="image/jpeg,image/png,image/webp,application/pdf"
                       className="sr-only"
                       onChange={(event) => {
                         const file = event.target.files?.[0];

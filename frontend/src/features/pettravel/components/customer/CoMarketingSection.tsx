@@ -13,25 +13,25 @@ export const CoMarketingSection: React.FC<CoMarketingSectionProps> = ({ onOpenPa
       icon: Store,
       color: "bg-blue-50 text-blue-600 border-blue-200",
       title: "Kệ Trưng Bày & POSM Miễn Phí",
-      desc: "Tài trợ 100% chi phí kệ mica chuyên dụng, Standee và bảng giá thương hiệu đặt tại điểm bán của đại lý.",
+      desc: "Trao đổi trực tiếp với đội ngũ Pet Travel về vật phẩm trưng bày và phương án hỗ trợ phù hợp cho từng điểm bán.",
     },
     {
       icon: Megaphone,
       color: "bg-indigo-50 text-indigo-600 border-indigo-200",
       title: "Truyền Thông Đồng Thương Hiệu",
-      desc: "Quảng bá điểm bán của đối tác trên hệ thống mạng xã hội & Website chính thức của Pet Travel Wholesale với hơn 50.000+ lượt tiếp cận/tháng.",
+      desc: "Phối hợp nội dung giới thiệu sản phẩm và điểm bán theo kế hoạch được hai bên thống nhất.",
     },
     {
       icon: RotateCcw,
       color: "bg-emerald-50 text-emerald-600 border-emerald-200",
       title: "Bảo Vệ Vốn & Đổi Trả Linh Hoạt",
-      desc: "Chính sách 1 đổi 1 trong 30 ngày cho lỗi kỹ thuật và hỗ trợ đổi mẫu chậm sang mẫu bán chạy để tối ưu hóa dòng tiền.",
+      desc: "Điều kiện đổi trả và hỗ trợ hàng hóa được thể hiện rõ trong báo giá, giúp đại lý chủ động kế hoạch nhập hàng.",
     },
     {
       icon: Zap,
       color: "bg-amber-50 text-amber-600 border-amber-200",
       title: "Báo Giá 2 Chiều Real-Time",
-      desc: "Hệ thống duyệt chiết khấu tự động, linh hoạt điều chỉnh số lượng và tạo mã VietQR đặt cọc Napas 247 tức thì.",
+      desc: "Đại lý và đội vận hành có thể trao đổi, điều chỉnh báo giá, nhận yêu cầu thanh toán và theo dõi trạng thái đơn hàng trên cùng hệ thống.",
     },
   ];
 
@@ -82,7 +82,7 @@ export const CoMarketingSection: React.FC<CoMarketingSectionProps> = ({ onOpenPa
           <div className="flex items-center gap-3">
             <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
             <div className="text-xs sm:text-sm text-slate-200">
-              <strong className="text-white font-semibold">Đã có hơn 350+ Đại lý & Spa</strong> tin tưởng hợp tác trên toàn quốc.
+              <strong className="text-white font-semibold">Mỗi chương trình hỗ trợ được xác nhận theo hồ sơ đại lý</strong> và điều kiện hợp tác thực tế.
             </div>
           </div>
           {onOpenPartnerModal && (

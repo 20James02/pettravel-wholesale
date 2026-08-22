@@ -2,13 +2,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from typing import Dict, Any, List
+from typing import Literal
+import logging
 import json
 import uuid
 import datetime
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.core.db import get_db
 from app.services.inventory import get_available_stock, release_stock, consume_reservations
+from app.services.operations_accounting import post_operations_accounting
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 ALLOWED_DOCUMENT_TYPES = {
     "purchase_receipt",
@@ -17,6 +22,79 @@ ALLOWED_DOCUMENT_TYPES = {
     "defect_report",
     "stock_adjustment",
 }
+
+
+class OperationsDocumentLineInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    productVariantId: str | None = Field(default=None, max_length=120)
+    sku: str | None = Field(default=None, max_length=120)
+    description: str = Field(default="", max_length=500)
+    quantity: int = Field(gt=0, le=1_000_000, strict=True)
+    unitCostVnd: int = Field(ge=0, le=10_000_000_000, strict=True)
+    supplierId: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def require_stock_identity(self):
+        if not (self.sku or self.productVariantId):
+            raise ValueError("Mỗi dòng chứng từ phải có SKU hoặc mã biến thể.")
+        return self
+
+
+class OperationsDocumentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["purchase_receipt", "sales_invoice", "expense", "defect_report", "stock_adjustment"]
+    documentNo: str | None = Field(default=None, max_length=120)
+    partnerName: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, max_length=2_000)
+    lines: list[OperationsDocumentLineInput] = Field(default_factory=list, max_length=500)
+    expenseCategory: str | None = Field(default=None, max_length=200)
+    amountVnd: int = Field(default=0, ge=0, le=1_000_000_000_000, strict=True)
+    shouldPost: bool = Field(default=False, strict=True)
+    userId: str = Field(min_length=1, max_length=120)
+    organizationId: str = Field(min_length=1, max_length=120)
+
+    @model_validator(mode="after")
+    def validate_document_shape(self):
+        if self.type == "expense" and self.amountVnd <= 0:
+            raise ValueError("Chi phí phải lớn hơn 0.")
+        if self.type != "expense" and not self.lines:
+            raise ValueError("Chứng từ phải có ít nhất một dòng hợp lệ.")
+        return self
+
+
+def _calculate_inventory_transition(
+    *,
+    sku: str,
+    current_on_hand: int,
+    current_reserved: int,
+    current_defective: int,
+    current_avg_cost: int,
+    quantity_delta: int,
+    defective_delta: int,
+    unit_cost: int,
+) -> tuple[int, int, int]:
+    available = max(0, current_on_hand - current_reserved - current_defective)
+    if quantity_delta < 0 and -quantity_delta > available:
+        raise HTTPException(status_code=409, detail=f"Tồn khả dụng không đủ để xuất SKU {sku}.")
+    if defective_delta > available:
+        raise HTTPException(status_code=409, detail=f"Tồn khả dụng không đủ để ghi nhận lỗi SKU {sku}.")
+
+    next_on_hand = current_on_hand + quantity_delta
+    next_defective = current_defective + defective_delta
+    if next_on_hand < 0 or next_defective < 0:
+        raise HTTPException(status_code=409, detail=f"Biến động tồn kho không hợp lệ cho SKU {sku}.")
+
+    if quantity_delta > 0 and next_on_hand > 0:
+        previous_value = current_on_hand * current_avg_cost
+        incoming_value = quantity_delta * unit_cost
+        next_avg_cost = int((previous_value + incoming_value) / next_on_hand)
+    else:
+        # Outbound and defect movements consume quantity/value at the current
+        # moving-average cost; they must not revalue the remaining stock.
+        next_avg_cost = current_avg_cost
+    return next_on_hand, next_defective, max(0, next_avg_cost)
 
 
 async def _require_actor_permission(
@@ -112,9 +190,10 @@ async def manage_stock_reservation(
     except HTTPException:
         await db.rollback()
         raise
-    except Exception as e:
+    except Exception as exc:
         await db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.exception("Unexpected stock reservation failure action=%s order_id=%s", action, order_id)
+        raise HTTPException(status_code=500, detail="Lỗi hệ thống khi xử lý giữ hàng.") from exc
 
 @router.get("/overview", response_model=Dict[str, Any])
 async def get_operations_overview(org_id: str, db: AsyncSession = Depends(get_db)):
@@ -195,19 +274,22 @@ async def get_operations_overview(org_id: str, db: AsyncSession = Depends(get_db
 
 @router.post("/documents", response_model=Dict[str, Any])
 async def create_operations_document(
-    payload: Dict[str, Any],
+    payload: OperationsDocumentInput,
     db: AsyncSession = Depends(get_db)
 ):
-    type_val = payload.get("type")
-    document_no = payload.get("documentNo")
-    partner_name = payload.get("partnerName")
-    note = payload.get("note")
-    lines = payload.get("lines", [])
-    expense_category = payload.get("expenseCategory")
-    amount_vnd = payload.get("amountVnd", 0)
-    should_post = payload.get("shouldPost", False)
-    user_id = payload.get("userId")
-    org_id = payload.get("organizationId")
+    if isinstance(payload, dict):
+        payload = OperationsDocumentInput.model_validate(payload)
+    payload_data = payload.model_dump()
+    type_val = payload_data.get("type")
+    document_no = payload_data.get("documentNo")
+    partner_name = payload_data.get("partnerName")
+    note = payload_data.get("note")
+    lines = payload_data.get("lines", [])
+    expense_category = payload_data.get("expenseCategory")
+    amount_vnd = payload_data.get("amountVnd", 0)
+    should_post = payload_data.get("shouldPost", False)
+    user_id = payload_data.get("userId")
+    org_id = payload_data.get("organizationId")
     
     if not org_id or not user_id:
         raise HTTPException(status_code=400, detail="Thiếu organizationId hoặc userId.")
@@ -226,16 +308,31 @@ async def create_operations_document(
         permission="operations.post" if should_post else "operations.write",
         organization_id=org_id,
     )
+    is_postgres = db.get_bind().dialect.name == "postgresql"
 
     # Get warehouse_id
     r_wh = await db.execute(text("SELECT id FROM warehouses WHERE organization_id = :org_id AND is_default = true AND active = true LIMIT 1"), {"org_id": org_id})
     warehouse_id = r_wh.scalar()
     if not warehouse_id:
         warehouse_id = str(uuid.uuid4())
-        await db.execute(text("INSERT INTO warehouses (id, organization_id, code, name, is_default, active) VALUES (:id, :org_id, 'MAIN', 'Kho chính Pet Travel', true, true)"), {
-            "id": warehouse_id,
-            "org_id": org_id
-        })
+        if is_postgres:
+            await db.execute(
+                text("""INSERT INTO warehouses (id, organization_id, code, name, is_default, active)
+                    VALUES (:id, :org_id, 'MAIN', 'Kho chính Pet Travel', true, true)
+                    ON CONFLICT (organization_id, code) DO NOTHING"""),
+                {"id": warehouse_id, "org_id": org_id},
+            )
+            warehouse_id = (
+                await db.execute(
+                    text("SELECT id FROM warehouses WHERE organization_id = :org_id AND code = 'MAIN' LIMIT 1"),
+                    {"org_id": org_id},
+                )
+            ).scalar_one()
+        else:
+            await db.execute(text("INSERT INTO warehouses (id, organization_id, code, name, is_default, active) VALUES (:id, :org_id, 'MAIN', 'Kho chính Pet Travel', true, true)"), {
+                "id": warehouse_id,
+                "org_id": org_id
+            })
         
     line_total = sum(int(line.get("quantity", 0)) * int(line.get("unitCostVnd", 0)) for line in lines)
     total_amount = amount_vnd if type_val == "expense" else line_total
@@ -243,7 +340,7 @@ async def create_operations_document(
     now = datetime.datetime.now(datetime.timezone.utc)
     
     if not document_no:
-        document_no = f"{type_val.upper()}-{now.year}{now.month:02d}-{int(now.timestamp())}"
+        document_no = f"{type_val.upper()}-{now:%Y%m}-{uuid.uuid4().hex[:10].upper()}"
         
     status_val = "posted" if should_post else "draft"
     
@@ -317,6 +414,7 @@ async def create_operations_document(
         })
         
     # Post Inventory if shouldPost
+    cogs_total = 0
     if should_post:
         for idx, line in enumerate(lines):
             qty = int(line.get("quantity", 0))
@@ -340,29 +438,51 @@ async def create_operations_document(
                 movement_type = "adjustment"
                 qty_delta = qty
                 
-            # Update inventory balance
-            r_bal = await db.execute(text("SELECT id, on_hand_qty, reserved_qty, defective_qty, avg_cost_vnd FROM inventory_balances WHERE organization_id = :org_id AND warehouse_id = :wh_id AND sku = :sku"), {
-                "org_id": org_id,
-                "wh_id": warehouse_id,
-                "sku": sku
-            })
+            # Materialize then lock the balance row. This serializes concurrent
+            # movements for the same organization/warehouse/SKU and prevents
+            # lost updates or double-selling the same available units.
+            balance_params = {"org_id": org_id, "wh_id": warehouse_id, "sku": sku}
+            if is_postgres:
+                await db.execute(
+                    text("""INSERT INTO inventory_balances
+                        (id, organization_id, warehouse_id, product_variant_id, sku, supplier_id,
+                         on_hand_qty, reserved_qty, defective_qty, avg_cost_vnd, updated_at)
+                        VALUES (:id, :org_id, :wh_id, :product_variant_id, :sku, :supplier_id,
+                                0, 0, 0, 0, :updated)
+                        ON CONFLICT (organization_id, warehouse_id, sku) DO NOTHING"""),
+                    {
+                        **balance_params,
+                        "id": str(uuid.uuid4()),
+                        "product_variant_id": line.get("productVariantId"),
+                        "supplier_id": line.get("supplierId"),
+                        "updated": now,
+                    },
+                )
+            lock_clause = " FOR UPDATE" if is_postgres else ""
+            r_bal = await db.execute(
+                text("""SELECT id, on_hand_qty, reserved_qty, defective_qty, avg_cost_vnd
+                    FROM inventory_balances
+                    WHERE organization_id = :org_id AND warehouse_id = :wh_id AND sku = :sku""" + lock_clause),
+                balance_params,
+            )
             balance = r_bal.mappings().first()
             
             curr_on_hand = int(balance["on_hand_qty"] or 0) if balance else 0
             curr_reserved = int(balance["reserved_qty"] or 0) if balance else 0
             curr_defective = int(balance["defective_qty"] or 0) if balance else 0
+            if type_val == "sales_invoice":
+                cogs_total += qty * (int(balance["avg_cost_vnd"] or 0) if balance else 0)
             
-            next_on_hand = curr_on_hand + qty_delta
-            next_defective = curr_defective + defective_delta
-            if type_val == "sales_invoice" and -qty_delta > max(0, curr_on_hand - curr_reserved - curr_defective):
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Tồn khả dụng không đủ để xuất SKU {sku}.",
-                )
-            
-            previous_value = curr_on_hand * int(balance["avg_cost_vnd"] or 0) if balance else 0
-            incoming_value = qty_delta * int(line.get("unitCostVnd", 0)) if qty_delta > 0 else 0
-            next_avg_cost = int((previous_value + incoming_value) / max(next_on_hand, 1)) if next_on_hand > 0 else (int(balance["avg_cost_vnd"] or 0) if balance else int(line.get("unitCostVnd", 0)))
+            next_on_hand, next_defective, next_avg_cost = _calculate_inventory_transition(
+                sku=str(sku),
+                current_on_hand=curr_on_hand,
+                current_reserved=curr_reserved,
+                current_defective=curr_defective,
+                current_avg_cost=int(balance["avg_cost_vnd"] or 0) if balance else 0,
+                quantity_delta=qty_delta,
+                defective_delta=defective_delta,
+                unit_cost=int(line.get("unitCostVnd", 0)),
+            )
             
             if balance:
                 await db.execute(text("""
@@ -374,7 +494,7 @@ async def create_operations_document(
                     "on_hand": next_on_hand,
                     "reserved": curr_reserved,
                     "defective": next_defective,
-                    "avg_cost": max(0, next_avg_cost),
+                    "avg_cost": next_avg_cost,
                     "updated": now
                 })
             else:
@@ -391,7 +511,7 @@ async def create_operations_document(
                     "on_hand": next_on_hand,
                     "reserved": curr_reserved,
                     "defective": next_defective,
-                    "avg_cost": max(0, next_avg_cost),
+                    "avg_cost": next_avg_cost,
                     "updated": now
                 })
                 
@@ -414,6 +534,19 @@ async def create_operations_document(
                 "created_at": now
             })
             
+    supplier_ids = {str(line.get("supplierId")) for line in lines if line.get("supplierId")}
+    accounting_result = await post_operations_accounting(
+        db,
+        document_id=document_id,
+        document_no=str(document_no),
+        document_type=str(type_val),
+        organization_id=str(org_id),
+        actor_id=str(user_id),
+        total_amount_vnd=int(total_amount),
+        cogs_amount_vnd=cogs_total,
+        supplier_id=next(iter(supplier_ids)) if len(supplier_ids) == 1 else None,
+    ) if should_post else {"status": "not_posted", "entryId": None}
+
     await db.commit()
     
     return {
@@ -423,5 +556,7 @@ async def create_operations_document(
         "status": status_val,
         "partnerName": partner_name,
         "totalAmountVnd": total_amount,
+        "accountingStatus": accounting_result["status"],
+        "accountingEntryId": accounting_result["entryId"],
         "createdAt": now.isoformat()
     }

@@ -11,7 +11,7 @@ export async function GET() {
     return NextResponse.json({ overview });
   } catch (error) {
     if (error instanceof Response) return error;
-    const message = error instanceof Error ? error.message : "Không thể đọc dữ liệu vận hành.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("OPERATIONS_OVERVIEW_FAILED", error);
+    return NextResponse.json({ error: "Không thể đọc dữ liệu vận hành." }, { status: 500 });
   }
 }

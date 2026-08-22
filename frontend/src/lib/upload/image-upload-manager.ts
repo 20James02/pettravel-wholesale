@@ -35,7 +35,7 @@ interface PresignResponse {
   key: string;
   uploadUrl: string;
   expiresInSeconds: number;
-  publicUrl: string;
+  publicUrl: string | null;
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -125,12 +125,10 @@ export async function uploadImageDirectToR2(
 
   // Pre-compress image client-side to optimize resolution and size (<200KB)
   let fileToUpload = file;
-  let compressedDataUrl = "";
   try {
     const compressed = await compressImageFile(file, 1200, 0.82);
     if (compressed.file && compressed.file.size > 0) {
       fileToUpload = compressed.file;
-      compressedDataUrl = compressed.dataUrl;
     }
   } catch {
     // Non-fatal: proceed with original file if canvas compression fails
@@ -182,6 +180,9 @@ export async function uploadImageDirectToR2(
       });
 
       if (uploadRes.ok) {
+        if (!presignData.publicUrl?.startsWith("https://")) {
+          throw new Error("Máy chủ lưu trữ không trả về URL ảnh công khai hợp lệ.");
+        }
         options.onProgress?.(100);
         return {
           key: presignData.key,
@@ -201,31 +202,8 @@ export async function uploadImageDirectToR2(
 
       attempt += 1;
       if (attempt > maxRetries) {
-        // Fallback gracefully to compressed Data URL (so user is never blocked)
-        if (compressedDataUrl) {
-          options.onProgress?.(100);
-          return {
-            key: `local_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`,
-            publicUrl: compressedDataUrl
-          };
-        }
-
-        try {
-          const reader = new FileReader();
-          const dataUrl = await new Promise<string>((resolve, reject) => {
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(fileToUpload);
-          });
-          options.onProgress?.(100);
-          return {
-            key: `local_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`,
-            publicUrl: dataUrl
-          };
-        } catch {
-          const msg = err instanceof Error ? err.message : "Tải ảnh thất bại.";
-          throw new Error(msg);
-        }
+        const msg = err instanceof Error ? err.message : "Tải ảnh thất bại.";
+        throw new Error(msg);
       }
 
       const baseDelay = attempt === 1 ? 400 : 1000;
@@ -233,10 +211,7 @@ export async function uploadImageDirectToR2(
     }
   }
 
-  return {
-    key: `local_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`,
-    publicUrl: compressedDataUrl || ""
-  };
+  throw new Error("Tải ảnh thất bại sau nhiều lần thử.");
 }
 
 export async function uploadQueue(

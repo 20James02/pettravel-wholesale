@@ -153,7 +153,7 @@ export async function deduplicatedFetch<T = unknown>(url: string, signal?: Abort
         signal,
         headers: {
           "x-prefetch": "1",
-          "x-trace-id": `trace_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+          "x-trace-id": `trace_${crypto.randomUUID()}`
         }
       });
       if (!res.ok) {

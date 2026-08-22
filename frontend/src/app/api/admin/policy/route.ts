@@ -21,7 +21,7 @@ export async function GET() {
     const rolePermissions = await getRolePermissions();
     return NextResponse.json({ adminPolicy, rolePermissions });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Không thể lấy thông tin cấu hình.";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    console.error("ADMIN_POLICY_FETCH_FAILED", error);
+    return NextResponse.json({ error: "Không thể lấy thông tin cấu hình." }, { status: 500 });
   }
 }

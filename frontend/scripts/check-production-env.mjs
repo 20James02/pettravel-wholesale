@@ -47,8 +47,6 @@ requireHttpsUrl("BACKEND_URL");
 requireValue("BACKEND_INTERNAL_SECRET", 32);
 requireValue("JWT_SECRET", 32);
 requireValue("CRON_SECRET", 16);
-requireValue("PAYMENT_QR_ACCOUNT_NO");
-requireValue("PAYMENT_QR_ACCOUNT_NAME");
 
 if (value("NEXT_PUBLIC_APP_URL").replace(/\/$/, "") === value("BACKEND_URL").replace(/\/$/, "")) {
   failures.push("NEXT_PUBLIC_APP_URL and BACKEND_URL must point to different Vercel projects/domains");

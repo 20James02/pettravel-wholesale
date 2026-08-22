@@ -10,7 +10,7 @@ interface TopbarProps {
   isAdmin?: boolean;
   activeTab: TabKey;
   setActiveTab: (tab: TabKey) => void;
-  setShowLoginModal: (val: boolean) => void;
+  onRequireLogin: (tab: TabKey) => void;
   cartItemsCount?: number;
 }
 
@@ -19,7 +19,7 @@ export function Topbar({
   isAdmin = false,
   activeTab,
   setActiveTab,
-  setShowLoginModal,
+  onRequireLogin,
   cartItemsCount = 0
 }: TopbarProps) {
   return (
@@ -34,6 +34,7 @@ export function Topbar({
           type="button"
           className={`liquid-glass-tab ${activeTab === "catalog" ? "active" : ""}`}
           onClick={() => setActiveTab("catalog")}
+          aria-current={activeTab === "catalog" ? "page" : undefined}
           onPointerEnter={() => prefetchRouteData("catalog")}
           onFocus={() => prefetchRouteData("catalog")}
           onTouchStart={() => prefetchRouteData("catalog")}
@@ -46,7 +47,8 @@ export function Topbar({
         <button
           type="button"
           className={`liquid-glass-tab ${activeTab === "cart" ? "active" : ""}`}
-          onClick={() => setActiveTab("cart")}
+          onClick={() => (isLoggedIn ? setActiveTab("cart") : onRequireLogin("cart"))}
+          aria-current={activeTab === "cart" ? "page" : undefined}
           onPointerEnter={() => prefetchRouteData("cart")}
           onFocus={() => prefetchRouteData("cart")}
           onTouchStart={() => prefetchRouteData("cart")}
@@ -62,7 +64,8 @@ export function Topbar({
         <button
           type="button"
           className={`liquid-glass-tab ${activeTab === "order" ? "active" : ""}`}
-          onClick={() => setActiveTab("order")}
+          onClick={() => (isLoggedIn ? setActiveTab("order") : onRequireLogin("order"))}
+          aria-current={activeTab === "order" ? "page" : undefined}
           onPointerEnter={() => prefetchRouteData("order")}
           onFocus={() => prefetchRouteData("order")}
           onTouchStart={() => prefetchRouteData("order")}
@@ -77,13 +80,14 @@ export function Topbar({
           className={`liquid-glass-tab ${activeTab === "profile" ? "active" : ""}`}
           onClick={() => {
             if (!isLoggedIn) {
-              setShowLoginModal(true);
+              onRequireLogin("profile");
             } else if (isAdmin) {
               setActiveTab("admin");
             } else {
               setActiveTab("profile");
             }
           }}
+          aria-current={activeTab === "profile" ? "page" : undefined}
           onPointerEnter={() => prefetchRouteData("profile")}
           onFocus={() => prefetchRouteData("profile")}
           onTouchStart={() => prefetchRouteData("profile")}
@@ -98,6 +102,7 @@ export function Topbar({
             type="button"
             className={`liquid-glass-tab font-extrabold ${activeTab.startsWith("admin") || activeTab === "settings" ? "active" : ""}`}
             onClick={() => setActiveTab("admin")}
+            aria-current={activeTab.startsWith("admin") || activeTab === "settings" ? "page" : undefined}
             onPointerEnter={() => prefetchRouteData("admin")}
             onFocus={() => prefetchRouteData("admin")}
             onTouchStart={() => prefetchRouteData("admin")}

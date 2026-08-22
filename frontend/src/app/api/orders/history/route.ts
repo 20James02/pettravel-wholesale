@@ -23,8 +23,13 @@ export async function GET(request: Request) {
     const history = await getOrderRevisionHistory(orderId, user);
     return NextResponse.json({ history });
   } catch (error) {
+    console.error("ORDER_HISTORY_FETCH_FAILED", {
+      orderId,
+      userId: user.id,
+      error: error instanceof Error ? error.message : "unknown"
+    });
     return NextResponse.json(
-      { error: (error as Error).message || "Không thể tải lịch sử đơn hàng." },
+      { error: "Không thể tải lịch sử đơn hàng. Vui lòng thử lại sau." },
       { status: 500 }
     );
   }

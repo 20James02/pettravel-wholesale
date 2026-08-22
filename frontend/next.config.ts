@@ -11,6 +11,10 @@ const nextConfig: NextConfig = {
       {
         protocol: "https",
         hostname: "**.r2.cloudflarestorage.com"
+      },
+      {
+        protocol: "https",
+        hostname: "img.vietqr.io"
       }
     ]
   },
@@ -27,7 +31,7 @@ const nextConfig: NextConfig = {
               "object-src 'none'",
               "frame-ancestors 'none'",
               "form-action 'self'",
-              "img-src 'self' data: blob: https://*.r2.dev https://*.r2.cloudflarestorage.com",
+              "img-src 'self' data: blob: https://*.r2.dev https://*.r2.cloudflarestorage.com https://img.vietqr.io",
               "connect-src 'self' https://*.supabase.co https://*.r2.cloudflarestorage.com",
               "script-src 'self' 'unsafe-inline'",
               "style-src 'self' 'unsafe-inline'",
@@ -37,6 +41,9 @@ const nextConfig: NextConfig = {
           },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" }
         ]

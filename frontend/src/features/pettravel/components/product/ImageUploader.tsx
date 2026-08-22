@@ -108,7 +108,7 @@ export function ImageUploader({
 
       const previewBlob = URL.createObjectURL(file);
       newItems.push({
-        id: `upload_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        id: `upload_${crypto.randomUUID()}`,
         file,
         previewUrl: previewBlob,
         status: "pending",

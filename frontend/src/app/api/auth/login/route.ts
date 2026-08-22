@@ -8,6 +8,7 @@ import {
   getValidationErrorMessage,
   loginPasswordSchema
 } from "@/lib/validation";
+import { consumeRateLimit, getRequestRateLimitKey, resetRateLimit } from "@/server/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -46,6 +47,14 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { identifier, email, password } = loginSchema.parse(body);
     const loginTarget = (identifier || email || "").trim();
+    const rateLimitKey = getRequestRateLimitKey(request, "login", loginTarget);
+    const rateLimit = consumeRateLimit(rateLimitKey, { limit: 8, windowMs: 5 * 60 * 1_000 });
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: "Bạn đã thử đăng nhập quá nhiều lần. Vui lòng đợi rồi thử lại." },
+        { status: 429, headers: { "Retry-After": String(rateLimit.retryAfterSeconds) } }
+      );
+    }
 
     const BACKEND_URL = getBackendUrl();
     let res: Response;
@@ -67,13 +76,16 @@ export async function POST(request: Request) {
     try {
       data = text ? JSON.parse(text) : {};
     } catch {
-      data = { error: text || `Máy chủ phản hồi lỗi HTTP ${res.status}` };
+      data = {};
     }
 
     if (!res.ok) {
+      const safeClientMessage = [400, 401, 403, 429].includes(res.status)
+        ? data.detail || data.error || "Sai email hoặc mật khẩu đăng nhập."
+        : "Máy chủ xử lý đăng nhập gặp sự cố. Vui lòng thử lại sau.";
       return NextResponse.json(
-        { error: data.detail || data.error || "Sai email hoặc mật khẩu đăng nhập." },
-        { status: res.status || 401 }
+        { error: safeClientMessage },
+        { status: res.status >= 400 && res.status < 600 ? res.status : 502 }
       );
     }
 
@@ -88,6 +100,7 @@ export async function POST(request: Request) {
     const isAdmin = INTERNAL_ROLE_KEYS.has(role);
 
     const token = encodeSession(user.id);
+    resetRateLimit(rateLimitKey);
 
     const response = NextResponse.json({
       user: {
@@ -110,6 +123,7 @@ export async function POST(request: Request) {
 
     return response;
   } catch (error) {
+    if (error instanceof Response) return error;
     const message = getValidationErrorMessage(error, "Lỗi đăng nhập.");
     return NextResponse.json({ error: message }, { status: 400 });
   }

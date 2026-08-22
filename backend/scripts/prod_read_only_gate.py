@@ -2,13 +2,17 @@ import asyncio
 import asyncpg
 import hashlib
 
-db_url = 'postgresql://postgres.gfiyzwrcvsnsimwbpgbb:HvT%40270756832002@aws-0-ap-south-1.pooler.supabase.com:5432/postgres'
+from app.core.config import settings
+
+
+def get_asyncpg_database_url() -> str:
+    return settings.async_database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
 
 async def prod_preflight():
     print('=' * 80)
     print('PRODUCTION READ-ONLY PRE-FLIGHT INSPECTION GATE')
     print('=' * 80)
-    conn = await asyncpg.connect(db_url, timeout=10)
+    conn = await asyncpg.connect(get_asyncpg_database_url(), timeout=10)
     try:
         # 1. Identity
         row = await conn.fetchrow('SELECT version(), current_user, session_user, current_database();')

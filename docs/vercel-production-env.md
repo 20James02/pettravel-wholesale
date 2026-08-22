@@ -22,8 +22,6 @@ Set these for Production and Preview:
 | `BACKEND_INTERNAL_SECRET` | yes | yes | Same exact value as backend; at least 32 random chars |
 | `JWT_SECRET` | yes | yes | Frontend session signing secret; at least 32 random chars |
 | `CRON_SECRET` | yes | yes | At least 16 random chars; Vercel sends it as `Authorization: Bearer ...` for cron |
-| `PAYMENT_QR_ACCOUNT_NO` | yes | yes | Bank account number used in generated payment payloads |
-| `PAYMENT_QR_ACCOUNT_NAME` | yes | no | Bank account name shown in payment payloads |
 | `ALLOW_DEMO_DATA` | yes | no | Must be `false` |
 | `ALLOW_RUNTIME_MIGRATIONS` | yes | no | Must be `false` |
 | `ADMIN_BOOTSTRAP_EMAIL` | temporary | no | Owner email for first admin creation only |
@@ -47,12 +45,18 @@ Set these for Production and Preview:
 | `R2_ACCOUNT_ID` | yes | yes | Cloudflare R2 account id |
 | `R2_ACCESS_KEY_ID` | yes | yes | Cloudflare R2 access key id |
 | `R2_SECRET_ACCESS_KEY` | yes | yes | Cloudflare R2 secret access key |
-| `R2_BUCKET` | yes | no | Production bucket name |
+| `R2_BUCKET` | yes | no | Public product-media bucket name |
+| `R2_PRIVATE_BUCKET` | yes | yes | Separate non-public bucket for payment proofs and invoices; must differ from `R2_BUCKET` |
 | `R2_PUBLIC_BASE_URL` | yes | no | Public asset base URL, not placeholder/example |
+| `PAYMENT_QR_BANK_CODE` | yes | no | VietQR bank code, for example `MB` |
+| `PAYMENT_QR_ACCOUNT_NO` | yes | yes | Authoritative receiving bank account number |
+| `PAYMENT_QR_ACCOUNT_NAME` | yes | no | Receiving account name shown by VietQR |
+| `VIETQR_WEBHOOK_SECRET` | yes | yes | Random payment callback secret with at least 32 characters |
+| `PAYMENT_SYSTEM_ACTOR_ID` | yes | no | Active app user id with `order.confirm_payment` permission |
 | `ALLOW_DEMO_DATA` | yes | no | Must be `false` |
 | `ALLOW_RUNTIME_MIGRATIONS` | yes | no | Must be `false` |
 
-Do not set `NEXT_PUBLIC_*`, `PAYMENT_QR_*`, `CRON_SECRET`, or admin bootstrap variables in the backend project unless backend code starts using them later.
+Do not set `NEXT_PUBLIC_*`, `CRON_SECRET`, or admin bootstrap variables in the backend project. Payment QR and webhook configuration is backend-only.
 
 ## Vercel Project Settings
 
@@ -100,6 +104,7 @@ Live checks after each new deployment:
 - Backend `/api/v1/health/db` returns `401` without `x-backend-internal-secret`
 - Backend `/api/v1/health/db` returns `200` with the shared backend secret
 - Login owner, create customer, create product variant, create order, quote, generate payment request, upload proof, confirm payment
+- Verify migration V15 exists (`auth_rate_limit_buckets` with RLS enabled), then confirm repeated failed logins return `429` across separate frontend/backend instances without storing raw identifiers.
 
 ## Production Agent Prompt
 

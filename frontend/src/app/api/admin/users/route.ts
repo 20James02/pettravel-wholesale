@@ -43,6 +43,7 @@ export async function GET() {
     const users = await getAppUsers();
     return NextResponse.json({ users });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Không thể lấy danh sách tài khoản.");
     return NextResponse.json({ error: msg }, { status: 500 });
   }
@@ -79,6 +80,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, message: "Tạo tài khoản thành công!" });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Không thể tạo tài khoản.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
@@ -117,8 +119,8 @@ export async function DELETE(request: Request) {
     invalidateUserSessionCache(userId);
     return NextResponse.json({ success: true, message: res.message || "Đã xóa tài khoản thành công." });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Không thể xóa tài khoản.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
-

@@ -64,6 +64,7 @@ export async function POST(req: Request) {
     await saveProduct(product);
     return NextResponse.json({ success: true, product });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Dữ liệu sản phẩm không hợp lệ.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
@@ -83,6 +84,7 @@ export async function PUT(req: Request) {
     await saveProduct(product);
     return NextResponse.json({ success: true, product });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Dữ liệu sản phẩm không hợp lệ.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
@@ -103,6 +105,7 @@ export async function DELETE(req: Request) {
     await deleteProduct(id);
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Thiếu hoặc sai ID sản phẩm.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }

@@ -479,7 +479,8 @@ stateDiagram-v2
 > **Status**: Presign API = `INTEGRATION_TESTED`, Storage Mock = `UNIT_TESTED_VIA_MOCK` | **Confidence**: `HIGH`
 
 - Presigned PUT URLs generated server-side with UUID keys (`products/{id}/{uuid}.ext`).
-- Client upload directly to R2; client never receives bucket credentials or master secrets.
+- Product media uses a public bucket; payment proofs and invoices use a separate private bucket with 60-second authorized download URLs.
+- Client upload directly to R2; client never receives bucket credentials or master secrets. Proof metadata is committed only after an R2 `HEAD` verification of content type and exact byte length.
 
 ---
 
@@ -914,4 +915,3 @@ The following architectural decisions require formal review and written sign-off
 [X] Step 8: Security & Authorization Audit
 [X] Step 9: Walkthrough & Documentation Update
 ```
-

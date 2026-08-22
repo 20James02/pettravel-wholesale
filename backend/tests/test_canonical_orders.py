@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import text
 
-from app.repositories.order_read import list_orders
+from app.repositories.order_read import get_order_revision_history, list_orders
 from app.repositories.orders import OrderConflictError, save_order
 
 
@@ -110,12 +110,11 @@ async def test_customer_upload_persists_payment_proof_metadata(canonical_db_sess
         actor_id="user_1",
         order={
             "id": "order_1",
-            "paymentRequests": [{"id": "request_1", "purpose": "deposit"}],
             "paymentProofs": [
                 {
                     "id": "proof_1",
                     "paymentRequestId": "request_1",
-                    "storageKey": "payment-proof/order_1/proof.jpg",
+                    "storageKey": "orders/order_1/payment-proof/proof.jpg",
                     "fileName": "proof.jpg",
                     "contentType": "image/jpeg",
                     "fileSizeBytes": 1234,
@@ -131,8 +130,177 @@ async def test_customer_upload_persists_payment_proof_metadata(canonical_db_sess
     request = (
         await canonical_db_session.execute(text("select status from payment_requests where id = 'request_1'"))
     ).scalar_one()
-    assert proof["storage_key"] == "payment-proof/order_1/proof.jpg"
+    assert proof["storage_key"] == "orders/order_1/payment-proof/proof.jpg"
     assert request == "uploaded"
+
+
+@pytest.mark.asyncio
+async def test_customer_cannot_upload_proof_to_expired_request(canonical_db_session):
+    await canonical_db_session.execute(text("insert into organizations (id, name) values ('org_exp_upload', 'Đại lý Expired')"))
+    await canonical_db_session.execute(
+        text("insert into app_users (id, organization_id, full_name, email, status) values ('cust_exp_upload', 'org_exp_upload', 'Khách Expired', 'expired-upload@example.com', 'active')")
+    )
+    await canonical_db_session.execute(
+        text("insert into customer_orders (id, order_number, organization_id, created_by, payment_intent) values ('ord_exp_upload', 'PTW-EXP-UP', 'org_exp_upload', 'cust_exp_upload', 'deposit_cod')")
+    )
+    await canonical_db_session.execute(
+        text("insert into quote_versions (id, order_id, version, status, subtotal, final_total, deposit_amount, cod_remaining, expires_at) values ('q_exp_upload', 'ord_exp_upload', 1, 'accepted', 1000, 1000, 300, 700, '2030-01-01')")
+    )
+    await canonical_db_session.execute(
+        text("insert into payment_requests (id, order_id, quote_id, purpose, amount, reference, qr_payload, status, expires_at) values ('pr_exp_upload', 'ord_exp_upload', 'q_exp_upload', 'deposit', 300, 'REF-EXP-UP', 'QR', 'active', '2020-01-01')")
+    )
+    await canonical_db_session.commit()
+
+    with pytest.raises(ValueError, match="PAYMENT_REQUEST_EXPIRED"):
+        await save_order(
+            canonical_db_session,
+            actor_id="cust_exp_upload",
+            order={
+                "id": "ord_exp_upload",
+                "paymentProofs": [
+                    {
+                        "id": "proof_exp_upload",
+                        "paymentRequestId": "pr_exp_upload",
+                        "storageKey": "orders/ord_exp_upload/payment-proof/proof.jpg",
+                        "fileName": "proof.jpg",
+                        "contentType": "image/jpeg",
+                        "fileSizeBytes": 100,
+                    }
+                ],
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_customer_cannot_change_shipping_or_payment_details_after_quote_acceptance(canonical_db_session):
+    await canonical_db_session.execute(text("insert into organizations (id, name) values ('org_details_lock', 'Đại lý Locked Details')"))
+    await canonical_db_session.execute(
+        text("insert into app_users (id, organization_id, full_name, email, status) values ('cust_details_lock', 'org_details_lock', 'Khách Locked', 'locked-details@example.com', 'active')")
+    )
+    await canonical_db_session.execute(
+        text("""insert into customer_orders
+            (id, order_number, organization_id, created_by, commercial_status, payment_status,
+             fulfillment_status, payment_intent, recipient_name, recipient_phone, recipient_address)
+            values ('ord_details_lock', 'PTW-DETAILS-LOCK', 'org_details_lock', 'cust_details_lock',
+                    'customer_accepted', 'deposit_requested', 'not_started', 'deposit_cod',
+                    'Người nhận cũ', '0900000000', 'Địa chỉ đã chốt')""")
+    )
+    await canonical_db_session.commit()
+
+    with pytest.raises(ValueError, match="CUSTOMER_ORDER_DETAILS_LOCKED"):
+        await save_order(
+            canonical_db_session,
+            actor_id="cust_details_lock",
+            order={
+                "id": "ord_details_lock",
+                "recipientAddress": "Địa chỉ thay đổi sau khi chốt",
+                "paymentIntent": "pay_full",
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_customer_revision_history_masks_internal_supplier_and_staff_data(canonical_db_session):
+    await canonical_db_session.execute(text("insert into organizations (id, name) values ('org_hist', 'Đại lý History')"))
+    await canonical_db_session.execute(text("insert into organizations (id, name) values ('org_staff', 'Pet Travel')"))
+    await canonical_db_session.execute(
+        text("insert into app_users (id, organization_id, full_name, email, status) values ('cust_hist', 'org_hist', 'Khách History', 'cust-hist@example.com', 'active')")
+    )
+    await canonical_db_session.execute(
+        text("insert into app_users (id, organization_id, full_name, email, status) values ('admin_hist', 'org_staff', 'Nhân viên nội bộ', 'admin-hist@example.com', 'active')")
+    )
+    await canonical_db_session.execute(
+        text("insert into user_roles (user_id, role_id) values ('admin_hist', 'role_super_admin')")
+    )
+    await canonical_db_session.execute(
+        text("insert into customer_orders (id, order_number, organization_id, created_by, payment_intent) values ('ord_hist', 'PTW-HIST', 'org_hist', 'cust_hist', 'deposit_cod')")
+    )
+    await canonical_db_session.execute(
+        text("""insert into order_revision_history
+            (id, order_id, revision_no, actor_id, actor_name, actor_role, action_type,
+             from_commercial_status, to_commercial_status, items_snapshot, quote_snapshot,
+             shipping_snapshot, note)
+            values ('rev_hist', 'ord_hist', 1, 'admin_hist', 'Nhân viên nội bộ', 'admin',
+                    'publish_quote', 'admin_review', 'quoted', :items, :quotes, :shipping, 'ghi chú nội bộ')"""),
+        {
+            "items": '[{"id":"item-hist","productCode":"P1","supplierId":"supplier-secret","quantity":1}]',
+            "quotes": '[{"id":"quote-hist","version":1,"finalTotal":100000,"publishedBy":"admin_hist"}]',
+            "shipping": '{"recipientName":"Khách History","recipientPhone":"0900000000"}',
+        },
+    )
+    await canonical_db_session.commit()
+
+    customer_history = await get_order_revision_history(
+        canonical_db_session, order_id="ord_hist", actor_id="cust_hist", is_admin=False
+    )
+    assert customer_history[0]["actorId"] == ""
+    assert customer_history[0]["actorName"] == "Pet Travel Wholesale"
+    assert customer_history[0]["note"] is None
+    assert "supplierId" not in customer_history[0]["itemsSnapshot"][0]
+    assert "publishedBy" not in customer_history[0]["quoteSnapshot"][0]
+
+    admin_history = await get_order_revision_history(
+        canonical_db_session, order_id="ord_hist", actor_id="admin_hist", is_admin=True
+    )
+    assert admin_history[0]["actorId"] == "admin_hist"
+    assert admin_history[0]["itemsSnapshot"][0]["supplierId"] == "supplier-secret"
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_confirm_a_proof_against_another_payment_request(canonical_db_session):
+    await canonical_db_session.execute(text("insert into organizations (id, name) values ('org_pay', 'Đại lý Payment')"))
+    await canonical_db_session.execute(text("insert into organizations (id, name) values ('org_pay_admin', 'Pet Travel')"))
+    await canonical_db_session.execute(
+        text("insert into app_users (id, organization_id, full_name, email, status) values ('cust_pay', 'org_pay', 'Khách Pay', 'cust-pay@example.com', 'active')")
+    )
+    await canonical_db_session.execute(
+        text("insert into app_users (id, organization_id, full_name, email, status) values ('admin_pay', 'org_pay_admin', 'Admin Pay', 'admin-pay@example.com', 'active')")
+    )
+    await canonical_db_session.execute(text("insert into user_roles (user_id, role_id) values ('admin_pay', 'role_super_admin')"))
+    await canonical_db_session.execute(
+        text("insert into customer_orders (id, order_number, organization_id, created_by, commercial_status, payment_intent) values ('ord_pay', 'PTW-PAY', 'org_pay', 'cust_pay', 'customer_accepted', 'deposit_cod')")
+    )
+    await canonical_db_session.execute(
+        text("insert into quote_versions (id, order_id, version, status, subtotal, final_total, deposit_amount, cod_remaining, expires_at) values ('q_pay_a', 'ord_pay', 1, 'accepted', 1000, 1000, 300, 700, '2030-01-01')")
+    )
+    await canonical_db_session.execute(
+        text("insert into payment_requests (id, order_id, quote_id, purpose, amount, reference, qr_payload, status, expires_at) values ('pr_pay_a', 'ord_pay', 'q_pay_a', 'deposit', 300, 'REF-A', 'QR', 'uploaded', '2030-01-01')")
+    )
+    await canonical_db_session.execute(
+        text("insert into payment_requests (id, order_id, quote_id, purpose, amount, reference, qr_payload, status, expires_at) values ('pr_pay_b', 'ord_pay', 'q_pay_a', 'deposit', 300, 'REF-B', 'QR', 'uploaded', '2030-01-01')")
+    )
+    await canonical_db_session.execute(
+        text("insert into payment_proofs (id, payment_request_id, storage_key, file_name, content_type, file_size_bytes, status, uploaded_by) values ('proof_pay_a', 'pr_pay_a', 'orders/ord_pay/payment-proof/a.jpg', 'a.jpg', 'image/jpeg', 100, 'pending_admin_confirmation', 'cust_pay')")
+    )
+    await canonical_db_session.commit()
+
+    with pytest.raises(ValueError, match="PAYMENT_PROOF_REQUEST_MISMATCH"):
+        await save_order(
+            canonical_db_session,
+            actor_id="admin_pay",
+            order={
+                "id": "ord_pay",
+                "paymentProofs": [
+                    {"id": "proof_pay_a", "paymentRequestId": "pr_pay_b", "status": "accepted"}
+                ],
+            },
+        )
+
+    await canonical_db_session.execute(
+        text("update payment_requests set expires_at = '2020-01-01' where id = 'pr_pay_a'")
+    )
+    await canonical_db_session.commit()
+    with pytest.raises(ValueError, match="PAYMENT_PROOF_REVIEW_EXPIRED"):
+        await save_order(
+            canonical_db_session,
+            actor_id="admin_pay",
+            order={
+                "id": "ord_pay",
+                "paymentProofs": [
+                    {"id": "proof_pay_a", "paymentRequestId": "pr_pay_a", "status": "accepted"}
+                ],
+            },
+        )
 
 
 @pytest.mark.asyncio
@@ -261,8 +429,10 @@ async def test_shipping_update_persists_fulfillment_and_shipment(canonical_db_se
     )
     await canonical_db_session.execute(
         text("""insert into customer_orders
-            (id, order_number, organization_id, created_by, payment_intent, fulfillment_status, updated_at)
-            values ('order_1', 'PTW-1', 'org_customer', 'customer_1', 'deposit_cod', 'ready_to_ship', '2026-08-15 00:00:00')""")
+            (id, order_number, organization_id, created_by, commercial_status, payment_status,
+             payment_intent, fulfillment_status, updated_at)
+            values ('order_1', 'PTW-1', 'org_customer', 'customer_1', 'locked', 'paid',
+                    'deposit_cod', 'ready_to_ship', '2026-08-15 00:00:00')""")
     )
     await canonical_db_session.execute(
         text("""insert into order_items

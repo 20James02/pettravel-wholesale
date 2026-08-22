@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSessionUser, requireSameOrigin } from "@/server/auth";
-import { BackendRequestError } from "@/server/backend-client";
+import { BackendRequestError, backendFetchJson } from "@/server/backend-client";
 import { normalizeOrderQuoteFinancials } from "@/server/accounting/order-financials";
-import { getMissingOrderPermissions } from "@/server/order-authorization";
+import { getMissingOrderPermissions, hasQuoteOwnershipWork } from "@/server/order-authorization";
 import { getAdminPolicy, getOrders, getProducts, saveOrder } from "@/server/db";
 import type { CustomerOrder, OrderComment, OrderItem, PaymentProof } from "@/lib/domain";
 import {
   getValidationErrorMessage,
-  idSchema,
   phoneSchema,
-  recipientSchema,
-  shortTextSchema
+  recipientSchema
 } from "@/lib/validation";
+import {
+  FORBIDDEN_CUSTOMER_FIELDS,
+  customerOrderUpdateSchema
+} from "@/lib/order-validation";
 
 export const runtime = "nodejs";
 
@@ -34,67 +36,6 @@ const createCustomerOrderSchema = z.object({
   recipientAddress: recipientSchema.shape.recipientAddress.optional().or(z.literal("")),
   customerTaxCode: z.string().trim().max(50).optional().or(z.literal("")),
   customerNote: z.string().trim().max(1000).optional().or(z.literal(""))
-});
-
-const customerCommentSchema = z.object({
-  id: idSchema.optional(),
-  message: shortTextSchema("Nội dung ghi chú", 1, 2000)
-});
-
-const customerProofSchema = z.object({
-  id: idSchema,
-  paymentRequestId: idSchema,
-  fileName: z.string().trim().min(3, "Tên file quá ngắn.").max(180, "Tên file quá dài."),
-  storageKey: z.string().trim().min(3).max(500),
-  contentType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]),
-  fileSizeBytes: z.number().int().positive().max(10 * 1024 * 1024),
-  uploadedAt: z.string().optional()
-});
-
-const customerPaymentRequestSchema = z.object({
-  id: z.string().trim().min(1),
-  quoteVersion: z.number().int().nonnegative(),
-  amount: z.number().int().nonnegative(),
-  purpose: z.enum(["deposit", "full", "remaining"]),
-  reference: z.string().trim().min(1),
-  qrPayload: z.string().trim().min(1),
-  expiresAt: z.string().min(1),
-  status: z.enum(["active", "uploaded", "confirmed", "expired", "superseded"])
-});
-
-const customerOrderUpdateSchema = z.object({
-  id: idSchema,
-  paymentIntent: z.enum(["deposit_cod", "pay_full"]).optional(),
-  invoiceRequested: z.boolean().optional(),
-  recipientName: recipientSchema.shape.recipientName.optional().or(z.literal("")),
-  recipientPhone: phoneSchema.optional().or(z.literal("")),
-  recipientAddress: recipientSchema.shape.recipientAddress.optional().or(z.literal("")),
-  customerTaxCode: z.string().trim().max(50).optional().or(z.literal("")),
-  customerNote: z.string().trim().max(1000).optional().or(z.literal("")),
-  commercialStatus: z.enum(["draft", "submitted", "admin_review", "quoted", "customer_accepted", "locked", "cancelled"]).optional(),
-  acceptedQuoteId: z.string().trim().min(1).optional(),
-  acceptedQuoteVersion: z.number().int().positive().optional(),
-  paymentStatus: z.enum(["unrequested", "deposit_requested", "deposit_uploaded", "deposit_confirmed", "full_requested", "full_uploaded", "paid", "cod_remaining", "refunded"]).optional(),
-  paymentRequests: z.array(customerPaymentRequestSchema).max(20).optional(),
-  comments: z.array(customerCommentSchema).max(20, "Mỗi lần cập nhật tối đa 20 ghi chú.").optional(),
-  paymentProofs: z.array(customerProofSchema).max(20, "Mỗi lần cập nhật tối đa 20 minh chứng.").optional()
-}).superRefine((data, ctx) => {
-  if (data.commercialStatus === "customer_accepted") {
-    if (!data.acceptedQuoteId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Thiếu acceptedQuoteId khi chấp thuận báo giá.",
-        path: ["acceptedQuoteId"]
-      });
-    }
-    if (data.acceptedQuoteVersion === undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Thiếu acceptedQuoteVersion khi chấp thuận báo giá.",
-        path: ["acceptedQuoteVersion"]
-      });
-    }
-  }
 });
 
 const adminOrderItemSchema = z.object({
@@ -216,7 +157,6 @@ export async function GET() {
     const safeOrders = user.isAdmin ? orders : orders.map(sanitizeOrderForCustomer);
     const hasActiveOrder = orders.some(
       (o) =>
-        o.customerId === user.id &&
         o.commercialStatus !== "cancelled" &&
         o.fulfillmentStatus !== "delivered"
     );
@@ -229,7 +169,7 @@ export async function GET() {
   } catch (err) {
     console.error("GET /api/orders failed:", err);
     return NextResponse.json(
-      { error: "Không thể lấy danh sách đơn hàng từ backend.", details: String(err), orders: [] },
+      { error: "Không thể lấy danh sách đơn hàng từ backend.", orders: [] },
       { status: 500 }
     );
   }
@@ -253,7 +193,6 @@ export async function POST(request: Request) {
   const orders = await getOrders(user);
   const hasActiveOrder = orders.some(
     (o) =>
-      o.customerId === user.id &&
       o.commercialStatus !== "cancelled" &&
       o.fulfillmentStatus !== "delivered"
   );
@@ -314,6 +253,7 @@ export async function POST(request: Request) {
     };
     return NextResponse.json({ order: sanitizeOrderForCustomer(persistedOrder) });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Lỗi tạo đơn hàng.");
     return NextResponse.json(
       { error: msg },
@@ -350,7 +290,17 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "Bạn không có quyền chỉnh sửa đơn hàng này." }, { status: 403 });
     }
 
-    let orderToSave = updatedOrder;
+    if (!user.isAdmin) {
+      for (const field of FORBIDDEN_CUSTOMER_FIELDS) {
+        if (field in rawBody && rawBody[field] !== undefined) {
+          return NextResponse.json(
+            { error: `Trường '${field}' không được phép gửi từ tài khoản đại lý (CUSTOMER_OVERPOSTING_REJECTED).` },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
     if (user.isAdmin) {
       const missingPermissions = getMissingOrderPermissions(existing, updatedOrder, user);
       if (missingPermissions.length > 0) {
@@ -359,14 +309,22 @@ export async function PUT(request: Request) {
           { status: 403 }
         );
       }
-      if (existing.assignedStaffId && existing.assignedStaffId !== user.id && user.role !== "super_admin") {
+      const containsQuoteOwnershipWork = hasQuoteOwnershipWork(existing, updatedOrder);
+      const canOverrideAssignment = ["super_admin", "admin_manager"].includes(user.role);
+      if (
+        containsQuoteOwnershipWork &&
+        existing.assignedStaffId &&
+        existing.assignedStaffId !== user.id &&
+        !canOverrideAssignment
+      ) {
         return NextResponse.json(
-          { error: `Đơn hàng này đang được xử lý bởi nhân viên khác (${existing.assignedStaffName || "Nhân viên vận hành"}). Bạn không có quyền chỉnh sửa.` },
+          { error: `Phần báo giá đang được phụ trách bởi ${existing.assignedStaffName || "nhân viên vận hành khác"}.` },
           { status: 403 }
         );
       }
 
-      if (!existing.assignedStaffId) {
+      let orderToSave = updatedOrder;
+      if (!existing.assignedStaffId && containsQuoteOwnershipWork) {
         orderToSave = {
           ...updatedOrder,
           assignedStaffId: user.id,
@@ -374,9 +332,42 @@ export async function PUT(request: Request) {
         };
       }
       orderToSave = normalizeOrderQuoteFinancials(orderToSave, await getAdminPolicy());
+
+      const saved = await saveOrder(orderToSave, user.id, existing.updatedAt);
+      const ordersAfter = await getOrders(user);
+      const persistedOrder = ordersAfter.find((order) => order.id === existing.id) ?? {
+        ...orderToSave,
+        updatedAt: saved.updatedAt
+      };
+      return NextResponse.json({ order: persistedOrder });
     } else {
       const customerPayload = customerOrderUpdateSchema.parse(rawBody);
       const existingPaymentRequestIds = new Set(existing.paymentRequests.map((request) => request.id));
+      const expectedProofPrefix = `orders/${sanitizeStoragePathPart(existing.id)}/payment-proof/`;
+      for (const proof of customerPayload.paymentProofs ?? []) {
+        if (!existingPaymentRequestIds.has(proof.paymentRequestId)) {
+          throw new Response(JSON.stringify({ error: "Minh chứng không thuộc yêu cầu thanh toán của đơn hàng." }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        if (!proof.storageKey.startsWith(expectedProofPrefix)) {
+          throw new Response(JSON.stringify({ error: "Minh chứng không thuộc vùng lưu trữ của đơn hàng." }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        await backendFetchJson("/api/v1/uploads/verify-private-upload", {
+          method: "POST",
+          body: JSON.stringify({
+            purpose: "payment-proof",
+            orderId: existing.id,
+            storageKey: proof.storageKey,
+            contentType: proof.contentType,
+            fileSizeBytes: proof.fileSizeBytes
+          })
+        });
+      }
       const safeComments: OrderComment[] = [
         ...existing.comments,
         ...(customerPayload.comments ?? []).map((comment) => ({
@@ -390,9 +381,8 @@ export async function PUT(request: Request) {
       const safeProofs: PaymentProof[] = [
         ...existing.paymentProofs,
         ...(customerPayload.paymentProofs ?? [])
-          .filter((proof) => existingPaymentRequestIds.has(proof.paymentRequestId))
           .map((proof) => ({
-            id: proof.id,
+            id: proof.id ?? `proof_${Date.now()}_${cryptoRandomSuffix()}`,
             paymentRequestId: proof.paymentRequestId,
             fileName: proof.fileName,
             storageKey: proof.storageKey,
@@ -403,10 +393,10 @@ export async function PUT(request: Request) {
           }))
       ];
 
-      // Allow customer to update status (e.g. customer_accepted when agreeing to quote, or admin_review when asking for re-quote)
-      let nextCommercialStatus = existing.commercialStatus;
-      let nextPaymentStatus = existing.paymentStatus;
-      let nextPaymentRequests = existing.paymentRequests;
+      // Build MINIMAL customer mutation payload (NO items, NO quoteVersions, NO fulfillmentGroups, NO paymentRequests)
+      const backendPayload: Record<string, unknown> = {
+        id: customerPayload.id,
+      };
 
       if (customerPayload.commercialStatus) {
         if (
@@ -414,55 +404,54 @@ export async function PUT(request: Request) {
           (existing.commercialStatus === "quoted" && customerPayload.commercialStatus === "admin_review") ||
           (existing.commercialStatus === "draft" && customerPayload.commercialStatus === "submitted")
         ) {
-          nextCommercialStatus = customerPayload.commercialStatus;
-          if (customerPayload.commercialStatus === "customer_accepted") {
-            const intent = customerPayload.paymentIntent ?? existing.paymentIntent;
-            nextPaymentStatus = intent === "pay_full" ? "full_requested" : "deposit_requested";
-          }
+          backendPayload.commercialStatus = customerPayload.commercialStatus;
         }
       }
-
-      if (customerPayload.paymentStatus) {
-        nextPaymentStatus = customerPayload.paymentStatus;
+      if (customerPayload.acceptedQuoteId) {
+        backendPayload.acceptedQuoteId = customerPayload.acceptedQuoteId;
+      }
+      if (customerPayload.acceptedQuoteVersion !== undefined) {
+        backendPayload.acceptedQuoteVersion = customerPayload.acceptedQuoteVersion;
+      }
+      if (customerPayload.paymentIntent) {
+        backendPayload.paymentIntent = customerPayload.paymentIntent;
+      }
+      if (customerPayload.invoiceRequested !== undefined) {
+        backendPayload.invoiceRequested = customerPayload.invoiceRequested;
+      }
+      if (customerPayload.recipientName !== undefined) {
+        backendPayload.recipientName = customerPayload.recipientName;
+      }
+      if (customerPayload.recipientPhone !== undefined) {
+        backendPayload.recipientPhone = customerPayload.recipientPhone;
+      }
+      if (customerPayload.recipientAddress !== undefined) {
+        backendPayload.recipientAddress = customerPayload.recipientAddress;
+      }
+      if (customerPayload.customerTaxCode !== undefined) {
+        backendPayload.customerTaxCode = customerPayload.customerTaxCode;
+      }
+      if (customerPayload.customerNote !== undefined) {
+        backendPayload.customerNote = customerPayload.customerNote;
+      }
+      if (customerPayload.comments && customerPayload.comments.length > 0) {
+        backendPayload.comments = safeComments;
+      }
+      if (customerPayload.paymentProofs && customerPayload.paymentProofs.length > 0) {
+        backendPayload.paymentProofs = safeProofs;
       }
 
-      if (customerPayload.paymentRequests && customerPayload.paymentRequests.length > 0) {
-        nextPaymentRequests = customerPayload.paymentRequests;
-      }
-
-      orderToSave = {
+      const saved = await saveOrder(backendPayload, user.id, customerPayload.expectedUpdatedAt ?? existing.updatedAt);
+      const ordersAfter = await getOrders(user);
+      const persistedOrder = ordersAfter.find((o) => o.id === existing.id) ?? {
         ...existing,
-        paymentIntent: customerPayload.paymentIntent ?? existing.paymentIntent,
-        invoiceRequested: customerPayload.invoiceRequested ?? existing.invoiceRequested,
-        recipientName: customerPayload.recipientName !== undefined ? customerPayload.recipientName : existing.recipientName,
-        recipientPhone: customerPayload.recipientPhone !== undefined ? customerPayload.recipientPhone : existing.recipientPhone,
-        recipientAddress: customerPayload.recipientAddress !== undefined ? customerPayload.recipientAddress : existing.recipientAddress,
-        customerTaxCode: customerPayload.customerTaxCode !== undefined ? customerPayload.customerTaxCode : existing.customerTaxCode,
-        customerNote: customerPayload.customerNote !== undefined ? customerPayload.customerNote : existing.customerNote,
-        customerId: existing.customerId,
-        customerName: existing.customerName,
-        customerCompany: existing.customerCompany,
-        commercialStatus: nextCommercialStatus,
-        paymentStatus: nextPaymentStatus,
-        fulfillmentStatus: existing.fulfillmentStatus,
-        items: existing.items,
-        fulfillmentGroups: existing.fulfillmentGroups,
-        quoteVersions: existing.quoteVersions,
-        acceptedQuoteId: customerPayload.acceptedQuoteId,
-        acceptedQuoteVersion: customerPayload.acceptedQuoteVersion,
-        paymentRequests: nextPaymentRequests,
-        paymentProofs: safeProofs,
-        comments: safeComments,
-        assignedStaffId: existing.assignedStaffId,
-        assignedStaffName: existing.assignedStaffName
+        ...backendPayload,
+        updatedAt: saved.updatedAt
       };
+      return NextResponse.json({ order: sanitizeOrderForCustomer(persistedOrder) });
     }
-
-    const saved = await saveOrder(orderToSave, user.id, existing.updatedAt);
-    const persistedOrder = { ...orderToSave, updatedAt: saved.updatedAt };
-    const result = user.isAdmin ? persistedOrder : sanitizeOrderForCustomer(persistedOrder);
-    return NextResponse.json({ order: result });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Lỗi cập nhật đơn hàng.");
     return NextResponse.json(
       { error: msg },
@@ -473,4 +462,13 @@ export async function PUT(request: Request) {
 
 function cryptoRandomSuffix(): string {
   return crypto.randomUUID().slice(0, 8);
+}
+
+function sanitizeStoragePathPart(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "")
+    .slice(0, 64) || "general";
 }

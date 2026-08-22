@@ -14,10 +14,7 @@ export async function GET(request: Request) {
   } catch (error) {
     if (error instanceof Response) return error;
 
-    const message = error instanceof Error
-      ? error.message
-      : "Không thể đọc sổ nhật ký kế toán.";
-
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("ACCOUNTING_JOURNAL_ENTRIES_FAILED", error);
+    return NextResponse.json({ error: "Không thể đọc sổ nhật ký kế toán." }, { status: 500 });
   }
 }

@@ -26,3 +26,46 @@ def test_v9_enforces_manager_approval_and_status_contracts():
     assert "admin_manager" in sql
     assert "customer_orders_commercial_status_check" in sql
     assert "security definer" not in sql
+
+
+def test_v13_protects_revision_history_and_scoped_realtime_state_with_rls():
+    schema = (REPO_ROOT / "supabase" / "schema.sql").read_text(encoding="utf-8").lower()
+    migration = (
+        REPO_ROOT / "supabase" / "update_v13_order_lifecycle_canonicalization.sql"
+    ).read_text(encoding="utf-8").lower()
+
+    for sql in (schema, migration):
+        assert "alter table public.order_revision_history enable row level security" in sql or "alter table order_revision_history enable row level security" in sql
+        assert "customers can read own order revision history" in sql
+        assert "alter table public.order_sync_revisions enable row level security" in sql or "alter table order_sync_revisions enable row level security" in sql
+        assert "users can read scoped order sync revisions" in sql
+
+    assert "cannot move adjustments onto an accepted quote version" in migration
+
+
+def test_v14_enforces_one_pending_proof_per_payment_request():
+    schema = (REPO_ROOT / "supabase" / "schema.sql").read_text(encoding="utf-8").lower()
+    migration = (
+        REPO_ROOT / "supabase" / "update_v14_payment_proof_lifecycle.sql"
+    ).read_text(encoding="utf-8").lower()
+
+    assert "v14_duplicate_pending_payment_proofs" in migration
+    for sql in (schema, migration):
+        assert "uq_payment_proofs_one_pending_per_request" in sql
+        assert "where status = 'pending_admin_confirmation'" in sql
+
+
+def test_v15_distributed_auth_rate_limit_is_private_and_pii_safe():
+    schema = (REPO_ROOT / "supabase" / "schema.sql").read_text(encoding="utf-8").lower()
+    migration = (
+        REPO_ROOT / "supabase" / "update_v15_distributed_auth_rate_limit.sql"
+    ).read_text(encoding="utf-8").lower()
+
+    for sql in (schema, migration):
+        assert "auth_rate_limit_buckets" in sql
+        assert "length(bucket_key) = 64" in sql
+        assert "enable row level security" in sql
+        assert "idx_auth_rate_limit_buckets_expiry" in sql
+    assert "email" not in migration
+    assert "phone" not in migration
+    assert "ip_address" not in migration

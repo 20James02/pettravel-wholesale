@@ -33,6 +33,7 @@ export async function POST(req: Request) {
     await saveCategories(updated);
     return NextResponse.json({ success: true, categories: updated });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Tên danh mục không hợp lệ.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
@@ -66,6 +67,7 @@ export async function PUT(req: Request) {
     await saveCategories(updated);
     return NextResponse.json({ success: true, categories: updated });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Tên danh mục không hợp lệ.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
@@ -89,6 +91,7 @@ export async function DELETE(req: Request) {
     await saveCategories(updated);
     return NextResponse.json({ success: true, categories: updated });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Thiếu hoặc sai tên danh mục.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }

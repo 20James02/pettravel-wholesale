@@ -36,6 +36,7 @@ export async function POST(req: Request) {
     await saveSupplier(supplier);
     return NextResponse.json({ success: true, supplier });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Dữ liệu nhà cung cấp không hợp lệ.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
@@ -55,6 +56,7 @@ export async function PUT(req: Request) {
     await saveSupplier(supplier);
     return NextResponse.json({ success: true, supplier });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Dữ liệu nhà cung cấp không hợp lệ.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }
@@ -75,6 +77,7 @@ export async function DELETE(req: Request) {
     await deleteSupplier(id);
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Thiếu hoặc sai ID nhà cung cấp.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }

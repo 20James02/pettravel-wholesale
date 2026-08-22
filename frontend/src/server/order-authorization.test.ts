@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { CustomerOrder, UserAccount } from "../lib/domain.ts";
-import { getMissingOrderPermissions } from "./order-authorization.ts";
+import { getMissingOrderPermissions, hasQuoteOwnershipWork } from "./order-authorization.ts";
 
 const baseOrder = {
   id: "order_1",
@@ -41,4 +41,50 @@ test("accountant can confirm payment but cannot change fulfillment", () => {
 
   assert.deepEqual(getMissingOrderPermissions(baseOrder, paymentUpdate, accountant), []);
   assert.deepEqual(getMissingOrderPermissions(baseOrder, fulfillmentUpdate, accountant), ["order.ship"]);
+});
+
+test("payment and fulfillment work do not take quote ownership", () => {
+  const assignedOrder = {
+    ...baseOrder,
+    assignedStaffId: "operator_1",
+    assignedStaffName: "Operator"
+  };
+  const paymentUpdate = { ...assignedOrder, paymentStatus: "deposit_confirmed" as const };
+  const fulfillmentUpdate = { ...assignedOrder, fulfillmentStatus: "supplier_checking" as const };
+
+  assert.equal(hasQuoteOwnershipWork(assignedOrder, paymentUpdate), false);
+  assert.equal(hasQuoteOwnershipWork(assignedOrder, fulfillmentUpdate), false);
+});
+
+test("quote, commercial status, and assignment changes take quote ownership", () => {
+  assert.equal(
+    hasQuoteOwnershipWork(baseOrder, {
+      ...baseOrder,
+      commercialStatus: "customer_accepted"
+    }),
+    true
+  );
+  assert.equal(
+    hasQuoteOwnershipWork(baseOrder, {
+      ...baseOrder,
+      assignedStaffId: "operator_1"
+    }),
+    true
+  );
+  assert.equal(
+    hasQuoteOwnershipWork(baseOrder, {
+      ...baseOrder,
+      items: [{
+        id: "item_1",
+        productCode: "P1",
+        productName: "Product",
+        variantSku: "SKU-1",
+        variantLabel: "Default",
+        quantity: 1,
+        unitPriceSnapshot: 1000,
+        supplierId: "supplier_1"
+      }]
+    }),
+    true
+  );
 });

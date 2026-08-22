@@ -1,4 +1,6 @@
-from app.services.order_workflow import stock_command_for_transition
+import pytest
+
+from app.services.order_workflow import stock_command_for_transition, validate_fulfillment_preconditions
 
 
 def test_accepting_order_reserves_stock():
@@ -32,3 +34,31 @@ def test_shipping_order_consumes_stock_once():
         before_fulfillment="shipped",
         after_fulfillment="delivered",
     ) is None
+
+
+def test_fulfillment_requires_confirmed_payment_and_real_shipment_details():
+    with pytest.raises(ValueError, match="FULFILLMENT_REQUIRES_CONFIRMED_PAYMENT"):
+        validate_fulfillment_preconditions(
+            commercial_status="customer_accepted",
+            payment_status="deposit_uploaded",
+            before="not_started",
+            after="supplier_checking",
+            has_shipment=False,
+        )
+
+    with pytest.raises(ValueError, match="SHIPMENT_DETAILS_REQUIRED"):
+        validate_fulfillment_preconditions(
+            commercial_status="locked",
+            payment_status="paid",
+            before="ready_to_ship",
+            after="shipped",
+            has_shipment=False,
+        )
+
+    validate_fulfillment_preconditions(
+        commercial_status="locked",
+        payment_status="paid",
+        before="ready_to_ship",
+        after="shipped",
+        has_shipment=True,
+    )

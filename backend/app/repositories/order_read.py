@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import hashlib
+import json
 import time
 from typing import Any, Iterable
 
@@ -41,6 +42,81 @@ def _group(rows: Iterable[Any], key: str) -> dict[str, list[Any]]:
     for row in rows:
         grouped[str(row[key])].append(row)
     return grouped
+
+
+def _decode_json(value: Any, fallback: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return fallback
+    return fallback
+
+
+def _customer_safe_revision_snapshot(row: Any) -> dict[str, Any]:
+    items = _decode_json(row["items_snapshot"], [])
+    quotes = _decode_json(row["quote_snapshot"], [])
+    shipping = _decode_json(row["shipping_snapshot"], {})
+    actor_role = str(row["actor_role"])
+    actor_is_customer = actor_role == "customer"
+
+    safe_items = [
+        {
+            key: item.get(key)
+            for key in (
+                "id",
+                "productCode",
+                "productName",
+                "variantSku",
+                "variantLabel",
+                "variantImage",
+                "quantity",
+                "unitPriceSnapshot",
+                "locked",
+            )
+            if key in item
+        }
+        for item in items
+        if isinstance(item, dict)
+    ]
+    safe_quotes = [
+        {
+            key: quote.get(key)
+            for key in (
+                "id",
+                "version",
+                "status",
+                "subtotal",
+                "finalTotal",
+                "depositAmount",
+                "codRemaining",
+                "expiresAt",
+                "acceptedAt",
+            )
+            if key in quote
+        }
+        for quote in quotes
+        if isinstance(quote, dict)
+    ]
+
+    return {
+        "id": row["id"],
+        "orderId": row["order_id"],
+        "revisionNo": row["revision_no"],
+        "actorId": row["actor_id"] if actor_is_customer else "",
+        "actorName": row["actor_name"] if actor_is_customer else "Pet Travel Wholesale",
+        "actorRole": actor_role,
+        "actionType": row["action_type"],
+        "fromCommercialStatus": row["from_commercial_status"],
+        "toCommercialStatus": row["to_commercial_status"],
+        "itemsSnapshot": safe_items,
+        "quoteSnapshot": safe_quotes,
+        "shippingSnapshot": shipping if isinstance(shipping, dict) else {},
+        "note": row["note"] if actor_is_customer else None,
+        "createdAt": _iso(row["created_at"]),
+    }
 
 
 async def is_internal_actor(db: AsyncSession, actor_id: str) -> bool:
@@ -510,6 +586,9 @@ async def get_order_revision_history(
         )
     ).mappings().all()
 
+    if not effective_admin:
+        return [_customer_safe_revision_snapshot(row) for row in rows]
+
     return [
         {
             "id": row["id"],
@@ -521,9 +600,9 @@ async def get_order_revision_history(
             "actionType": row["action_type"],
             "fromCommercialStatus": row["from_commercial_status"],
             "toCommercialStatus": row["to_commercial_status"],
-            "itemsSnapshot": row["items_snapshot"],
-            "quoteSnapshot": row["quote_snapshot"],
-            "shippingSnapshot": row["shipping_snapshot"],
+            "itemsSnapshot": _decode_json(row["items_snapshot"], []),
+            "quoteSnapshot": _decode_json(row["quote_snapshot"], []),
+            "shippingSnapshot": _decode_json(row["shipping_snapshot"], {}),
             "note": row["note"],
             "createdAt": _iso(row["created_at"]),
         }

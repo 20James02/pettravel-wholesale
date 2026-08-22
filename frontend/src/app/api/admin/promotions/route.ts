@@ -49,6 +49,7 @@ export async function PUT(request: Request) {
     });
     return NextResponse.json({ success: true, policy: payload });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Dữ liệu cấu hình không hợp lệ.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }

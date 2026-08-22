@@ -11,7 +11,7 @@ export async function GET() {
     return NextResponse.json({ overview });
   } catch (error) {
     if (error instanceof Response) return error;
-    const message = error instanceof Error ? error.message : "Không thể tải báo cáo quản trị.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("ADMIN_REPORTS_OVERVIEW_FAILED", error);
+    return NextResponse.json({ error: "Không thể tải báo cáo quản trị." }, { status: 500 });
   }
 }

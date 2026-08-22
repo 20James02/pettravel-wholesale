@@ -1,3 +1,4 @@
+import re
 from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -44,12 +45,15 @@ class Settings(BaseSettings):
     R2_ACCESS_KEY_ID: str = ""
     R2_SECRET_ACCESS_KEY: str = ""
     R2_BUCKET: str = "pettravel-wholesale"
+    R2_PRIVATE_BUCKET: str = "pettravel-wholesale-private"
     R2_PUBLIC_BASE_URL: str = "https://pub-example.r2.dev"
 
     # VietQR Payment
-    PAYMENT_QR_BANK_NAME: str = "Pet Travel"
+    PAYMENT_QR_BANK_CODE: str = ""
     PAYMENT_QR_ACCOUNT_NO: str = ""
     PAYMENT_QR_ACCOUNT_NAME: str = "PET TRAVEL WHOLESALE"
+    VIETQR_WEBHOOK_SECRET: str = ""
+    PAYMENT_SYSTEM_ACTOR_ID: str = ""
 
     @property
     def async_database_url(self) -> str:
@@ -99,7 +103,13 @@ class Settings(BaseSettings):
             errors.append("ALLOW_DEMO_DATA must be false")
         if self.ALLOW_RUNTIME_MIGRATIONS:
             errors.append("ALLOW_RUNTIME_MIGRATIONS must be false")
-        if not self.FRONTEND_URL.strip().startswith("https://"):
+        parsed_frontend = urlparse(self.FRONTEND_URL.strip())
+        if (
+            parsed_frontend.scheme != "https"
+            or not parsed_frontend.netloc
+            or parsed_frontend.username
+            or parsed_frontend.password
+        ):
             errors.append("FRONTEND_URL must be an HTTPS URL")
 
         r2_values = {
@@ -107,11 +117,34 @@ class Settings(BaseSettings):
             "R2_ACCESS_KEY_ID": self.R2_ACCESS_KEY_ID,
             "R2_SECRET_ACCESS_KEY": self.R2_SECRET_ACCESS_KEY,
             "R2_BUCKET": self.R2_BUCKET,
+            "R2_PRIVATE_BUCKET": self.R2_PRIVATE_BUCKET,
             "R2_PUBLIC_BASE_URL": self.R2_PUBLIC_BASE_URL,
         }
         for key, value in r2_values.items():
             if not value.strip() or "example" in value.lower():
                 errors.append(f"{key} must be configured")
+        parsed_r2 = urlparse(self.R2_PUBLIC_BASE_URL.strip())
+        if parsed_r2.scheme != "https" or not parsed_r2.netloc:
+            errors.append("R2_PUBLIC_BASE_URL must be an HTTPS URL")
+        if self.R2_PRIVATE_BUCKET.strip() == self.R2_BUCKET.strip():
+            errors.append("R2_PRIVATE_BUCKET must be different from the public R2_BUCKET")
+
+        payment_values = {
+            "PAYMENT_QR_BANK_CODE": self.PAYMENT_QR_BANK_CODE,
+            "PAYMENT_QR_ACCOUNT_NO": self.PAYMENT_QR_ACCOUNT_NO,
+            "PAYMENT_QR_ACCOUNT_NAME": self.PAYMENT_QR_ACCOUNT_NAME,
+        }
+        for key, value in payment_values.items():
+            if not value.strip() or "example" in value.lower():
+                errors.append(f"{key} must be configured")
+        if self.PAYMENT_QR_BANK_CODE and not re.fullmatch(r"[A-Za-z0-9_-]{2,20}", self.PAYMENT_QR_BANK_CODE):
+            errors.append("PAYMENT_QR_BANK_CODE has invalid format")
+        if self.PAYMENT_QR_ACCOUNT_NO and not re.fullmatch(r"[0-9]{6,30}", self.PAYMENT_QR_ACCOUNT_NO):
+            errors.append("PAYMENT_QR_ACCOUNT_NO has invalid format")
+        if len(self.VIETQR_WEBHOOK_SECRET.strip()) < 32:
+            errors.append("VIETQR_WEBHOOK_SECRET must contain at least 32 characters")
+        if not self.PAYMENT_SYSTEM_ACTOR_ID.strip():
+            errors.append("PAYMENT_SYSTEM_ACTOR_ID must be configured")
 
         if errors:
             raise RuntimeError("Invalid production configuration: " + "; ".join(errors))

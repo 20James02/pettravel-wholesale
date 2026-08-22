@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth, requireSameOrigin } from "@/server/auth";
+import { invalidateUserSessionCache, requireAuth, requireSameOrigin } from "@/server/auth";
 import { updateUserProfile } from "@/server/db";
 import { fullNameSchema, getValidationErrorMessage, optionalUrlSchema, passwordSchema } from "@/lib/validation";
 
@@ -37,9 +37,11 @@ export async function PUT(request: Request) {
       avatarUrl: payload.avatarUrl || undefined,
       newPasswordRaw: payload.newPassword
     });
+    invalidateUserSessionCache(user.id);
 
     return NextResponse.json({ success: true, message: "Cập nhật thông tin tài khoản thành công!" });
   } catch (error) {
+    if (error instanceof Response) return error;
     const msg = getValidationErrorMessage(error, "Không thể cập nhật thông tin.");
     return NextResponse.json({ error: msg }, { status: 400 });
   }

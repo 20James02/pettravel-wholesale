@@ -4,10 +4,16 @@ import asyncpg
 import hashlib
 import json
 import time
+from urllib.parse import urlsplit
 
-db_url = 'postgresql://postgres.gfiyzwrcvsnsimwbpgbb:HvT%40270756832002@aws-0-ap-south-1.pooler.supabase.com:5432/postgres'
+from app.core.config import settings
+
+
+def get_asyncpg_database_url() -> str:
+    return settings.async_database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
 
 async def execute_production_v11_v12():
+    db_url = get_asyncpg_database_url()
     supabase_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'supabase'))
     v11_file = os.path.join(supabase_dir, 'update_v11_security_accounting_hardening.sql')
     v12_file = os.path.join(supabase_dir, 'update_v12_commercial_sot_hardening.sql')
@@ -21,7 +27,8 @@ async def execute_production_v11_v12():
     print("=" * 80)
     print("PET TRAVEL WHOLESALE — PRODUCTION V11 -> V12 CONTROLLED UPGRADE")
     print("=" * 80)
-    print(f"Target: {db_url.split('@')[1]}")
+    parsed_target = urlsplit(db_url)
+    print(f"Target: {parsed_target.hostname}:{parsed_target.port or 5432}/{parsed_target.path.lstrip('/')}")
     print(f"V11 Artifact SHA256: {v11_hash}")
     print(f"V12 Artifact SHA256: {v12_hash}")
 

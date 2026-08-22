@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { z } from "zod";
 import { requireSameOrigin } from "@/server/auth";
 import { createAppUser } from "@/server/db";
+import { getValidationErrorMessage } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -56,7 +57,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, message: "Bootstrap admin created. Remove ADMIN_BOOTSTRAP_TOKEN after verification." });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to bootstrap admin.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: getValidationErrorMessage(error, "Bootstrap payload is invalid.") },
+        { status: 400 }
+      );
+    }
+    console.error("ADMIN_BOOTSTRAP_FAILED", error);
+    return NextResponse.json({ error: "Unable to bootstrap admin." }, { status: 500 });
   }
 }

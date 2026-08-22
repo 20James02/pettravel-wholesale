@@ -230,6 +230,65 @@ export interface CustomerOrder {
   updatedAt: string;
 }
 
+// ── CUSTOMER MUTATION DTOS (MINIMAL INTENT - NO OVERPOSTING) ─
+
+export interface CustomerOrderCreateInput {
+  items: Array<{ variantSku: string; quantity: number; variantImage?: string | null }>;
+  paymentIntent?: PaymentIntent;
+  recipientName?: string;
+  recipientPhone?: string;
+  recipientAddress?: string;
+  customerTaxCode?: string;
+  customerNote?: string;
+}
+
+export interface CustomerOrderContactUpdateInput {
+  id: string;
+  expectedUpdatedAt?: string;
+  recipientName?: string;
+  recipientPhone?: string;
+  recipientAddress?: string;
+  customerTaxCode?: string;
+  customerNote?: string;
+  paymentIntent?: PaymentIntent;
+  invoiceRequested?: boolean;
+}
+
+export interface CustomerQuoteAcceptanceInput {
+  id: string;
+  expectedUpdatedAt?: string;
+  commercialStatus: "customer_accepted";
+  acceptedQuoteId: string;
+  acceptedQuoteVersion: number;
+}
+
+export interface CustomerQuoteChangeRequestInput {
+  id: string;
+  expectedUpdatedAt?: string;
+  commercialStatus: "admin_review";
+  customerNote?: string;
+  comments?: Array<{ id?: string; message: string }>;
+}
+
+export interface CustomerPaymentProofInput {
+  id: string;
+  expectedUpdatedAt?: string;
+  paymentProofs: PaymentProof[];
+}
+
+export interface CustomerCommentInput {
+  id: string;
+  expectedUpdatedAt?: string;
+  comments: Array<{ id?: string; message: string }>;
+}
+
+export type CustomerOrderMutationPayload =
+  | { action: "accept_quote"; payload: CustomerQuoteAcceptanceInput }
+  | { action: "request_changes"; payload: CustomerQuoteChangeRequestInput }
+  | { action: "update_contact"; payload: CustomerOrderContactUpdateInput }
+  | { action: "upload_proof"; payload: CustomerPaymentProofInput }
+  | { action: "comment"; payload: CustomerCommentInput };
+
 export interface OrderRevisionRecord {
   id: string;
   orderId: string;

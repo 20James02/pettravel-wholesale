@@ -163,49 +163,22 @@ async def delete_app_user(user_id: str, db: AsyncSession = Depends(get_db)):
             detail="Không thể xóa tài khoản Quản trị viên cấp cao nhất (Super Admin)."
         )
 
-    # 1. Thu hồi toàn bộ vai trò của user
+    # Preserve the row for audit/foreign-key integrity, but revoke every role
+    # and remove directly identifying profile fields in one transaction.
     await db.execute(text("delete from user_roles where user_id = :user_id"), {"user_id": user_id})
-
-    # 2. Kiểm tra xem user có dữ liệu liên quan không (đơn hàng, bình luận, nhật ký)
-    has_refs = False
-    try:
-        res = await db.execute(
-            text("""
-                select (
-                    exists(select 1 from customer_orders where created_by = :uid or assigned_staff_id = :uid)
-                    or exists(select 1 from order_comments where author_id = :uid)
-                    or exists(select 1 from journal_entries where created_by = :uid)
-                    or exists(select 1 from app_users where created_by = :uid)
-                )
-            """),
-            {"uid": user_id},
-        )
-        has_refs = bool(res.scalar())
-    except Exception:
-        has_refs = True
-
-    if not has_refs:
-        try:
-            await db.execute(text("delete from app_users where id = :user_id"), {"user_id": user_id})
-            await db.commit()
-            invalidate_users_cache()
-            return {"status": "success", "message": f"Đã xóa vĩnh viễn tài khoản {user['full_name']}."}
-        except Exception:
-            await db.rollback()
-
-    # Soft-delete an toàn: Vô hiệu hóa và ẩn khỏi danh sách
     random_suffix = uuid.uuid4().hex[:8]
-    anonymized_email = f"deleted_{random_suffix}_{user['email']}"
+    anonymized_email = f"deleted-{random_suffix}@invalid.local"
     await db.execute(
         text("""update app_users set
             status = 'disabled',
             email = :email,
             phone = null,
+            full_name = 'Tài khoản đã xóa',
+            avatar_url = null,
             password_hash = 'disabled'
             where id = :user_id"""),
         {"user_id": user_id, "email": anonymized_email},
     )
     await db.commit()
     invalidate_users_cache()
-    return {"status": "success", "message": f"Đã thu hồi quyền và xóa tài khoản {user['full_name']} khỏi hệ thống."}
-
+    return {"status": "success", "message": "Đã thu hồi quyền và ẩn danh tài khoản khỏi hệ thống."}

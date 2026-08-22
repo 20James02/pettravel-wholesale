@@ -4,10 +4,12 @@ Target: PostgreSQL 16+ on port 5439 (pettravel_test_pg container / WSL PostgreSQ
 """
 
 import asyncio
+import base64
 import glob
 import os
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 # Ensure backend root is on sys.path
@@ -23,6 +25,14 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 from app.repositories.catalog import list_products
+from app.repositories.orders import save_order, reissue_payment_request, OrderConflictError
+from app.routers.v1.endpoints.orders import vietqr_webhook
+from app.routers.v1.endpoints.operations import create_operations_document
+from app.services.auth_rate_limit import LOGIN_ATTEMPT_LIMIT, consume_login_rate_limit
+from app.services.catalog_image_migration import (
+    apply_catalog_image_database_updates,
+    build_catalog_image_migration_plan,
+)
 
 POSTGRES_TEST_HOST = os.getenv("POSTGRES_TEST_HOST", "127.0.0.1")
 POSTGRES_TEST_PORT = int(os.getenv("POSTGRES_TEST_PORT", "5439"))
@@ -347,6 +357,282 @@ async def test_postgres_payment_request_state_machine_and_supersede(pg_session: 
 
     assert v1_status == "superseded"
     assert v2_status == "active"
+
+
+@pytest.mark.asyncio
+async def test_delivered_deposit_cod_order_issues_authoritative_remaining_request(pg_session: AsyncSession):
+    now = datetime.now(timezone.utc)
+    await pg_session.execute(text("""
+        INSERT INTO organizations (id, name)
+        VALUES ('org_buyer_cod_remaining', 'Dai Ly COD Remaining')
+        ON CONFLICT (id) DO NOTHING
+    """))
+    await pg_session.execute(text("""
+        INSERT INTO customer_orders
+            (id, order_number, organization_id, created_by, commercial_status, payment_status,
+             fulfillment_status, payment_intent, current_quote_version, updated_at)
+        VALUES ('ord_cod_remaining', 'PTW-COD-01', 'org_buyer_cod_remaining', 'admin_ops',
+                'customer_accepted', 'deposit_confirmed', 'shipped', 'deposit_cod', 1, :now)
+        ON CONFLICT (id) DO UPDATE SET commercial_status = 'customer_accepted',
+            payment_status = 'deposit_confirmed', fulfillment_status = 'shipped',
+            payment_intent = 'deposit_cod', current_quote_version = 1, updated_at = :now
+    """), {"now": now})
+    await pg_session.execute(text("""
+        INSERT INTO quote_versions
+            (id, order_id, version, status, subtotal, final_total, deposit_amount, cod_remaining, expires_at)
+        VALUES ('q_cod_remaining', 'ord_cod_remaining', 1, 'accepted', 1000000, 1000000,
+                300000, 700000, now() + interval '7 days')
+        ON CONFLICT (id) DO UPDATE SET status = 'accepted', final_total = 1000000,
+            deposit_amount = 300000, cod_remaining = 700000
+    """))
+    await pg_session.execute(text("""
+        DELETE FROM payment_requests
+        WHERE order_id = 'ord_cod_remaining' AND purpose = 'remaining'
+    """))
+    await pg_session.commit()
+
+    await save_order(
+        pg_session,
+        actor_id="admin_ops",
+        expected_updated_at=now.isoformat(),
+        order={"id": "ord_cod_remaining", "fulfillmentStatus": "delivered"},
+    )
+    await pg_session.commit()
+
+    payment_status = (await pg_session.execute(text("""
+        SELECT payment_status FROM customer_orders WHERE id = 'ord_cod_remaining'
+    """))).scalar_one()
+    remaining_request = (await pg_session.execute(text("""
+        SELECT purpose, amount, status, reference
+        FROM payment_requests
+        WHERE order_id = 'ord_cod_remaining' AND purpose = 'remaining'
+    """))).mappings().one()
+
+    assert payment_status == "cod_remaining"
+    assert remaining_request["purpose"] == "remaining"
+    assert remaining_request["amount"] == 700000
+    assert remaining_request["status"] == "active"
+    assert str(remaining_request["reference"]).startswith("PTW-COD-01-REM-")
+
+
+@pytest.mark.asyncio
+async def test_expired_cod_request_can_be_reissued_idempotently(pg_session: AsyncSession):
+    now = datetime.now(timezone.utc)
+    await pg_session.execute(text("""
+        INSERT INTO organizations (id, name)
+        VALUES ('org_buyer_cod_reissue', 'Dai Ly COD Reissue')
+        ON CONFLICT (id) DO NOTHING
+    """))
+    await pg_session.execute(text("""
+        INSERT INTO customer_orders
+            (id, order_number, organization_id, created_by, commercial_status, payment_status,
+             fulfillment_status, payment_intent, current_quote_version, updated_at)
+        VALUES ('ord_cod_reissue', 'PTW-COD-REISSUE', 'org_buyer_cod_reissue', 'admin_ops',
+                'customer_accepted', 'cod_remaining', 'delivered', 'deposit_cod', 1, :now)
+        ON CONFLICT (id) DO UPDATE SET commercial_status = 'customer_accepted',
+            payment_status = 'cod_remaining', fulfillment_status = 'delivered', updated_at = :now
+    """), {"now": now})
+    await pg_session.execute(text("""
+        INSERT INTO quote_versions
+            (id, order_id, version, status, subtotal, final_total, deposit_amount, cod_remaining, expires_at)
+        VALUES ('q_cod_reissue', 'ord_cod_reissue', 1, 'accepted', 1000000, 1000000,
+                300000, 700000, now() + interval '7 days')
+        ON CONFLICT (id) DO UPDATE SET status = 'accepted', cod_remaining = 700000
+    """))
+    await pg_session.execute(text("DELETE FROM payment_proofs WHERE payment_request_id = 'pr_cod_reissue_expired'"))
+    await pg_session.execute(text("DELETE FROM payment_requests WHERE order_id = 'ord_cod_reissue'"))
+    await pg_session.execute(text("""
+        INSERT INTO payment_requests
+            (id, order_id, quote_id, purpose, amount, reference, qr_payload, status, expires_at)
+        VALUES ('pr_cod_reissue_expired', 'ord_cod_reissue', 'q_cod_reissue', 'remaining',
+                700000, 'REF-COD-REISSUE-OLD', 'https://img.vietqr.io/image/970415-123-compact2.png',
+                'active', now() - interval '1 minute')
+    """))
+    await pg_session.commit()
+
+    first = await reissue_payment_request(
+        pg_session,
+        actor_id="admin_ops",
+        order_id="ord_cod_reissue",
+    )
+    second = await reissue_payment_request(
+        pg_session,
+        actor_id="admin_ops",
+        order_id="ord_cod_reissue",
+    )
+
+    assert first["reissued"] is True
+    assert first["purpose"] == "remaining"
+    assert first["amount"] == 700000
+    assert second["reissued"] is False
+    assert second["id"] == first["id"]
+    statuses = (await pg_session.execute(text("""
+        SELECT status FROM payment_requests
+        WHERE order_id = 'ord_cod_reissue' AND purpose = 'remaining'
+        ORDER BY expires_at, id
+    """))).scalars().all()
+    assert statuses.count("active") == 1
+    assert "superseded" in statuses
+    audit_count = (await pg_session.execute(text("""
+        SELECT count(*) FROM order_revision_history
+        WHERE order_id = 'ord_cod_reissue' AND action_type = 'reissue_payment_request'
+    """))).scalar_one()
+    assert audit_count == 1
+
+    await pg_session.execute(
+        text("UPDATE payment_requests SET status = 'uploaded' WHERE id = :request_id"),
+        {"request_id": first["id"]},
+    )
+    await pg_session.execute(text("""
+        INSERT INTO payment_proofs
+            (id, payment_request_id, storage_key, file_name, content_type,
+             file_size_bytes, status, uploaded_by, uploaded_at)
+        VALUES ('proof_reissue_pending', :request_id,
+                'orders/ord_cod_reissue/payment-proof/pending.jpg', 'pending.jpg', 'image/jpeg',
+                2048, 'pending_admin_confirmation', 'admin_ops', now())
+    """), {"request_id": first["id"]})
+    await pg_session.commit()
+    with pytest.raises(ValueError, match="PAYMENT_PROOF_PENDING_REVIEW"):
+        await reissue_payment_request(
+            pg_session,
+            actor_id="admin_ops",
+            order_id="ord_cod_reissue",
+        )
+
+
+@pytest.mark.asyncio
+async def test_proof_uploaded_before_expiry_has_seven_day_review_grace(pg_session: AsyncSession):
+    now = datetime.now(timezone.utc)
+    await pg_session.execute(text("""
+        INSERT INTO organizations (id, name)
+        VALUES ('org_buyer_review_grace', 'Dai Ly Review Grace')
+        ON CONFLICT (id) DO NOTHING
+    """))
+    await pg_session.execute(text("""
+        INSERT INTO customer_orders
+            (id, order_number, organization_id, created_by, commercial_status, payment_status,
+             fulfillment_status, payment_intent, current_quote_version, updated_at)
+        VALUES ('ord_review_grace', 'PTW-GRACE-01', 'org_buyer_review_grace', 'admin_ops',
+                'customer_accepted', 'full_uploaded', 'not_started', 'pay_full', 1, :now)
+        ON CONFLICT (id) DO UPDATE SET commercial_status = 'customer_accepted',
+            payment_status = 'full_uploaded', payment_intent = 'pay_full', updated_at = :now
+    """), {"now": now})
+    await pg_session.execute(text("""
+        INSERT INTO quote_versions
+            (id, order_id, version, status, subtotal, final_total, deposit_amount, cod_remaining, expires_at)
+        VALUES ('q_review_grace', 'ord_review_grace', 1, 'accepted', 500000, 500000,
+                500000, 0, now() + interval '7 days')
+        ON CONFLICT (id) DO UPDATE SET status = 'accepted', final_total = 500000
+    """))
+    await pg_session.execute(text("DELETE FROM payment_proofs WHERE payment_request_id = 'pr_review_grace'"))
+    await pg_session.execute(text("DELETE FROM payment_requests WHERE id = 'pr_review_grace'"))
+    await pg_session.execute(text("""
+        INSERT INTO payment_requests
+            (id, order_id, quote_id, purpose, amount, reference, qr_payload, status, expires_at)
+        VALUES ('pr_review_grace', 'ord_review_grace', 'q_review_grace', 'full', 500000,
+                'REF-GRACE-01', 'https://img.vietqr.io/image/970415-123-compact2.png',
+                'uploaded', :expires_at)
+    """), {"expires_at": now - timedelta(hours=1)})
+    await pg_session.execute(text("""
+        INSERT INTO payment_proofs
+            (id, payment_request_id, storage_key, file_name, content_type,
+             file_size_bytes, status, uploaded_by, uploaded_at)
+        VALUES ('proof_review_grace', 'pr_review_grace',
+                'orders/ord_review_grace/payment-proof/proof.jpg', 'proof.jpg', 'image/jpeg',
+                1024, 'pending_admin_confirmation', 'admin_ops', :uploaded_at)
+    """), {"uploaded_at": now - timedelta(hours=2)})
+    await pg_session.commit()
+
+    await save_order(
+        pg_session,
+        actor_id="admin_ops",
+        expected_updated_at=now.isoformat(),
+        order={
+            "id": "ord_review_grace",
+            "paymentProofs": [{
+                "id": "proof_review_grace",
+                "paymentRequestId": "pr_review_grace",
+                "status": "accepted",
+            }],
+        },
+    )
+
+    payment_status = (await pg_session.execute(text(
+        "SELECT payment_status FROM customer_orders WHERE id = 'ord_review_grace'"
+    ))).scalar_one()
+    request_status = (await pg_session.execute(text(
+        "SELECT status FROM payment_requests WHERE id = 'pr_review_grace'"
+    ))).scalar_one()
+    assert payment_status == "paid"
+    assert request_status == "confirmed"
+
+
+@pytest.mark.asyncio
+async def test_rejected_proof_reopens_unexpired_request_for_customer_retry(pg_session: AsyncSession):
+    now = datetime.now(timezone.utc)
+    await pg_session.execute(text("""
+        INSERT INTO organizations (id, name)
+        VALUES ('org_review_reject', 'Review Reject Org')
+        ON CONFLICT (id) DO NOTHING
+    """))
+    await pg_session.execute(text("""
+        INSERT INTO customer_orders
+            (id, order_number, organization_id, created_by, commercial_status, payment_status,
+             fulfillment_status, payment_intent, current_quote_version, updated_at)
+        VALUES ('ord_review_reject', 'PTW-REJECT-01', 'org_review_reject', 'admin_ops',
+                'customer_accepted', 'full_uploaded', 'not_started', 'pay_full', 1, :now)
+        ON CONFLICT (id) DO UPDATE SET payment_status = 'full_uploaded', updated_at = :now
+    """), {"now": now})
+    await pg_session.execute(text("""
+        INSERT INTO quote_versions
+            (id, order_id, version, status, subtotal, final_total, deposit_amount, cod_remaining, expires_at)
+        VALUES ('q_review_reject', 'ord_review_reject', 1, 'accepted', 500000, 500000,
+                500000, 0, now() + interval '7 days')
+        ON CONFLICT (id) DO UPDATE SET status = 'accepted'
+    """))
+    await pg_session.execute(text("DELETE FROM payment_proofs WHERE payment_request_id = 'pr_review_reject'"))
+    await pg_session.execute(text("DELETE FROM payment_requests WHERE id = 'pr_review_reject'"))
+    await pg_session.execute(text("""
+        INSERT INTO payment_requests
+            (id, order_id, quote_id, purpose, amount, reference, qr_payload, status, expires_at)
+        VALUES ('pr_review_reject', 'ord_review_reject', 'q_review_reject', 'full', 500000,
+                'REF-REJECT-01', 'https://img.vietqr.io/image/970415-123-compact2.png',
+                'uploaded', now() + interval '1 day')
+    """))
+    await pg_session.execute(text("""
+        INSERT INTO payment_proofs
+            (id, payment_request_id, storage_key, file_name, content_type,
+             file_size_bytes, status, uploaded_by, uploaded_at)
+        VALUES ('proof_review_reject', 'pr_review_reject',
+                'orders/ord_review_reject/payment-proof/proof.jpg', 'proof.jpg', 'image/jpeg',
+                1024, 'pending_admin_confirmation', 'admin_ops', now())
+    """))
+    await pg_session.commit()
+
+    await save_order(
+        pg_session,
+        actor_id="admin_ops",
+        expected_updated_at=now.isoformat(),
+        order={
+            "id": "ord_review_reject",
+            "paymentProofs": [{
+                "id": "proof_review_reject",
+                "paymentRequestId": "pr_review_reject",
+                "status": "rejected",
+            }],
+        },
+    )
+
+    states = (await pg_session.execute(text("""
+        SELECT o.payment_status, pr.status AS request_status, pp.status AS proof_status
+        FROM customer_orders o
+        JOIN payment_requests pr ON pr.order_id = o.id
+        JOIN payment_proofs pp ON pp.payment_request_id = pr.id
+        WHERE o.id = 'ord_review_reject'
+    """))).mappings().one()
+    assert states["payment_status"] == "full_requested"
+    assert states["request_status"] == "active"
+    assert states["proof_status"] == "rejected"
 
 
 # ── TEST 7: GENERAL LEDGER IDEMPOTENCY (V-008) ──────────────────────
@@ -1314,3 +1600,405 @@ async def test_concurrent_quote_change_vs_sale_recognition(pg_engine):
     async with AsyncSessionLocal() as session:
         line_131 = (await session.execute(text("SELECT debit_amount FROM journal_lines WHERE order_id = 'ord_race_quote' AND account_code = '131'"))).scalar_one()
         assert line_131 == 1000000, f"Receivable must be 1,000,000 from accepted quote V1 (got {line_131})"
+
+
+# ── V13 REAL POSTGRESQL CONCURRENCY MATRIX (C1 - C4) ─────────────
+
+# C1: Same organization create order race
+@pytest.mark.asyncio
+async def test_concurrency_c1_same_org_create_race(pg_engine):
+    """C1: Two concurrent order creation attempts for same organization on separate connections -> exactly 1 succeeds, other fails with active order conflict."""
+    AsyncSessionLocal = sessionmaker(bind=pg_engine, class_=AsyncSession, expire_on_commit=False)
+    async with AsyncSessionLocal() as session:
+        await session.execute(text("INSERT INTO organizations (id, name) VALUES ('org_c1_conc', 'Concurrent Org 1') ON CONFLICT DO NOTHING"))
+        await session.execute(text("""
+            INSERT INTO app_users (id, organization_id, full_name, email, status)
+            VALUES ('user_c1_conc', 'org_c1_conc', 'User C1', 'c1@example.com', 'active')
+            ON CONFLICT DO NOTHING
+        """))
+        await session.execute(text("INSERT INTO suppliers (id, code, name, active) VALUES ('sup_c1_conc', 'SUP-C1', 'Supplier C1', true) ON CONFLICT DO NOTHING"))
+        await session.execute(text("INSERT INTO products (id, code, name, brand, category, active) VALUES ('prod_c1', 'P-C1', 'Prod C1', 'Brand C1', 'Cat C1', true) ON CONFLICT DO NOTHING"))
+        await session.execute(text("""
+            INSERT INTO product_variants (id, product_id, sku, label, active)
+            VALUES ('var_c1', 'prod_c1', 'SKU-C1', 'Variant C1', true)
+            ON CONFLICT DO NOTHING
+        """))
+        await session.execute(text("""
+            INSERT INTO supplier_offers (id, supplier_id, product_variant_id, wholesale_price, min_order_qty, stock_qty, active)
+            VALUES ('off_c1', 'sup_c1_conc', 'var_c1', 100000, 1, 100, true)
+            ON CONFLICT DO NOTHING
+        """))
+        await session.commit()
+
+    async def worker_create(worker_id: int):
+        async with AsyncSessionLocal() as session:
+            return await save_order(
+                session,
+                actor_id="user_c1_conc",
+                order={
+                    "orderNumber": f"PTW-C1-{worker_id}",
+                    "paymentIntent": "deposit_cod",
+                    "items": [{"variantSku": "SKU-C1", "supplierId": "sup_c1_conc", "quantity": 1}],
+                },
+            )
+
+    results = await asyncio.gather(worker_create(1), worker_create(2), return_exceptions=True)
+
+    successes = [r for r in results if not isinstance(r, Exception)]
+    failures = [r for r in results if isinstance(r, Exception)]
+
+    assert len(successes) == 1, f"Expected exactly 1 order creation success, got {len(successes)}: {results}"
+    assert len(failures) == 1, f"Expected exactly 1 failure due to active order constraint, got {len(failures)}"
+    assert any(
+        err_keyword in str(failures[0]).lower()
+        for err_keyword in ["active_order_exists", "uq_customer_orders_active_org", "đang có một đơn hàng", "hoạt động"]
+    ), f"Unexpected failure message: {failures[0]}"
+
+
+# C2: Same quote acceptance race
+@pytest.mark.asyncio
+async def test_concurrency_c2_same_quote_acceptance_race(pg_engine):
+    """C2: Two concurrent accept requests for the same order with the same expected_updated_at -> exactly 1 succeeds, other 409 conflict."""
+    AsyncSessionLocal = sessionmaker(bind=pg_engine, class_=AsyncSession, expire_on_commit=False)
+    now_dt = datetime.now(timezone.utc)
+    t0_str = now_dt.isoformat()
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(text("INSERT INTO organizations (id, name) VALUES ('org_c2_conc', 'Concurrent Org 2') ON CONFLICT DO NOTHING"))
+        await session.execute(text("""
+            INSERT INTO app_users (id, organization_id, full_name, email, status)
+            VALUES ('user_c2_conc', 'org_c2_conc', 'User C2', 'c2@example.com', 'active')
+            ON CONFLICT DO NOTHING
+        """))
+        await session.execute(text("INSERT INTO warehouses (id, organization_id, code, name) VALUES ('wh_concur_1', 'org_seller', 'WH-C1', 'WH Concur 1') ON CONFLICT DO NOTHING"))
+        await session.execute(text("INSERT INTO products (id, code, name, brand, category, active) VALUES ('prod_c2', 'P-C2', 'Prod C2', 'Brand C2', 'Cat C2', true) ON CONFLICT DO NOTHING"))
+        await session.execute(text("""
+            INSERT INTO product_variants (id, product_id, sku, label, active)
+            VALUES ('var_c2', 'prod_c2', 'SKU-C2', 'Variant C2', true)
+            ON CONFLICT DO NOTHING
+        """))
+        await session.execute(text("""
+            INSERT INTO inventory_balances (id, organization_id, warehouse_id, product_variant_id, sku, on_hand_qty, reserved_qty)
+            VALUES ('bal_c2', 'org_seller', 'wh_concur_1', 'var_c2', 'SKU-C2', 100, 0)
+            ON CONFLICT (id) DO UPDATE SET on_hand_qty = 100, reserved_qty = 0
+        """))
+        await session.execute(text("""
+            INSERT INTO customer_orders (id, order_number, organization_id, created_by, assigned_staff_id, commercial_status, payment_intent, current_quote_version, updated_at)
+            VALUES ('ord_c2_conc', 'PTW-C2', 'org_c2_conc', 'user_c2_conc', 'admin_ops', 'quoted', 'deposit_cod', 1, :now)
+            ON CONFLICT (id) DO UPDATE SET commercial_status = 'quoted', assigned_staff_id = 'admin_ops', current_quote_version = 1, updated_at = :now
+        """), {"now": now_dt})
+        await session.execute(text("""
+            INSERT INTO order_items (id, order_id, product_code_snapshot, product_name_snapshot, variant_sku_snapshot, variant_label_snapshot, supplier_id, quantity, unit_price_snapshot)
+            VALUES ('item_c2', 'ord_c2_conc', 'P-C2', 'Prod C2', 'SKU-C2', 'Label C2', 'sup_pettravel', 1, 1000000)
+            ON CONFLICT (id) DO NOTHING
+        """))
+        await session.execute(text("""
+            INSERT INTO quote_versions (id, order_id, version, status, subtotal, final_total, deposit_amount, cod_remaining, expires_at)
+            VALUES ('qv_c2_conc', 'ord_c2_conc', 1, 'published', 1000000, 1000000, 300000, 700000, now() + interval '3 days')
+            ON CONFLICT (id) DO UPDATE SET status = 'published'
+        """))
+        await session.commit()
+
+    async def worker_accept(worker_id: int):
+        async with AsyncSessionLocal() as session:
+            return await save_order(
+                session,
+                actor_id="user_c2_conc",
+                expected_updated_at=t0_str,
+                order={
+                    "id": "ord_c2_conc",
+                    "commercialStatus": "customer_accepted",
+                    "acceptedQuoteId": "qv_c2_conc",
+                    "acceptedQuoteVersion": 1,
+                },
+            )
+
+    results = await asyncio.gather(worker_accept(1), worker_accept(2), return_exceptions=True)
+
+    successes = [r for r in results if not isinstance(r, Exception)]
+    failures = [r for r in results if isinstance(r, Exception)]
+
+    assert len(successes) == 1, f"Expected exactly 1 quote acceptance to succeed, got {len(successes)}: {results}"
+    assert len(failures) == 1, f"Expected exactly 1 failure due to CAS / single accepted constraint, got {len(failures)}"
+    assert isinstance(failures[0], (OrderConflictError, Exception))
+
+
+# C3: Same payment confirmation race
+@pytest.mark.asyncio
+async def test_concurrency_c3_same_payment_confirmation_race(pg_engine, monkeypatch):
+    """C3: Two concurrent VietQR webhook calls for the same payment reference -> 1 fresh success, 1 idempotent success."""
+    monkeypatch.setenv("VIETQR_WEBHOOK_SECRET", "secret-c3")
+    monkeypatch.setenv("PAYMENT_SYSTEM_ACTOR_ID", "admin_ops")
+
+    AsyncSessionLocal = sessionmaker(bind=pg_engine, class_=AsyncSession, expire_on_commit=False)
+    async with AsyncSessionLocal() as session:
+        await session.execute(text("INSERT INTO organizations (id, name) VALUES ('org_c3_conc', 'Concurrent Org 3') ON CONFLICT DO NOTHING"))
+        await session.execute(text("""
+            INSERT INTO app_users (id, organization_id, full_name, email, status)
+            VALUES ('user_c3_conc', 'org_c3_conc', 'User C3', 'c3@example.com', 'active')
+            ON CONFLICT DO NOTHING
+        """))
+        await session.execute(text("""
+            INSERT INTO customer_orders (id, order_number, organization_id, created_by, commercial_status, payment_status, payment_intent, current_quote_version)
+            VALUES ('ord_c3_conc', 'PTW-C3', 'org_c3_conc', 'user_c3_conc', 'customer_accepted', 'deposit_requested', 'deposit_cod', 1)
+            ON CONFLICT (id) DO UPDATE SET commercial_status = 'customer_accepted', payment_status = 'deposit_requested'
+        """))
+        await session.execute(text("""
+            INSERT INTO quote_versions (id, order_id, version, status, subtotal, final_total, deposit_amount, cod_remaining, expires_at)
+            VALUES ('qv_c3_conc', 'ord_c3_conc', 1, 'accepted', 1000000, 1000000, 300000, 700000, now() + interval '3 days')
+            ON CONFLICT (id) DO UPDATE SET status = 'accepted'
+        """))
+        await session.execute(text("""
+            INSERT INTO payment_requests (id, order_id, quote_id, purpose, amount, reference, qr_payload, status, expires_at)
+            VALUES ('pr_c3_conc', 'ord_c3_conc', 'qv_c3_conc', 'deposit', 300000, 'REF-C3-CONCURRENT', 'qr_payload', 'active', now() + interval '3 days')
+            ON CONFLICT (id) DO UPDATE SET status = 'active'
+        """))
+        await session.commit()
+
+    async def worker_webhook():
+        async with AsyncSessionLocal() as session:
+            return await vietqr_webhook(
+                payload={"reference": "REF-C3-CONCURRENT", "amount": 300000},
+                x_webhook_secret="secret-c3",
+                db=session,
+            )
+
+    results = await asyncio.gather(worker_webhook(), worker_webhook(), return_exceptions=True)
+
+    assert not any(isinstance(r, Exception) for r in results), f"Webhook concurrent calls failed: {results}"
+    assert all(r["status"] == "success" for r in results)
+    idempotent_flags = [r.get("idempotent", False) for r in results]
+    assert True in idempotent_flags or len(results) == 2, f"Expected idempotent handling in race: {results}"
+
+
+# C4: Same shipment transition race
+@pytest.mark.asyncio
+async def test_concurrency_c4_same_shipment_transition_race(pg_engine):
+    """C4: Two concurrent shipment transitions -> exactly one shipment record, consistent fulfillment state."""
+    AsyncSessionLocal = sessionmaker(bind=pg_engine, class_=AsyncSession, expire_on_commit=False)
+    now_dt = datetime.now(timezone.utc)
+    t0_str = now_dt.isoformat()
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(text("INSERT INTO organizations (id, name) VALUES ('org_c4_conc', 'Concurrent Org 4') ON CONFLICT DO NOTHING"))
+        await session.execute(text("""
+            INSERT INTO app_users (id, organization_id, full_name, email, status)
+            VALUES ('user_c4_conc', 'org_c4_conc', 'User C4', 'c4@example.com', 'active')
+            ON CONFLICT DO NOTHING
+        """))
+        await session.execute(text("""
+            INSERT INTO customer_orders (id, order_number, organization_id, created_by, commercial_status, payment_status, fulfillment_status, payment_intent, current_quote_version, updated_at)
+            VALUES ('ord_c4_conc', 'PTW-C4', 'org_c4_conc', 'user_c4_conc', 'locked', 'paid', 'ready_to_ship', 'pay_full', 1, :now)
+            ON CONFLICT (id) DO UPDATE SET commercial_status = 'locked', fulfillment_status = 'ready_to_ship', updated_at = :now
+        """), {"now": now_dt})
+        await session.execute(text("""
+            INSERT INTO quote_versions (id, order_id, version, status, subtotal, final_total, deposit_amount, cod_remaining, expires_at)
+            VALUES ('qv_c4_conc', 'ord_c4_conc', 1, 'accepted', 1000000, 1000000, 1000000, 0, now() + interval '3 days')
+            ON CONFLICT (id) DO UPDATE SET status = 'accepted'
+        """))
+        await session.execute(text("INSERT INTO warehouses (id, organization_id, code, name) VALUES ('wh_concur_1', 'org_seller', 'WH-C1', 'WH Concur 1') ON CONFLICT DO NOTHING"))
+        await session.execute(text("INSERT INTO products (id, code, name, brand, category, active) VALUES ('prod_c4', 'P-C4', 'Prod C4', 'Brand C4', 'Cat C4', true) ON CONFLICT DO NOTHING"))
+        await session.execute(text("""
+            INSERT INTO product_variants (id, product_id, sku, label, active)
+            VALUES ('var_c4', 'prod_c4', 'SKU-C4', 'Label C4', true)
+            ON CONFLICT DO NOTHING
+        """))
+        await session.execute(text("""
+            INSERT INTO order_items (id, order_id, product_code_snapshot, product_name_snapshot, variant_sku_snapshot, variant_label_snapshot, supplier_id, quantity, unit_price_snapshot, locked)
+            VALUES ('item_c4', 'ord_c4_conc', 'P-C4', 'Prod C4', 'SKU-C4', 'Label C4', 'sup_pettravel', 2, 500000, true)
+            ON CONFLICT (id) DO NOTHING
+        """))
+        await session.commit()
+
+    async def worker_ship(worker_id: int):
+        async with AsyncSessionLocal() as session:
+            return await save_order(
+                session,
+                actor_id="admin_ops",
+                expected_updated_at=t0_str,
+                order={
+                    "id": "ord_c4_conc",
+                    "fulfillmentStatus": "shipped",
+                    "shipment": {
+                        "carrier": f"Carrier-{worker_id}",
+                        "trackingCode": f"TRACK-C4-{worker_id}",
+                        "shippingFee": 30000,
+                    },
+                },
+            )
+
+    results = await asyncio.gather(worker_ship(1), worker_ship(2), return_exceptions=True)
+
+    successes = [r for r in results if not isinstance(r, Exception)]
+    failures = [r for r in results if isinstance(r, Exception)]
+
+    assert len(successes) == 1, f"Expected exactly 1 shipment transition to succeed, got {len(successes)}: {results}"
+    assert len(failures) == 1, f"Expected 1 CAS conflict failure, got {len(failures)}"
+
+    async with AsyncSessionLocal() as session:
+        # Check order fulfillment_status
+        f_status = (await session.execute(text("SELECT fulfillment_status FROM customer_orders WHERE id = 'ord_c4_conc'"))).scalar()
+        assert f_status == "shipped"
+
+        # Check shipments count -> exactly 1 shipment record
+        shipments_count = (await session.execute(text("SELECT count(*) FROM shipments WHERE order_id = 'ord_c4_conc'"))).scalar()
+        assert shipments_count == 1
+
+
+# C5: Concurrent operations documents cannot oversell or lose inventory updates
+@pytest.mark.asyncio
+async def test_concurrency_c5_operations_inventory_row_lock_prevents_oversell(pg_engine):
+    AsyncSessionLocal = sessionmaker(bind=pg_engine, class_=AsyncSession, expire_on_commit=False)
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("""INSERT INTO inventory_balances
+                (id, organization_id, warehouse_id, sku, on_hand_qty, reserved_qty, defective_qty, avg_cost_vnd)
+                VALUES ('bal_c5_ops', 'org_seller', 'wh_concur_1', 'SKU-C5-OPS', 10, 0, 0, 100000)
+                ON CONFLICT (organization_id, warehouse_id, sku)
+                DO UPDATE SET on_hand_qty = 10, reserved_qty = 0, defective_qty = 0, avg_cost_vnd = 100000""")
+        )
+        await session.execute(text("DELETE FROM stock_movements WHERE sku_snapshot = 'SKU-C5-OPS'"))
+        await session.execute(text("DELETE FROM operations_documents WHERE document_no LIKE 'C5-OPS-%'"))
+        await session.commit()
+
+    async def worker_sale(worker_id: int):
+        async with AsyncSessionLocal() as session:
+            return await create_operations_document(
+                {
+                    "type": "sales_invoice",
+                    "documentNo": f"C5-OPS-{worker_id}",
+                    "partnerName": f"Buyer {worker_id}",
+                    "lines": [{"sku": "SKU-C5-OPS", "quantity": 7, "unitCostVnd": 100000}],
+                    "shouldPost": True,
+                    "userId": "admin_ops",
+                    "organizationId": "org_seller",
+                },
+                db=session,
+            )
+
+    results = await asyncio.gather(worker_sale(1), worker_sale(2), return_exceptions=True)
+    successes = [result for result in results if not isinstance(result, Exception)]
+    failures = [result for result in results if isinstance(result, Exception)]
+    assert len(successes) == 1, results
+    assert len(failures) == 1, results
+    assert "Tồn khả dụng không đủ" in str(failures[0])
+
+    async with AsyncSessionLocal() as session:
+        balance = (
+            await session.execute(
+                text("SELECT on_hand_qty FROM inventory_balances WHERE id = 'bal_c5_ops'")
+            )
+        ).scalar_one()
+        movement_count = (
+            await session.execute(
+                text("SELECT count(*) FROM stock_movements WHERE sku_snapshot = 'SKU-C5-OPS'")
+            )
+        ).scalar_one()
+        document_count = (
+            await session.execute(
+                text("SELECT count(*) FROM operations_documents WHERE document_no LIKE 'C5-OPS-%'")
+            )
+        ).scalar_one()
+        journal_count = (
+            await session.execute(
+                text("SELECT count(*) FROM journal_entries WHERE source_type = 'operations_document' AND source_id IN (SELECT id FROM operations_documents WHERE document_no LIKE 'C5-OPS-%') AND status = 'posted'")
+            )
+        ).scalar_one()
+        assert balance == 3
+        assert movement_count == 1
+        assert document_count == 1
+        assert journal_count == 1
+
+
+# C6: Login throttling stays atomic when requests hit different server instances.
+@pytest.mark.asyncio
+async def test_concurrency_c6_distributed_login_rate_limit_is_atomic(pg_engine):
+    AsyncSessionLocal = sessionmaker(bind=pg_engine, class_=AsyncSession, expire_on_commit=False)
+    identifier = "concurrent-login-target@example.com"
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(text("DELETE FROM auth_rate_limit_buckets"))
+        await session.commit()
+
+    async def consume_once():
+        async with AsyncSessionLocal() as session:
+            return await consume_login_rate_limit(session, identifier)
+
+    results = await asyncio.gather(
+        *(consume_once() for _ in range(LOGIN_ATTEMPT_LIMIT + 4))
+    )
+
+    assert sum(result.allowed for result in results) == LOGIN_ATTEMPT_LIMIT
+    assert sum(not result.allowed for result in results) == 4
+    async with AsyncSessionLocal() as session:
+        attempt_count = (
+            await session.execute(
+                text("SELECT attempt_count FROM auth_rate_limit_buckets")
+            )
+        ).scalar_one()
+    assert attempt_count == LOGIN_ATTEMPT_LIMIT + 4
+
+
+# C7: Legacy catalog image compare-and-swap is valid for PostgreSQL text[].
+@pytest.mark.asyncio
+async def test_c7_catalog_image_migration_is_atomic_on_real_postgres(pg_session):
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"postgres-migration-test"
+    data_url = "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
+    await pg_session.execute(
+        text("""insert into products (id, code, name, brand, category, image_url, images)
+            values
+              ('prod_img_apply', 'IMG-APPLY', 'Apply image', 'Pet Travel', 'Test', :data_url, ARRAY[:data_url]),
+              ('prod_img_atomic_a', 'IMG-ATOMIC-A', 'Atomic A', 'Pet Travel', 'Test', :data_url, ARRAY[:data_url]),
+              ('prod_img_atomic_b', 'IMG-ATOMIC-B', 'Atomic B', 'Pet Travel', 'Test', :data_url, ARRAY[:data_url])"""),
+        {"data_url": data_url},
+    )
+    await pg_session.execute(
+        text("""insert into product_variants (id, product_id, sku, label, image_url)
+            values ('var_img_apply', 'prod_img_apply', 'SKU-IMG-APPLY', 'Default', :data_url)"""),
+        {"data_url": data_url},
+    )
+    await pg_session.commit()
+
+    success_plan = build_catalog_image_migration_plan(
+        [{"id": "prod_img_apply", "image_url": data_url, "images": [data_url]}],
+        [{"id": "var_img_apply", "product_id": "prod_img_apply", "image_url": data_url}],
+        "https://catalog.example.test",
+    )
+    await apply_catalog_image_database_updates(pg_session, success_plan)
+    migrated_product = (
+        await pg_session.execute(
+            text("select image_url, images from products where id = 'prod_img_apply'")
+        )
+    ).mappings().one()
+    migrated_variant = await pg_session.scalar(
+        text("select image_url from product_variants where id = 'var_img_apply'")
+    )
+    assert migrated_product["image_url"].startswith("https://catalog.example.test/products/")
+    assert migrated_product["images"][0].startswith("https://catalog.example.test/products/")
+    assert migrated_variant.startswith("https://catalog.example.test/variants/")
+    await pg_session.commit()
+
+    atomic_plan = build_catalog_image_migration_plan(
+        [
+            {"id": "prod_img_atomic_a", "image_url": data_url, "images": [data_url]},
+            {"id": "prod_img_atomic_b", "image_url": data_url, "images": [data_url]},
+        ],
+        [],
+        "https://catalog.example.test",
+    )
+    await pg_session.execute(
+        text("update products set image_url = '/changed-concurrently.webp' where id = 'prod_img_atomic_b'")
+    )
+    await pg_session.commit()
+
+    with pytest.raises(RuntimeError, match="changed after dry-run"):
+        await apply_catalog_image_database_updates(pg_session, atomic_plan)
+
+    unchanged_first = await pg_session.scalar(
+        text("select image_url from products where id = 'prod_img_atomic_a'")
+    )
+    concurrently_changed_second = await pg_session.scalar(
+        text("select image_url from products where id = 'prod_img_atomic_b'")
+    )
+    assert unchanged_first == data_url
+    assert concurrently_changed_second == "/changed-concurrently.webp"

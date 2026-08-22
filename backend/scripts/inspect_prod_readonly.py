@@ -3,10 +3,15 @@ import asyncpg
 import json
 import hashlib
 
-db_url = 'postgresql://postgres.gfiyzwrcvsnsimwbpgbb:HvT%40270756832002@aws-0-ap-south-1.pooler.supabase.com:5432/postgres'
+from app.core.config import settings
+
+
+def get_asyncpg_database_url() -> str:
+    """Load credentials from the configured environment without printing them."""
+    return settings.async_database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
 
 async def inspect_prod():
-    conn = await asyncpg.connect(db_url, timeout=10)
+    conn = await asyncpg.connect(get_asyncpg_database_url(), timeout=10)
     try:
         ver = await conn.fetchval('SELECT version();')
         s_ver = await conn.fetchval('SHOW server_version;')

@@ -38,9 +38,7 @@ def validate_commercial_transition(
                 return
             raise ValueError("Chỉ quản trị viên mới có thể hủy đơn hàng sau khi báo giá đã được chấp thuận.")
         if before == "locked":
-            if actor_is_internal and ("order.quote" in permissions or "super_admin" in permissions):
-                return
-            raise ValueError("Không thể hủy đơn hàng đã bị khóa xử lý.")
+            raise ValueError("LOCKED_ORDER_CANCELLATION_REQUIRES_REVERSAL_WORKFLOW: Đơn hàng đã bị khóa xử lý. Hủy đơn yêu cầu quy trình hoàn tiền và đảo sổ riêng biệt.")
         raise ValueError(f"Không thể hủy đơn hàng từ trạng thái '{before}'.")
 
     # Customer-driven transitions
@@ -104,6 +102,24 @@ def validate_fulfillment_transition(
         raise ValueError(
             f"Trạng thái giao hàng chỉ được phép chuyển liền kề theo thứ tự: '{before}' -> '{allowed_chain[before_idx + 1]}'. (Không được bỏ qua trạng thái)"
         )
+
+
+def validate_fulfillment_preconditions(
+    *,
+    commercial_status: str,
+    payment_status: str,
+    before: str,
+    after: str,
+    has_shipment: bool,
+) -> None:
+    if before == after:
+        return
+    if commercial_status not in {"customer_accepted", "locked"}:
+        raise ValueError("FULFILLMENT_REQUIRES_ACCEPTED_ORDER: Đơn hàng chưa được khách chấp thuận.")
+    if payment_status not in {"deposit_confirmed", "paid", "cod_remaining"}:
+        raise ValueError("FULFILLMENT_REQUIRES_CONFIRMED_PAYMENT: Chưa thể xử lý giao hàng trước khi xác nhận thanh toán.")
+    if after == "shipped" and not has_shipment:
+        raise ValueError("SHIPMENT_DETAILS_REQUIRED: Cần đơn vị vận chuyển và mã vận đơn thật trước khi xuất kho.")
 
 
 def stock_command_for_transition(

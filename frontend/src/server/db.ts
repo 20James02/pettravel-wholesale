@@ -112,14 +112,10 @@ export async function saveCategories(categories: string[]): Promise<void> {
 // ── ORDERS ───────────────────────────────────────────────────
 
 export async function getOrderRevision(user: UserAccount): Promise<string> {
-  try {
-    const data: { revision: string } = await backendFetch(
-      `/api/v1/orders/revision?user_id=${user.id}&is_admin=${user.isAdmin}`
-    );
-    return data.revision || "empty";
-  } catch {
-    return "fallback-" + Date.now();
-  }
+  const data: { revision: string } = await backendFetch(
+    `/api/v1/orders/revision?user_id=${user.id}&is_admin=${user.isAdmin}`
+  );
+  return data.revision || "empty";
 }
 
 export async function getOrdersSummary(
@@ -140,7 +136,7 @@ export async function getOrders(user: UserAccount): Promise<CustomerOrder[]> {
 }
 
 export async function saveOrder(
-  order: CustomerOrder,
+  order: CustomerOrder | Record<string, unknown>,
   creatorId: string,
   expectedUpdatedAt?: string
 ): Promise<{ orderId: string; orderNumber: string; updatedAt: string }> {

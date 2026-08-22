@@ -1,3 +1,6 @@
+import logging
+import uuid
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -5,6 +8,8 @@ from app.routers.router import api_router
 from app.core.config import settings
 from app.core.internal_auth import is_public_api_path, require_internal_request
 import uvicorn
+
+logger = logging.getLogger(__name__)
 
 PRODUCTION_CONFIG_ERROR: str | None = None
 try:
@@ -38,12 +43,12 @@ async def vercel_path_rewrite(request: Request, call_next):
 
     final_path = request.scope.get("path", "")
     if PRODUCTION_CONFIG_ERROR and final_path not in {"/", "/debug"}:
+        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+        logger.error("Production configuration invalid request_id=%s: %s", request_id, PRODUCTION_CONFIG_ERROR)
         return JSONResponse(
             status_code=503,
-            content={
-                "detail": "Production configuration is invalid.",
-                "error": PRODUCTION_CONFIG_ERROR,
-            },
+            content={"detail": "Production configuration is invalid.", "requestId": request_id},
+            headers={"X-Request-ID": request_id},
         )
 
     if final_path.startswith(settings.API_V1_STR) and not is_public_api_path(final_path, request.method):
@@ -71,11 +76,21 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    import traceback
-    traceback.print_exc()
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    logger.exception(
+        "Unhandled request error request_id=%s method=%s path=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
     return JSONResponse(
         status_code=500,
-        content={"detail": "Máy chủ xử lý yêu cầu gặp sự cố nội bộ. Vui lòng thử lại sau.", "error": str(exc)},
+        content={
+            "detail": "Máy chủ xử lý yêu cầu gặp sự cố nội bộ. Vui lòng thử lại sau.",
+            "requestId": request_id,
+        },
+        headers={"X-Request-ID": request_id},
     )
 
 

@@ -35,7 +35,7 @@ export const AnnouncementBanner: React.FC<AnnouncementBannerProps> = ({ onOpenPa
             <Sparkles className="w-3 h-3 text-amber-300" /> B2B Partner
           </span>
           <span className="truncate">
-            Chương trình Đại lý VIP & Co-Marketing: Chiết khấu sỉ đến <strong className="text-amber-300 font-bold">45%</strong> + Tặng kệ trưng bày POSM miễn phí!
+            Chương trình đồng hành cùng đại lý: tư vấn danh mục, báo giá và hỗ trợ bán hàng theo nhu cầu thực tế.
           </span>
           {onOpenPartnerModal && (
             <button

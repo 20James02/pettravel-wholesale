@@ -102,6 +102,18 @@ create table products (
   created_at timestamptz not null default now()
 );
 
+-- Cross-instance authentication throttling. bucket_key is a SHA-256 digest;
+-- raw email addresses, phone numbers, and IP addresses are never persisted.
+create table auth_rate_limit_buckets (
+  bucket_key text primary key check (length(bucket_key) = 64),
+  attempt_count integer not null check (attempt_count > 0),
+  window_expires_at timestamptz not null,
+  updated_at timestamptz not null default now()
+);
+
+create index idx_auth_rate_limit_buckets_expiry
+  on auth_rate_limit_buckets (window_expires_at);
+
 create table product_variants (
   id text primary key default gen_random_uuid()::text,
   product_id text not null references products(id) on delete cascade,
@@ -309,11 +321,15 @@ create index idx_orders_org_updated on customer_orders (organization_id, updated
 create index idx_order_items_order on order_items (order_id);
 create index idx_fulfillment_groups_order on fulfillment_groups (order_id);
 create index idx_payment_requests_order_status on payment_requests (order_id, status);
+create unique index uq_payment_proofs_one_pending_per_request
+  on payment_proofs (payment_request_id)
+  where status = 'pending_admin_confirmation';
 create index idx_comments_order_created on order_comments (order_id, created_at desc);
 create index idx_audit_entity on audit_log (entity_type, entity_id, created_at desc);
 
 alter table organizations enable row level security;
 alter table app_users enable row level security;
+alter table auth_rate_limit_buckets enable row level security;
 alter table roles enable row level security;
 alter table permissions enable row level security;
 alter table user_roles enable row level security;
@@ -329,6 +345,8 @@ alter table quote_adjustments enable row level security;
 alter table fulfillment_groups enable row level security;
 alter table fulfillment_items enable row level security;
 alter table order_comments enable row level security;
+alter table order_revision_history enable row level security;
+alter table order_sync_revisions enable row level security;
 alter table payment_requests enable row level security;
 alter table payment_proofs enable row level security;
 alter table shipments enable row level security;
@@ -538,6 +556,25 @@ create policy "customers can read own shipments"
       where o.id = shipments.order_id
         and o.organization_id = current_app_user_org_id()
     )
+  );
+
+create policy "customers can read own order revision history"
+  on order_revision_history for select
+  using (
+    current_app_user_has_role(array['super_admin', 'admin_manager', 'order_operator', 'accountant', 'warehouse'])
+    or exists (
+      select 1
+      from customer_orders o
+      where o.id = order_revision_history.order_id
+        and o.organization_id = current_app_user_org_id()
+    )
+  );
+
+create policy "users can read scoped order sync revisions"
+  on order_sync_revisions for select
+  using (
+    current_app_user_has_role(array['super_admin', 'admin_manager', 'order_operator', 'accountant', 'warehouse'])
+    or (scope_type = 'organization' and scope_id = current_app_user_org_id())
   );
 
 create policy "internal roles can read audit log"
@@ -1044,5 +1081,3 @@ for each row execute function public.pt_guard_locked_order_item_immutability();
 create unique index if not exists uq_quote_versions_single_accepted
 on public.quote_versions (order_id)
 where status = 'accepted';
-
-

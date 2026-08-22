@@ -3,14 +3,36 @@ from datetime import timedelta
 import hashlib
 import hmac
 import json
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import text
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 from app.core.config import settings
+from app.core.internal_auth import is_public_api_path
 from app.core.security import create_access_token, get_password_hash
+from app.main import app
 from app.routers.v1.endpoints.auth import LoginJsonInput, login_json
+from app.services.auth_rate_limit import (
+    LOGIN_ATTEMPT_LIMIT,
+    consume_login_rate_limit,
+    digest_login_identifier,
+)
+
+
+def test_backend_login_endpoints_require_internal_bff_authentication(monkeypatch):
+    assert not is_public_api_path("/api/v1/auth/login", "POST")
+    assert not is_public_api_path("/api/v1/auth/login-json", "POST")
+    monkeypatch.setattr(settings, "BACKEND_INTERNAL_SECRET", "test-internal-secret-32-characters-long")
+
+    response = TestClient(app).post(
+        "/api/v1/auth/login-json",
+        json={"identifier": "owner@example.com", "password": "CorrectPassword123"},
+    )
+
+    assert response.status_code == 401
 
 
 def test_access_token_round_trip_uses_hs256():
@@ -66,6 +88,10 @@ async def test_login_json_returns_canonical_user_role_and_organization(canonical
     assert result["user"]["role"] == "super_admin"
     assert result["user"]["organizationId"] == "org_pettravel"
     assert result["user"]["company"] == "Pet Travel Wholesale"
+    remaining_buckets = await canonical_db_session.scalar(
+        text("select count(*) from auth_rate_limit_buckets")
+    )
+    assert remaining_buckets == 0
 
 
 @pytest.mark.asyncio
@@ -108,3 +134,55 @@ async def test_login_json_rejects_disabled_account(canonical_db_session):
         )
 
     assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_login_json_distributed_rate_limit_is_persistent_and_pii_safe(canonical_db_session):
+    identifier = "target-account@example.com"
+
+    for _ in range(LOGIN_ATTEMPT_LIMIT):
+        with pytest.raises(HTTPException) as exc:
+            await login_json(
+                LoginJsonInput(email=identifier, password="WrongPassword123"),
+                canonical_db_session,
+            )
+        assert exc.value.status_code == 401
+
+    with pytest.raises(HTTPException) as blocked:
+        await login_json(
+            LoginJsonInput(email=identifier, password="WrongPassword123"),
+            canonical_db_session,
+        )
+
+    assert blocked.value.status_code == 429
+    assert int(blocked.value.headers["Retry-After"]) > 0
+    bucket = (
+        await canonical_db_session.execute(
+            text("select bucket_key, attempt_count from auth_rate_limit_buckets")
+        )
+    ).mappings().one()
+    assert bucket["bucket_key"] == digest_login_identifier(identifier)
+    assert identifier not in bucket["bucket_key"]
+    assert bucket["attempt_count"] == LOGIN_ATTEMPT_LIMIT + 1
+
+
+@pytest.mark.asyncio
+async def test_distributed_rate_limit_purges_expired_buckets(canonical_db_session):
+    first_window = datetime(2026, 8, 22, 1, 0, tzinfo=timezone.utc)
+    await consume_login_rate_limit(
+        canonical_db_session,
+        "expired@example.com",
+        now=first_window,
+    )
+    await consume_login_rate_limit(
+        canonical_db_session,
+        "current@example.com",
+        now=first_window + timedelta(minutes=6),
+    )
+
+    keys = (
+        await canonical_db_session.execute(
+            text("select bucket_key from auth_rate_limit_buckets")
+        )
+    ).scalars().all()
+    assert keys == [digest_login_identifier("current@example.com")]

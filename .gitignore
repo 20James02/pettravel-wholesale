@@ -4,6 +4,7 @@ node_modules/
 out/
 build/
 dist/
+scratch/catalog-image-migration-*.json
 npm-debug.log*
 yarn-error.log*
 

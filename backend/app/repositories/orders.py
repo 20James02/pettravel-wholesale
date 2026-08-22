@@ -13,14 +13,19 @@ from app.services.order_workflow import (
     execute_stock_command,
     stock_command_for_transition,
     validate_commercial_transition,
+    validate_fulfillment_preconditions,
     validate_fulfillment_transition,
 )
 from app.services.pricing import calculate_quote_financials, resolve_deposit_rate_bps
 from app.services.canonical_accounting import post_order_accounting
+from app.services.payment import build_vietqr_image_url
 
 
 class OrderConflictError(ValueError):
     """Raised when a caller tries to overwrite a newer order revision or accepts a stale quote."""
+
+
+PAYMENT_PROOF_REVIEW_GRACE = timedelta(days=7)
 
 
 def _iso(value: Any) -> str | None:
@@ -275,6 +280,228 @@ async def save_order(
     return {"orderId": order_id, "orderNumber": order_number, "updatedAt": _iso(now) or ""}
 
 
+async def reissue_payment_request(
+    db: AsyncSession,
+    *,
+    actor_id: str,
+    order_id: str,
+) -> dict[str, Any]:
+    """Idempotently issue a replacement request after an unpaid request expires or is rejected."""
+    now = datetime.now(timezone.utc)
+    is_postgres = db.get_bind().dialect.name == "postgresql"
+    for_update = "for update of o" if is_postgres else ""
+    order = (
+        await db.execute(
+            text(f"""select o.*, u.status as actor_status, u.full_name as actor_name
+                from customer_orders o
+                cross join app_users u
+                where o.id = :order_id and u.id = :actor_id
+                {for_update}"""),
+            {"order_id": order_id, "actor_id": actor_id},
+        )
+    ).mappings().first()
+    if not order:
+        raise ValueError("Đơn hàng không tồn tại.")
+    if str(order["actor_status"]) != "active":
+        raise ValueError("Tài khoản không hoạt động.")
+
+    role_keys = {
+        str(row[0])
+        for row in (
+            await db.execute(
+                text("""select r.key from user_roles ur join roles r on r.id = ur.role_id
+                    where ur.user_id = :actor_id"""),
+                {"actor_id": actor_id},
+            )
+        ).all()
+    }
+    permissions = {
+        str(row[0])
+        for row in (
+            await db.execute(
+                text("""select distinct rp.permission_key from user_roles ur
+                    join role_permissions rp on rp.role_id = ur.role_id
+                    where ur.user_id = :actor_id"""),
+                {"actor_id": actor_id},
+            )
+        ).all()
+    }
+    if "order.confirm_payment" not in permissions and "super_admin" not in role_keys:
+        raise ValueError("Tài khoản không có quyền phát hành lại yêu cầu thanh toán.")
+    if str(order["commercial_status"]) not in {"customer_accepted", "locked"}:
+        raise ValueError("PAYMENT_REQUEST_REISSUE_INVALID_ORDER: Đơn hàng chưa chốt báo giá.")
+
+    payment_status = str(order["payment_status"])
+    if payment_status == "cod_remaining":
+        purpose = "remaining"
+        if str(order["payment_intent"]) != "deposit_cod" or str(order["fulfillment_status"]) != "delivered":
+            raise ValueError("PAYMENT_REQUEST_REISSUE_INVALID_ORDER: Đơn COD chưa hoàn tất giao hàng.")
+    elif payment_status in {"deposit_requested", "deposit_uploaded"}:
+        purpose = "deposit"
+    elif payment_status in {"full_requested", "full_uploaded"}:
+        purpose = "full"
+    else:
+        raise ValueError("PAYMENT_REQUEST_REISSUE_INVALID_STATUS: Đơn hàng không chờ yêu cầu thanh toán thay thế.")
+
+    request_rows = (
+        await db.execute(
+            text("""select pr.id, pr.amount, pr.reference, pr.qr_payload, pr.status, pr.expires_at,
+                    exists(select 1 from payment_proofs pp where pp.payment_request_id = pr.id
+                        and pp.status = 'pending_admin_confirmation') as has_pending_proof
+                from payment_requests pr
+                where pr.order_id = :order_id and pr.purpose = :purpose
+                order by pr.expires_at desc, pr.id desc"""),
+            {"order_id": order_id, "purpose": purpose},
+        )
+    ).mappings().all()
+    if any(
+        str(request_row["status"]) == "uploaded" and bool(request_row["has_pending_proof"])
+        for request_row in request_rows
+    ):
+        raise ValueError(
+            "PAYMENT_PROOF_PENDING_REVIEW: Đơn hàng đang có minh chứng chờ duyệt; không được phát hành yêu cầu trùng."
+        )
+    for request_row in request_rows:
+        status = str(request_row["status"])
+        expires_at = _as_utc(request_row["expires_at"])
+        if status == "active" and expires_at > now:
+            return {
+                "id": str(request_row["id"]),
+                "purpose": purpose,
+                "amount": int(request_row["amount"]),
+                "reference": str(request_row["reference"]),
+                "qrPayload": str(request_row["qr_payload"]),
+                "status": "active",
+                "expiresAt": _iso(request_row["expires_at"]),
+                "reissued": False,
+            }
+
+    accepted_quote = (
+        await db.execute(
+            text("""select id, final_total, deposit_amount, cod_remaining
+                from quote_versions where order_id = :order_id and status = 'accepted'
+                order by version desc, created_at desc, id desc limit 1"""),
+            {"order_id": order_id},
+        )
+    ).mappings().first()
+    if not accepted_quote:
+        raise ValueError("PAYMENT_REQUEST_REISSUE_NO_QUOTE: Không tìm thấy báo giá đã chấp thuận.")
+    amount_field = {"deposit": "deposit_amount", "full": "final_total", "remaining": "cod_remaining"}[purpose]
+    amount = int(accepted_quote[amount_field] or 0)
+    if amount <= 0:
+        raise ValueError("PAYMENT_REQUEST_REISSUE_INVALID_AMOUNT: Số tiền thanh toán không hợp lệ.")
+
+    await db.execute(
+        text("""update payment_requests set status = 'superseded'
+            where order_id = :order_id and purpose = :purpose and status in ('active', 'uploaded')"""),
+        {"order_id": order_id, "purpose": purpose},
+    )
+    clean_order_num = str(order["order_number"]).upper().removeprefix("PTW-")
+    clean_order_num = "".join(ch for ch in clean_order_num if ch.isalnum() or ch in "-_")[:32]
+    reference = f"PTW-{clean_order_num}-{purpose[:3].upper()}-{uuid.uuid4().hex[:8].upper()}"
+    expires_at = now + timedelta(days=7 if purpose == "remaining" else 3)
+    request_id = f"pr_{uuid.uuid4().hex}"
+    qr_payload = build_vietqr_image_url(amount_vnd=amount, reference=reference)
+    await db.execute(
+        text("""insert into payment_requests
+            (id, order_id, quote_id, purpose, amount, reference, qr_payload, status, expires_at)
+            values (:id, :order_id, :quote_id, :purpose, :amount, :reference,
+                    :qr_payload, 'active', :expires_at)"""),
+        {
+            "id": request_id,
+            "order_id": order_id,
+            "quote_id": accepted_quote["id"],
+            "purpose": purpose,
+            "amount": amount,
+            "reference": reference,
+            "qr_payload": qr_payload,
+            "expires_at": expires_at,
+        },
+    )
+    await db.execute(
+        text("update customer_orders set updated_at = :now where id = :order_id"),
+        {"now": now, "order_id": order_id},
+    )
+    await db.execute(
+        text("""insert into order_comments
+            (id, order_id, author_id, audience, message, created_at)
+            values (:id, :order_id, :actor_id, 'customer_visible', :message, :created_at)"""),
+        {
+            "id": f"comment_{uuid.uuid4().hex}",
+            "order_id": order_id,
+            "actor_id": actor_id,
+            "message": "Yêu cầu thanh toán đã được phát hành lại. Vui lòng dùng đúng mã tham chiếu mới hiển thị trên đơn hàng.",
+            "created_at": now,
+        },
+    )
+    if is_postgres:
+        next_revision = int((await db.execute(
+            text("select coalesce(max(revision_no), 0) + 1 from order_revision_history where order_id = :order_id"),
+            {"order_id": order_id},
+        )).scalar_one())
+        items_snapshot = (
+            await db.execute(
+                text("""select id, product_code_snapshot as "productCode",
+                    product_name_snapshot as "productName", variant_sku_snapshot as "variantSku",
+                    variant_label_snapshot as "variantLabel", quantity,
+                    unit_price_snapshot as "unitPriceSnapshot", locked
+                    from order_items where order_id = :order_id order by id"""),
+                {"order_id": order_id},
+            )
+        ).mappings().all()
+        quotes_snapshot = (
+            await db.execute(
+                text("""select id, version, status, subtotal, final_total as "finalTotal",
+                    deposit_amount as "depositAmount", cod_remaining as "codRemaining",
+                    expires_at as "expiresAt"
+                    from quote_versions where order_id = :order_id order by version"""),
+                {"order_id": order_id},
+            )
+        ).mappings().all()
+        await db.execute(
+            text("""insert into order_revision_history
+                (id, order_id, revision_no, actor_id, actor_name, actor_role, action_type,
+                 from_commercial_status, to_commercial_status, items_snapshot, quote_snapshot,
+                 shipping_snapshot, note, created_at)
+                values (:id, :order_id, :revision_no, :actor_id, :actor_name, 'admin',
+                        'reissue_payment_request', :commercial_status, :commercial_status,
+                        CAST(:items_snapshot AS jsonb), CAST(:quote_snapshot AS jsonb),
+                        CAST(:shipping_snapshot AS jsonb), :note, :created_at)"""),
+            {
+                "id": f"rev_{uuid.uuid4().hex}",
+                "order_id": order_id,
+                "revision_no": next_revision,
+                "actor_id": actor_id,
+                "actor_name": str(order["actor_name"]),
+                "commercial_status": str(order["commercial_status"]),
+                "items_snapshot": json.dumps([dict(row) for row in items_snapshot], default=str),
+                "quote_snapshot": json.dumps([dict(row) for row in quotes_snapshot], default=str),
+                "shipping_snapshot": json.dumps({
+                    "recipientName": order["recipient_name"] or "",
+                    "recipientPhone": order["recipient_phone"] or "",
+                    "recipientAddress": order["recipient_address"] or "",
+                    "customerTaxCode": order["customer_tax_code"] or "",
+                    "customerNote": order["customer_note"] or "",
+                }),
+                "note": f"Reissued authoritative {purpose} payment request {request_id}.",
+                "created_at": now,
+            },
+        )
+    await _bump_sync_revisions(db, org_id=str(order["organization_id"]), now=now)
+    await db.commit()
+    invalidate_orders_cache()
+    return {
+        "id": request_id,
+        "purpose": purpose,
+        "amount": amount,
+        "reference": reference,
+        "qrPayload": qr_payload,
+        "status": "active",
+        "expiresAt": _iso(expires_at),
+        "reissued": True,
+    }
+
+
 async def _update_order(
     db: AsyncSession,
     *,
@@ -338,6 +565,40 @@ async def _update_order(
         ).all()
     }
 
+    if not internal:
+        if "items" in order:
+            raise ValueError("CUSTOMER_ITEM_MUTATION_FORBIDDEN: Đại lý không được chỉnh sửa danh sách sản phẩm sau khi đơn đã tạo.")
+        if "quoteVersions" in order:
+            raise ValueError("CUSTOMER_QUOTE_MUTATION_FORBIDDEN: Đại lý không được chỉnh sửa phiên bản báo giá.")
+        if "fulfillmentGroups" in order or "shipment" in order or "fulfillmentStatus" in order:
+            raise ValueError("CUSTOMER_FULFILLMENT_MUTATION_FORBIDDEN: Đại lý không được chỉnh sửa thông tin giao vận.")
+        if "paymentRequests" in order:
+            raise ValueError("CUSTOMER_PAYMENT_REQUEST_MUTATION_FORBIDDEN: Đại lý không được chỉnh sửa yêu cầu thanh toán.")
+        if "assignedStaffId" in order or "assignedStaffName" in order:
+            raise ValueError("CUSTOMER_ASSIGNED_STAFF_MUTATION_FORBIDDEN: Đại lý không được tự gán nhân viên xử lý.")
+        if "paymentStatus" in order:
+            raise ValueError("CUSTOMER_PAYMENT_STATUS_MUTATION_FORBIDDEN: Đại lý không được tự ý thiết lập trạng thái thanh toán.")
+        locked_customer_fields = {
+            "paymentIntent": "payment_intent",
+            "invoiceRequested": "invoice_requested",
+            "recipientName": "recipient_name",
+            "recipientPhone": "recipient_phone",
+            "recipientAddress": "recipient_address",
+            "customerTaxCode": "customer_tax_code",
+        }
+        has_locked_customer_change = any(
+            field in order and order[field] != current[column]
+            for field, column in locked_customer_fields.items()
+        )
+        customer_details_are_locked = (
+            str(current["commercial_status"]) in {"customer_accepted", "locked", "cancelled"}
+            or str(current["fulfillment_status"]) != "not_started"
+        )
+        if has_locked_customer_change and customer_details_are_locked:
+            raise ValueError(
+                "CUSTOMER_ORDER_DETAILS_LOCKED: Thông tin thanh toán, hóa đơn và giao nhận đã khóa sau khi chấp thuận báo giá."
+            )
+
     if internal:
         permission_changes = {
             "order.quote": (
@@ -367,7 +628,22 @@ async def _update_order(
         after=str(requested_commercial_status),
     )
 
+    if requested_commercial_status == "cancelled":
+        if current["payment_status"] in {"deposit_confirmed", "paid", "refunded"}:
+            raise ValueError("LOCKED_ORDER_CANCELLATION_REQUIRES_REVERSAL_WORKFLOW: Đơn hàng đã có thanh toán được xác nhận. Hủy đơn yêu cầu quy trình hoàn tiền và đảo sổ riêng biệt.")
+        await db.execute(
+            text("update payment_requests set status = 'superseded' where order_id = :order_id and status in ('active', 'uploaded')"),
+            {"order_id": order_id},
+        )
+
     if order.get("fulfillmentStatus") is not None:
+        validate_fulfillment_preconditions(
+            commercial_status=str(current["commercial_status"]),
+            payment_status=str(current["payment_status"]),
+            before=str(current["fulfillment_status"]),
+            after=str(order["fulfillmentStatus"]),
+            has_shipment=bool(order.get("shipment")),
+        )
         validate_fulfillment_transition(
             before=str(current["fulfillment_status"]),
             after=str(order["fulfillmentStatus"]),
@@ -796,19 +1072,18 @@ async def _update_order(
         intent = str(order.get("paymentIntent") or current["payment_intent"])
         purpose = "full" if intent == "pay_full" else "deposit"
         expected_amount = int(accepted_quote_row["final_total"] if purpose == "full" else accepted_quote_row["deposit_amount"])
-        
+
         await db.execute(
             text("update payment_requests set status = 'superseded' where order_id = :order_id and status = 'active'"),
             {"order_id": order_id},
         )
-        
+
         ref_suffix = uuid.uuid4().hex[:4].upper()
         clean_order_num = str(current["order_number"]).replace("PTW-", "").replace("-", "")
         ref_code = f"PTW-{clean_order_num}-{purpose[:3].upper()}-{ref_suffix}"
-        
         pr_id = f"pr_{uuid.uuid4().hex}"
-        qr_payload = f"https://img.vietqr.io/image/MB-0335022888-compact2.png?amount={expected_amount}&addInfo={ref_code}&accountName=PET%20TRAVEL%20WHOLESALE"
-        
+        qr_payload = build_vietqr_image_url(amount_vnd=expected_amount, reference=ref_code)
+
         await db.execute(
             text("""insert into payment_requests
                 (id, order_id, quote_id, purpose, amount, reference, qr_payload, status, expires_at)
@@ -826,54 +1101,158 @@ async def _update_order(
             },
         )
 
+    is_marking_delivered = (
+        internal
+        and str(order.get("fulfillmentStatus") or current["fulfillment_status"]) == "delivered"
+        and str(current["fulfillment_status"]) != "delivered"
+    )
+    if (
+        is_marking_delivered
+        and str(current["payment_intent"]) == "deposit_cod"
+        and str(current["payment_status"]) == "deposit_confirmed"
+    ):
+        remaining_quote = (
+            await db.execute(
+                text("""select id, cod_remaining from quote_versions
+                    where order_id = :order_id and status = 'accepted'
+                    order by version desc, created_at desc, id desc limit 1"""),
+                {"order_id": order_id},
+            )
+        ).mappings().first()
+        remaining_amount = int(remaining_quote["cod_remaining"] or 0) if remaining_quote else 0
+        if not remaining_quote or remaining_amount <= 0:
+            raise ValueError("COD_REMAINING_AMOUNT_INVALID: Không tìm thấy số tiền COD còn lại hợp lệ.")
+
+        clean_order_num = str(current["order_number"]).upper().removeprefix("PTW-")
+        clean_order_num = "".join(ch for ch in clean_order_num if ch.isalnum() or ch in "-_")[:32]
+        reference = f"PTW-{clean_order_num}-REM-{uuid.uuid4().hex[:8].upper()}"
+        await db.execute(
+            text("""insert into payment_requests
+                (id, order_id, quote_id, purpose, amount, reference, qr_payload, status, expires_at)
+                values (:id, :order_id, :quote_id, 'remaining', :amount, :reference,
+                        :qr_payload, 'active', :expires_at)"""),
+            {
+                "id": f"pr_{uuid.uuid4().hex}",
+                "order_id": order_id,
+                "quote_id": remaining_quote["id"],
+                "amount": remaining_amount,
+                "reference": reference,
+                "qr_payload": build_vietqr_image_url(amount_vnd=remaining_amount, reference=reference),
+                "expires_at": now + timedelta(days=7),
+            },
+        )
+
     # 9. Handle Payment Proofs Upload (Customer) and Confirmation (Admin)
-    request_ids = {
-        str(row[0])
-        for row in (
-            await db.execute(text("select id from payment_requests where order_id = :id"), {"id": order_id})
-        ).all()
-    }
+    request_rows = (
+        await db.execute(
+            text("select id, purpose, status, expires_at from payment_requests where order_id = :id"),
+            {"id": order_id},
+        )
+    ).mappings().all()
+    payment_requests_by_id = {str(row["id"]): row for row in request_rows}
 
     uploaded_proof = False
     uploaded_request_ids: set[str] = set()
     confirmed_payment = False
+    rejected_payment_purpose: str | None = None
 
     for proof in order.get("paymentProofs") or []:
         proof_id = str(proof.get("id") or "")
         request_id = str(proof.get("paymentRequestId") or "")
-        if not proof_id or request_id not in request_ids:
+        if not proof_id or request_id not in payment_requests_by_id:
             continue
 
+        payment_request = payment_requests_by_id[request_id]
+
         exists = (
-            await db.execute(text("select id, status from payment_proofs where id = :id"), {"id": proof_id})
+            await db.execute(
+                text("select id, payment_request_id, status, uploaded_at from payment_proofs where id = :id"),
+                {"id": proof_id},
+            )
         ).mappings().first()
+
+        if exists and str(exists["payment_request_id"]) != request_id:
+            raise ValueError(
+                "PAYMENT_PROOF_REQUEST_MISMATCH: Minh chứng không thuộc yêu cầu thanh toán đang xác nhận."
+            )
 
         if exists and internal and proof.get("status") in {"accepted", "rejected"}:
             if "order.confirm_payment" not in permissions and "super_admin" not in actor_role_keys:
                 raise ValueError("Tài khoản không có quyền xác nhận thanh toán.")
-            await db.execute(
-                text("update payment_proofs set status = :status where id = :id"),
-                {"id": proof_id, "status": proof["status"]},
-            )
             if proof["status"] == "accepted":
+                request_status = str(payment_request["status"])
+                request_expires_at = _as_utc(payment_request["expires_at"])
+                proof_uploaded_at = _as_utc(exists["uploaded_at"])
+                uploaded_on_time = proof_uploaded_at <= request_expires_at
+                within_review_grace = now <= request_expires_at + PAYMENT_PROOF_REVIEW_GRACE
+                if request_status == "active" and request_expires_at <= now:
+                    raise ValueError("PAYMENT_REQUEST_EXPIRED: Yêu cầu thanh toán đã hết hạn.")
+                if request_status == "uploaded" and not (uploaded_on_time and within_review_grace):
+                    raise ValueError(
+                        "PAYMENT_PROOF_REVIEW_EXPIRED: Minh chứng đã quá thời hạn duyệt; hãy từ chối và phát hành yêu cầu mới."
+                    )
+                if request_status not in {"active", "uploaded"}:
+                    raise ValueError("PAYMENT_REQUEST_NOT_CONFIRMABLE: Yêu cầu thanh toán không còn hiệu lực.")
                 pr_update = await db.execute(
                     text("""update payment_requests set status = 'confirmed',
                         confirmed_by = :actor_id, confirmed_at = :confirmed_at
                         where id = :request_id and order_id = :order_id
-                          and status in ('active', 'uploaded')"""),
+                          and status = :expected_status"""),
                     {
                         "actor_id": actor_id,
                         "confirmed_at": now,
                         "request_id": request_id,
                         "order_id": order_id,
+                        "expected_status": request_status,
                     },
                 )
-                if pr_update.rowcount > 0:
-                    confirmed_payment = True
+                if pr_update.rowcount <= 0:
+                    raise ValueError(
+                        "PAYMENT_REQUEST_NOT_CONFIRMABLE: Yêu cầu thanh toán không còn hiệu lực."
+                    )
+                confirmed_payment = True
+            else:
+                rejected_payment_purpose = str(payment_request["purpose"])
+                replacement_status = "active" if _as_utc(payment_request["expires_at"]) > now else "superseded"
+                await db.execute(
+                    text("""update payment_requests set status = :status
+                        where id = :request_id and order_id = :order_id and status = 'uploaded'"""),
+                    {"status": replacement_status, "request_id": request_id, "order_id": order_id},
+                )
+            await db.execute(
+                text("update payment_proofs set status = :status where id = :id and payment_request_id = :request_id"),
+                {"id": proof_id, "request_id": request_id, "status": proof["status"]},
+            )
 
         if not exists and not internal:
             if not all((proof.get("storageKey"), proof.get("contentType"), proof.get("fileSizeBytes"))):
                 raise ValueError("Minh chứng thanh toán thiếu metadata lưu trữ.")
+            pending_proof_exists = (
+                await db.execute(
+                    text("""select 1 from payment_proofs
+                        where payment_request_id = :request_id
+                          and status = 'pending_admin_confirmation' limit 1"""),
+                    {"request_id": request_id},
+                )
+            ).first()
+            if pending_proof_exists:
+                raise ValueError(
+                    "PAYMENT_PROOF_ALREADY_PENDING: Yêu cầu thanh toán đã có minh chứng chờ duyệt."
+                )
+            if str(payment_request["status"]) not in {"active", "uploaded"}:
+                raise ValueError("PAYMENT_REQUEST_NOT_UPLOADABLE: Yêu cầu thanh toán không còn nhận minh chứng.")
+            if _as_utc(payment_request["expires_at"]) <= now:
+                raise ValueError("PAYMENT_REQUEST_EXPIRED: Yêu cầu thanh toán đã hết hạn.")
+            expected_key_prefix = f"orders/{order_id.lower()}/payment-proof/"
+            if not str(proof["storageKey"]).lower().startswith(expected_key_prefix):
+                raise ValueError("PAYMENT_PROOF_STORAGE_KEY_INVALID: Đường dẫn minh chứng không thuộc đơn hàng.")
+            if str(proof["contentType"]) not in {
+                "image/jpeg", "image/png", "image/webp", "image/avif", "application/pdf"
+            }:
+                raise ValueError("PAYMENT_PROOF_CONTENT_TYPE_INVALID: Định dạng minh chứng không hợp lệ.")
+            file_size = int(proof["fileSizeBytes"])
+            if file_size <= 0 or file_size > 10 * 1024 * 1024:
+                raise ValueError("PAYMENT_PROOF_FILE_SIZE_INVALID: Dung lượng minh chứng không hợp lệ.")
             await db.execute(
                 text("""insert into payment_proofs
                     (id, payment_request_id, storage_key, file_name, content_type,
@@ -886,7 +1265,7 @@ async def _update_order(
                     "storage_key": proof["storageKey"],
                     "file_name": proof["fileName"],
                     "content_type": proof["contentType"],
-                    "file_size": int(proof["fileSizeBytes"]),
+                    "file_size": file_size,
                     "actor_id": actor_id,
                     "uploaded_at": now,
                 },
@@ -912,6 +1291,16 @@ async def _update_order(
                 )
             ).scalar()
             next_payment_status = "deposit_confirmed" if active_req == "deposit" else "paid"
+            if active_req in {"full", "remaining"}:
+                next_commercial_status = "locked"
+        elif rejected_payment_purpose:
+            next_payment_status = {
+                "deposit": "deposit_requested",
+                "full": "full_requested",
+                "remaining": "cod_remaining",
+            }.get(rejected_payment_purpose, current["payment_status"])
+        elif is_marking_delivered and str(current["payment_intent"]) == "deposit_cod":
+            next_payment_status = "cod_remaining"
         else:
             next_payment_status = order.get("paymentStatus", current["payment_status"])
     else:
@@ -919,13 +1308,11 @@ async def _update_order(
             intent = str(order.get("paymentIntent") or current["payment_intent"])
             next_payment_status = "full_requested" if intent == "pay_full" else "deposit_requested"
         elif uploaded_proof:
-            latest_purpose = (
-                await db.execute(
-                    text("select purpose from payment_requests where order_id = :order_id order by expires_at desc limit 1"),
-                    {"order_id": order_id},
-                )
-            ).scalar()
-            next_payment_status = "deposit_uploaded" if latest_purpose == "deposit" else "full_uploaded"
+            uploaded_purposes = {
+                str(payment_requests_by_id[request_id]["purpose"])
+                for request_id in uploaded_request_ids
+            }
+            next_payment_status = "deposit_uploaded" if uploaded_purposes == {"deposit"} else "full_uploaded"
         else:
             next_payment_status = current["payment_status"]
 

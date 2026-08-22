@@ -17,6 +17,20 @@ from app.services.order_workflow import execute_stock_command
 router = APIRouter()
 
 
+def _parse_positive_vnd(value: Any) -> int:
+    if isinstance(value, bool):
+        raise HTTPException(status_code=400, detail="Số tiền thanh toán phải là số nguyên VND dương.")
+    if isinstance(value, int):
+        amount = value
+    elif isinstance(value, str) and value.strip().isdigit():
+        amount = int(value.strip())
+    else:
+        raise HTTPException(status_code=400, detail="Số tiền thanh toán phải là số nguyên VND dương.")
+    if amount <= 0 or amount > 1_000_000_000_000:
+        raise HTTPException(status_code=400, detail="Số tiền thanh toán nằm ngoài giới hạn cho phép.")
+    return amount
+
+
 @router.post("/", include_in_schema=False)
 async def create_wholesale_order_deprecated():
     """Deprecated legacy order creation path."""
@@ -108,10 +122,12 @@ async def vietqr_webhook(
 
     now = datetime.now(timezone.utc)
     ref_code = str(payload.get("reference") or payload.get("addInfo") or payload.get("content") or "").strip().upper()
-    amount_received = int(payload.get("amount") or 0)
+    if len(ref_code) > 128:
+        raise HTTPException(status_code=400, detail="Mã đối soát vượt quá giới hạn cho phép.")
+    amount_received = _parse_positive_vnd(payload.get("amount"))
 
-    if not ref_code or amount_received <= 0:
-        raise HTTPException(status_code=400, detail="Mã đối soát hoặc số tiền thanh toán không hợp lệ.")
+    if not ref_code:
+        raise HTTPException(status_code=400, detail="Mã đối soát thanh toán không hợp lệ.")
 
     # 1. Resolve active or uploaded payment request with exact reference
     is_postgres = db.get_bind().dialect.name == "postgresql"
@@ -130,7 +146,15 @@ async def vietqr_webhook(
     if not payment_req:
         raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu thanh toán phù hợp với mã đối soát.")
 
-    # 2. Idempotent check
+    # 2. Verify amount before idempotent handling so conflicting replays are visible.
+    expected_amount = int(payment_req["amount"])
+    if amount_received != expected_amount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"PAYMENT_AMOUNT_MISMATCH: Số tiền nhận ({amount_received:,} VND) không khớp với số tiền yêu cầu ({expected_amount:,} VND).",
+        )
+
+    # 3. Idempotency and expiry checks
     if payment_req["status"] == "confirmed":
         return {
             "status": "success",
@@ -143,58 +167,62 @@ async def vietqr_webhook(
     if payment_req["status"] not in {"active", "uploaded"}:
         raise HTTPException(status_code=400, detail=f"Yêu cầu thanh toán đang ở trạng thái không hợp lệ: {payment_req['status']}.")
 
-    # 3. Verify Exact Amount
-    expected_amount = int(payment_req["amount"])
-    if amount_received != expected_amount:
-        raise HTTPException(
-            status_code=400,
-            detail=f"PAYMENT_AMOUNT_MISMATCH: Số tiền nhận ({amount_received:,} VND) không khớp với số tiền yêu cầu ({expected_amount:,} VND).",
+    expires_at = payment_req["expires_at"]
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at.astimezone(timezone.utc) <= now:
+        await db.execute(
+            text("update payment_requests set status = 'expired' where id = :id and status in ('active', 'uploaded')"),
+            {"id": payment_req["id"]},
         )
+        await db.commit()
+        raise HTTPException(status_code=400, detail="PAYMENT_REQUEST_EXPIRED: Yêu cầu thanh toán đã hết hạn.")
 
     order_id = payment_req["order_id"]
     purpose = payment_req["purpose"]
 
-    # 4. Resolve Deterministic System Actor
+    # 4. Resolve Deterministic System Actor (Fail-Closed, Zero Fallback)
     payment_system_actor_id = os.environ.get("PAYMENT_SYSTEM_ACTOR_ID")
-    system_actor = None
-    if payment_system_actor_id:
-        system_actor = (
-            await db.execute(
-                text("""select u.id from app_users u
-                    join user_roles ur on ur.user_id = u.id
-                    left join role_permissions rp on rp.role_id = ur.role_id
-                    left join roles r on r.id = ur.role_id
-                    where u.id = :actor_id
-                      and u.status = 'active'
-                      and (r.key in ('super_admin', 'admin', 'admin_manager', 'accountant')
-                           or rp.permission_key = 'order.confirm_payment')
-                    limit 1"""),
-                {"actor_id": payment_system_actor_id},
-            )
-        ).scalar()
-
-    if not system_actor:
-        system_actor = (
-            await db.execute(
-                text("""select u.id from app_users u
-                    join user_roles ur on ur.user_id = u.id
-                    left join role_permissions rp on rp.role_id = ur.role_id
-                    left join roles r on r.id = ur.role_id
-                    where u.status = 'active'
-                      and (r.key in ('super_admin', 'admin', 'admin_manager', 'accountant')
-                           or rp.permission_key = 'order.confirm_payment')
-                    order by u.created_at asc
-                    limit 1""")
-            )
-        ).scalar()
-
-    if not system_actor:
+    if not payment_system_actor_id or not payment_system_actor_id.strip():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="PAYMENT_SYSTEM_ACTOR_INVALID: Không tìm thấy tài khoản hệ thống có quyền xác nhận thanh toán.",
+            detail="PAYMENT_SYSTEM_ACTOR_NOT_CONFIGURED: Chưa cấu hình PAYMENT_SYSTEM_ACTOR_ID trên máy chủ.",
         )
 
-    actor_id = str(system_actor)
+    actor_row = (
+        await db.execute(
+            text("select id, status from app_users where id = :actor_id"),
+            {"actor_id": payment_system_actor_id.strip()},
+        )
+    ).mappings().first()
+
+    if not actor_row or actor_row["status"] != "active":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PAYMENT_SYSTEM_ACTOR_INVALID: Tài khoản PAYMENT_SYSTEM_ACTOR_ID không tồn tại hoặc không ở trạng thái hoạt động.",
+        )
+
+    has_perm = (
+        await db.execute(
+            text("""select 1 from user_roles ur
+                left join role_permissions rp on rp.role_id = ur.role_id
+                left join roles r on r.id = ur.role_id
+                where ur.user_id = :actor_id
+                  and (r.key = 'super_admin' or rp.permission_key = 'order.confirm_payment')
+                limit 1"""),
+            {"actor_id": payment_system_actor_id.strip()},
+        )
+    ).scalar()
+
+    if not has_perm:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PAYMENT_SYSTEM_ACTOR_FORBIDDEN: Tài khoản PAYMENT_SYSTEM_ACTOR_ID thiếu quyền order.confirm_payment.",
+        )
+
+    actor_id = payment_system_actor_id.strip()
 
     # 5. Update Payment Request to confirmed
     await db.execute(
@@ -203,21 +231,39 @@ async def vietqr_webhook(
             where id = :pr_id"""),
         {"pr_id": payment_req["id"], "actor_id": actor_id, "now": now},
     )
+    await db.execute(
+        text("""update payment_proofs set status = 'accepted'
+            where payment_request_id = :pr_id and status = 'pending_admin_confirmation'"""),
+        {"pr_id": payment_req["id"]},
+    )
 
     # 6. Update Order Payment Status
     if purpose == "deposit":
         next_payment_status = "deposit_confirmed"
     else:
         next_payment_status = "paid"
+    next_commercial_status = (
+        "locked" if purpose in {"full", "remaining"} else str(payment_req["commercial_status"])
+    )
 
     await db.execute(
         text("""update customer_orders
-            set payment_status = :payment_status, updated_at = :now
+            set payment_status = :payment_status, commercial_status = :commercial_status, updated_at = :now
             where id = :order_id"""),
-        {"order_id": order_id, "payment_status": next_payment_status, "now": now},
+        {
+            "order_id": order_id,
+            "payment_status": next_payment_status,
+            "commercial_status": next_commercial_status,
+            "now": now,
+        },
     )
 
-    # 7. Add System Audit Comment
+    # 7. Add System Audit Comment and Monotonic Revision History
+    actor_user = (
+        await db.execute(text("select full_name from app_users where id = :id"), {"id": actor_id})
+    ).first()
+    actor_name = str(actor_user[0]) if actor_user else "Hệ thống VietQR"
+
     await db.execute(
         text("""insert into order_comments
             (id, order_id, author_id, audience, message, created_at)
@@ -230,6 +276,55 @@ async def vietqr_webhook(
             "now": now,
         },
     )
+
+    rev_row = await db.execute(
+        text("select coalesce(max(revision_no), 0) from order_revision_history where order_id = :id"),
+        {"id": order_id},
+    )
+    next_rev_no = int(rev_row.scalar() or 0) + 1
+
+    if is_postgres:
+        await db.execute(
+            text("""insert into order_revision_history
+                (id, order_id, revision_no, actor_id, actor_name, actor_role,
+                 action_type, from_commercial_status, to_commercial_status,
+                 items_snapshot, quote_snapshot, shipping_snapshot, note, created_at)
+                values (:id, :order_id, :rev_no, :actor_id, :actor_name, 'admin',
+                        'confirm_payment', :from_status, :to_status,
+                        '[]'::jsonb, '[]'::jsonb, '{}'::jsonb, :note, :now)"""),
+            {
+                "id": f"rev_{uuid.uuid4().hex}",
+                "order_id": order_id,
+                "rev_no": next_rev_no,
+                "actor_id": actor_id,
+                "actor_name": actor_name,
+                "from_status": str(payment_req["commercial_status"]),
+                "to_status": next_commercial_status,
+                "note": f"Đối soát tự động VietQR thành công: {amount_received:,} VND. Tham chiếu: {ref_code}.",
+                "now": now,
+            },
+        )
+    else:
+        await db.execute(
+            text("""insert into order_revision_history
+                (id, order_id, revision_no, actor_id, actor_name, actor_role,
+                 action_type, from_commercial_status, to_commercial_status,
+                 items_snapshot, quote_snapshot, shipping_snapshot, note, created_at)
+                values (:id, :order_id, :rev_no, :actor_id, :actor_name, 'admin',
+                        'confirm_payment', :from_status, :to_status,
+                        '[]', '[]', '{}', :note, :now)"""),
+            {
+                "id": f"rev_{uuid.uuid4().hex}",
+                "order_id": order_id,
+                "rev_no": next_rev_no,
+                "actor_id": actor_id,
+                "actor_name": actor_name,
+                "from_status": str(payment_req["commercial_status"]),
+                "to_status": next_commercial_status,
+                "note": f"Đối soát tự động VietQR thành công: {amount_received:,} VND. Tham chiếu: {ref_code}.",
+                "now": now,
+            },
+        )
 
     # 8. Trigger Canonical Accounting Posting (Atomic with transaction)
     if is_postgres:
@@ -252,4 +347,3 @@ async def vietqr_webhook(
         "paymentStatus": next_payment_status,
         "amount": amount_received,
     }
-

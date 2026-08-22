@@ -82,22 +82,29 @@ export const shortTextSchema = (label: string, min = 1, max = 180) =>
     .max(max, `${label} không được vượt quá ${max} ký tự.`)
     .regex(noControlCharsRegex, `${label} chứa ký tự không hợp lệ.`);
 
+const MAX_PERSISTED_IMAGE_URL_LENGTH = 2_048;
+
+export const isSafePersistedImageUrl = (value: string): boolean => {
+  if (!value) return true;
+  if (value.length > MAX_PERSISTED_IMAGE_URL_LENGTH || /[\u0000-\u001F\u007F]/.test(value)) return false;
+
+  if (value.startsWith("/")) {
+    return !value.startsWith("//") && !value.includes("\\");
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+};
+
 export const optionalUrlSchema = z
   .string()
   .trim()
-  .max(10_000_000, "Đường dẫn ảnh quá dài.")
-  .refine((value) => {
-    if (!value) return true;
-    if (value.startsWith("/")) return true;
-    if (value.startsWith("data:image/")) return true;
-    if (value.startsWith("blob:")) return true;
-    try {
-      const url = new URL(value);
-      return url.protocol === "https:" || url.protocol === "http:";
-    } catch {
-      return false;
-    }
-  }, "Đường dẫn ảnh không hợp lệ.");
+  .max(MAX_PERSISTED_IMAGE_URL_LENGTH, "Đường dẫn ảnh quá dài.")
+  .refine(isSafePersistedImageUrl, "Ảnh phải là đường dẫn nội bộ hoặc URL HTTPS đã tải lên.");
 
 export const positiveIntegerSchema = (label: string, max = 1_000_000) =>
   z
@@ -143,7 +150,7 @@ export const productVariantSchema = z.object({
   minOrderQty: positiveIntegerSchema("Số lượng tối thiểu", 100_000),
   stock: nonNegativeIntegerSchema("Tồn kho", 1_000_000),
   supplierId: idSchema,
-  imageUrl: z.string().trim().optional().or(z.literal(""))
+  imageUrl: optionalUrlSchema.optional().or(z.literal(""))
 });
 
 export const productSchema = z.object({

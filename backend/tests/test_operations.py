@@ -3,12 +3,95 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from app.models.wholesale import Product, ProductVariant, Supplier
 from app.routers.v1.endpoints.operations import (
+    _calculate_inventory_transition,
     _require_actor_permission,
+    OperationsDocumentInput,
     check_sku_availability,
     create_operations_document,
     get_operations_overview,
 )
 from fastapi import HTTPException
+
+
+def test_inventory_transition_uses_weighted_average_and_protects_available_stock():
+    next_on_hand, next_defective, next_avg_cost = _calculate_inventory_transition(
+        sku="SKU-AVG",
+        current_on_hand=10,
+        current_reserved=0,
+        current_defective=0,
+        current_avg_cost=100,
+        quantity_delta=10,
+        defective_delta=0,
+        unit_cost=200,
+    )
+    assert (next_on_hand, next_defective, next_avg_cost) == (20, 0, 150)
+
+    outbound = _calculate_inventory_transition(
+        sku="SKU-OUT",
+        current_on_hand=20,
+        current_reserved=0,
+        current_defective=0,
+        current_avg_cost=150,
+        quantity_delta=-5,
+        defective_delta=0,
+        unit_cost=0,
+    )
+    assert outbound == (15, 0, 150), "Outbound stock must not revalue the remaining inventory"
+
+    with pytest.raises(HTTPException) as sale_error:
+        _calculate_inventory_transition(
+            sku="SKU-LIMIT",
+            current_on_hand=10,
+            current_reserved=4,
+            current_defective=3,
+            current_avg_cost=100,
+            quantity_delta=-4,
+            defective_delta=0,
+            unit_cost=100,
+        )
+    assert sale_error.value.status_code == 409
+
+    with pytest.raises(HTTPException) as defect_error:
+        _calculate_inventory_transition(
+            sku="SKU-DEFECT",
+            current_on_hand=5,
+            current_reserved=2,
+            current_defective=2,
+            current_avg_cost=100,
+            quantity_delta=0,
+            defective_delta=2,
+            unit_cost=0,
+        )
+    assert defect_error.value.status_code == 409
+
+
+def test_operations_posting_source_locks_inventory_rows():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "app" / "routers" / "v1" / "endpoints" / "operations.py").read_text(
+        encoding="utf-8"
+    )
+    assert "FOR UPDATE" in source
+    assert "ON CONFLICT (organization_id, warehouse_id, sku) DO NOTHING" in source
+
+
+def test_operations_document_input_rejects_fractional_money_and_unknown_fields():
+    from pydantic import ValidationError
+
+    base = {
+        "type": "purchase_receipt",
+        "lines": [{"sku": "SKU-1", "quantity": 1, "unitCostVnd": 100}],
+        "userId": "warehouse_1",
+        "organizationId": "org_1",
+    }
+    with pytest.raises(ValidationError):
+        OperationsDocumentInput.model_validate(
+            {**base, "lines": [{"sku": "SKU-1", "quantity": 1, "unitCostVnd": 100.5}]}
+        )
+    with pytest.raises(ValidationError):
+        OperationsDocumentInput.model_validate({**base, "unexpectedPrivilege": True})
+    with pytest.raises(ValidationError):
+        OperationsDocumentInput.model_validate({**base, "shouldPost": "false"})
 
 @pytest.mark.asyncio
 async def test_operations_endpoints(db_session):

@@ -2,57 +2,88 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Image from "next/image";
-import Lenis from "lenis";
+import dynamic from "next/dynamic";
 import type {
   AccountingOverview,
   AdminPolicy,
   AdminReportsOverview,
   CustomerOrder,
+  FulfillmentStatus,
   JournalEntryDetail,
   OperationsOverview,
   OrderItem,
-  PaymentRequest,
   PermissionKey,
   Product,
   RoleKey,
+  Shipment,
   Supplier,
   ProductVariant
 } from "@/lib/domain";
 import { formatVnd } from "@/lib/money";
-import {
-  fullNameSchema,
-  loginIdentifierSchema,
-  passwordSchema,
-  loginPasswordSchema,
-  optionalUrlSchema,
-  recipientSchema,
-  vndAmountSchema
-} from "@/lib/validation";
-import { getValidationErrorMessage } from "@/lib/validation";
 
 import type { AppMode, TabKey, ApiUser } from "./types";
-import { TAB_ROUTE_MAP, ROUTE_TAB_MAP } from "./types";
+import { TAB_ROUTE_MAP, ROUTE_TAB_MAP, resolvePostLoginTab } from "./types";
 import { entityStore } from "@/lib/cache/entity-store";
 import { scheduleIdlePrediction } from "@/lib/prefetch/prefetch-engine";
 
 // Import custom subcomponents
 import { Topbar } from "./components/shared/Topbar";
-import { ChatPopup } from "./components/shared/ChatPopup";
 import { Catalog } from "./components/customer/Catalog";
-import { Cart } from "./components/customer/Cart";
-import { OrderTimeline } from "./components/customer/OrderTimeline";
-import { AdminOrders } from "./components/admin/AdminOrders";
-import { AdminInventory } from "./components/admin/AdminInventory";
-import { AdminAccounting } from "./components/admin/AdminAccounting";
-import { AdminReports } from "./components/admin/AdminReports";
-import { AdminUsers } from "./components/admin/AdminUsers";
-import { AdminHeader } from "./components/admin/AdminHeader";
 import { BottomSheet } from "./components/ui/BottomSheet";
-import { ProductGallery } from "./components/product/ProductGallery";
 import { ToastProvider } from "./components/ui/Toast";
 import { AnnouncementBanner } from "./components/shared/AnnouncementBanner";
-import { B2BPartnerModal } from "./components/shared/B2BPartnerModal";
 import { Eye, EyeOff, Lock, Sparkles, Check, PackagePlus } from "lucide-react";
+
+
+function DeferredPanelLoading() {
+  return (
+    <div className="panel min-h-40 animate-pulse p-6 text-sm font-semibold text-slate-500" role="status">
+      Đang tải dữ liệu cần thiết…
+    </div>
+  );
+}
+
+const Cart = dynamic(() => import("./components/customer/Cart").then((module) => module.Cart), {
+  loading: DeferredPanelLoading
+});
+const OrderTimeline = dynamic(
+  () => import("./components/customer/OrderTimeline").then((module) => module.OrderTimeline),
+  { loading: DeferredPanelLoading }
+);
+const AdminOrders = dynamic(
+  () => import("./components/admin/AdminOrders").then((module) => module.AdminOrders),
+  { loading: DeferredPanelLoading }
+);
+const AdminInventory = dynamic(
+  () => import("./components/admin/AdminInventory").then((module) => module.AdminInventory),
+  { loading: DeferredPanelLoading }
+);
+const AdminAccounting = dynamic(
+  () => import("./components/admin/AdminAccounting").then((module) => module.AdminAccounting),
+  { loading: DeferredPanelLoading }
+);
+const AdminReports = dynamic(
+  () => import("./components/admin/AdminReports").then((module) => module.AdminReports),
+  { loading: DeferredPanelLoading }
+);
+const AdminUsers = dynamic(
+  () => import("./components/admin/AdminUsers").then((module) => module.AdminUsers),
+  { loading: DeferredPanelLoading }
+);
+const AdminHeader = dynamic(
+  () => import("./components/admin/AdminHeader").then((module) => module.AdminHeader),
+  { loading: DeferredPanelLoading }
+);
+const ChatPopup = dynamic(
+  () => import("./components/shared/ChatPopup").then((module) => module.ChatPopup)
+);
+const ProductGallery = dynamic(
+  () => import("./components/product/ProductGallery").then((module) => module.ProductGallery),
+  { loading: DeferredPanelLoading }
+);
+const B2BPartnerModal = dynamic(
+  () => import("./components/shared/B2BPartnerModal").then((module) => module.B2BPartnerModal)
+);
 
 
 const EMPTY_ORDER: CustomerOrder = {
@@ -100,11 +131,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   // --- CORE APPLICATION STATES ---
   const [mode, setMode] = useState<AppMode>("guest");
   const [activeTab, setActiveTabState] = useState<TabKey>(() => {
-    if (initialTab) return initialTab;
-    if (typeof window !== "undefined") {
-      const path = window.location.pathname;
-      return ROUTE_TAB_MAP[path] || "catalog";
-    }
+    if (initialTab === "catalog") return initialTab;
     return "catalog";
   });
 
@@ -212,6 +239,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   const [modalQty, setModalQty] = useState<number>(1);
   const [showCheckoutModal, setShowCheckoutModal] = useState<boolean>(false);
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
+  const [pendingPostLoginTab, setPendingPostLoginTab] = useState<TabKey>(initialTab || "catalog");
   const [loginEmail, setLoginEmail] = useState<string>("");
   const [loginPassword, setLoginPassword] = useState<string>("");
   const [showPassword, setShowPassword] = useState<boolean>(false);
@@ -267,14 +295,24 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     }
   }, [cartItems, cartStorageKey]);
 
-  // Initialize smooth scroll & load user profile on mount
+  // Initialize smooth scroll without pinning Lenis in the initial guest bundle.
   useEffect(() => {
-    const lenis = new Lenis({ duration: 1.2, easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)) });
-    function raf(time: number) {
-      lenis.raf(time);
-      requestAnimationFrame(raf);
+    let cancelled = false;
+    let animationFrameId: number | undefined;
+    let lenis: InstanceType<typeof import("lenis").default> | undefined;
+
+    async function initializeSmoothScroll() {
+      const { default: Lenis } = await import("lenis");
+      if (cancelled) return;
+      lenis = new Lenis({ duration: 1.2, easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)) });
+      function raf(time: number) {
+        if (cancelled || !lenis) return;
+        lenis.raf(time);
+        animationFrameId = requestAnimationFrame(raf);
+      }
+      animationFrameId = requestAnimationFrame(raf);
     }
-    requestAnimationFrame(raf);
+    void initializeSmoothScroll();
 
     // Fetch initial user
     async function loadUser() {
@@ -285,26 +323,19 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
         }
       } catch { /* silent */ }
 
+      let sessionFound = false;
       try {
         const res = await fetch("/api/auth/me");
         if (res.ok) {
           const data = await res.json();
           if (data.user) {
+            sessionFound = true;
             setCurrentUser(data.user);
             setMode(data.user.isAdmin ? "admin" : "customer");
-            if (data.user.isAdmin) {
-              if (initialTab) {
-                setActiveTab(initialTab);
-              } else if (typeof window !== "undefined") {
-                const path = window.location.pathname;
-                const mappedTab = ROUTE_TAB_MAP[path];
-                if (mappedTab) {
-                  setActiveTab(mappedTab);
-                } else {
-                  setActiveTab((prev: TabKey) => (prev === "catalog" || prev === "profile" ? "admin" : prev));
-                }
-              }
-            }
+            const requestedTab = initialTab || (
+              typeof window !== "undefined" ? ROUTE_TAB_MAP[window.location.pathname] : undefined
+            );
+            setActiveTab(resolvePostLoginTab(requestedTab, Boolean(data.user.isAdmin)));
             // Restore user's cart from localStorage
             const savedCart = localStorage.getItem(`ptw_cart_${data.user.id}`);
             if (savedCart) {
@@ -315,11 +346,18 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
           }
         }
       } catch { /* silent */ }
+      if (!sessionFound && initialTab && initialTab !== "catalog") {
+        setPendingPostLoginTab(initialTab);
+        setActiveTab("catalog");
+        setShowLoginModal(true);
+      }
     }
     loadUser();
 
     return () => {
-      lenis.destroy();
+      cancelled = true;
+      if (animationFrameId !== undefined) cancelAnimationFrame(animationFrameId);
+      lenis?.destroy();
     };
   }, [initialTab, setActiveTab]);
 
@@ -412,17 +450,20 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       }
     };
     events.addEventListener("orders.snapshot", handleSnapshot);
-
-    const pollInterval = setInterval(() => {
-      if (document.visibilityState === "visible") {
+    let lastFallbackFetchAt = 0;
+    events.onerror = () => {
+      const now = Date.now();
+      if (document.visibilityState === "visible" && now - lastFallbackFetchAt >= 30_000) {
+        lastFallbackFetchAt = now;
+        entityStore.invalidate("orders");
         void fetchOrders();
       }
-    }, 4000);
+    };
 
     return () => {
       events.removeEventListener("orders.snapshot", handleSnapshot);
+      events.onerror = null;
       events.close();
-      clearInterval(pollInterval);
     };
   }, [currentUser, fetchOrders]);
 
@@ -682,10 +723,35 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   // Sync mutated order state back to server database
   async function syncOrder(updatedOrder: CustomerOrder): Promise<boolean> {
     try {
+      const payload = currentUser?.isAdmin
+        ? updatedOrder
+        : (() => {
+            const ord = updatedOrder as Partial<CustomerOrder>;
+            const minimal: Record<string, unknown> = { id: ord.id };
+            if (ord.commercialStatus) minimal.commercialStatus = ord.commercialStatus;
+            if (ord.acceptedQuoteId) minimal.acceptedQuoteId = ord.acceptedQuoteId;
+            if (ord.acceptedQuoteVersion !== undefined) minimal.acceptedQuoteVersion = ord.acceptedQuoteVersion;
+            if (ord.paymentIntent) minimal.paymentIntent = ord.paymentIntent;
+            if (ord.invoiceRequested !== undefined) minimal.invoiceRequested = ord.invoiceRequested;
+            if (ord.recipientName !== undefined) minimal.recipientName = ord.recipientName;
+            if (ord.recipientPhone !== undefined) minimal.recipientPhone = ord.recipientPhone;
+            if (ord.recipientAddress !== undefined) minimal.recipientAddress = ord.recipientAddress;
+            if (ord.customerTaxCode !== undefined) minimal.customerTaxCode = ord.customerTaxCode;
+            if (ord.customerNote !== undefined) minimal.customerNote = ord.customerNote;
+            const existingCommentIds = new Set(workingOrder.comments.map((comment) => comment.id));
+            const newComments = ord.comments?.filter((comment) => !existingCommentIds.has(comment.id)) ?? [];
+            if (newComments.length > 0) minimal.comments = newComments;
+            const existingProofIds = new Set(workingOrder.paymentProofs.map((proof) => proof.id));
+            const newProofs = ord.paymentProofs?.filter((proof) => !existingProofIds.has(proof.id)) ?? [];
+            if (newProofs.length > 0) minimal.paymentProofs = newProofs;
+            if (ord.updatedAt) minimal.expectedUpdatedAt = ord.updatedAt;
+            return minimal;
+          })();
+
       const res = await fetch(`/api/orders?id=${updatedOrder.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updatedOrder)
+        body: JSON.stringify(payload)
       });
       if (res.ok) {
         const data = (await res.json()) as { order: CustomerOrder };
@@ -726,6 +792,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     e.preventDefault();
     setIsLoading(true);
     try {
+      const { loginIdentifierSchema, loginPasswordSchema } = await import("@/lib/validation");
       const preflight = loginPasswordSchema.safeParse(loginPassword);
       if (!preflight.success) {
         alert("Mật khẩu không hợp lệ (tối thiểu 8 ký tự).");
@@ -764,7 +831,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       }
       setCurrentUser(data.user);
       setMode(data.user.isAdmin ? "admin" : "customer");
-      setActiveTab(data.user.isAdmin ? "admin" : "catalog");
+      setActiveTab(resolvePostLoginTab(pendingPostLoginTab, Boolean(data.user.isAdmin)));
+      setPendingPostLoginTab("catalog");
       setLoadedTabs(new Set());
       setShowLoginModal(false);
       setLoginEmail("");
@@ -778,22 +846,33 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   }
 
   async function handleLogout() {
+    try {
+      const response = await fetch("/api/auth/me", { method: "DELETE" });
+      if (!response.ok) {
+        alert("Không thể kết thúc phiên đăng nhập. Vui lòng thử lại.");
+        return;
+      }
+    } catch {
+      alert("Mất kết nối khi đăng xuất. Phiên đăng nhập vẫn được giữ an toàn.");
+      return;
+    }
     if (currentUser) {
       localStorage.removeItem(`ptw_cart_${currentUser.id}`);
     }
-    await fetch("/api/auth/me", { method: "DELETE" });
     setMode("guest");
     setCurrentUser(null);
     setCartItems([]);
     setWorkingOrder(EMPTY_ORDER);
     setSelectedOrderId(null);
     setLoadedTabs(new Set());
+    setPendingPostLoginTab("catalog");
     setActiveTab("catalog");
   }
 
   async function handleUpdateProfile(e: React.FormEvent) {
     e.preventDefault();
     try {
+      const { fullNameSchema, optionalUrlSchema, passwordSchema } = await import("@/lib/validation");
       const payload: ProfileUpdatePayload = {};
       if (profileFullName.trim()) payload.fullName = fullNameSchema.parse(profileFullName);
       if (profileAvatarUrl.trim()) payload.avatarUrl = optionalUrlSchema.parse(profileAvatarUrl);
@@ -926,25 +1005,42 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   // Accept payment/deposit proof and confirm money in bank
   async function confirmDeposit() {
     if (!workingOrder?.id) return;
-    const isDeposit = workingOrder.paymentStatus === "deposit_uploaded";
-    const currentQuote = workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1];
-    if (!currentQuote) return;
+    const pendingProof = workingOrder.paymentProofs.find(
+      (proof) =>
+        proof.status === "pending_admin_confirmation" &&
+        workingOrder.paymentRequests.some(
+          (request) => request.id === proof.paymentRequestId && request.status === "uploaded"
+        )
+    );
+    const paymentRequest = workingOrder.paymentRequests.find((request) => request.id === pendingProof?.paymentRequestId);
+    if (!pendingProof || !paymentRequest) {
+      alert("Không có minh chứng hợp lệ gắn với yêu cầu thanh toán đang chờ đối soát.");
+      return;
+    }
+    if (!window.confirm(`Xác nhận đã kiểm tra tài khoản ngân hàng và nhận đủ ${formatVnd(paymentRequest.amount)}?`)) {
+      return;
+    }
 
-    const updatedProofs = workingOrder.paymentProofs.map((p, idx) => (idx === 0 ? { ...p, status: "accepted" as const } : p));
+    const isDeposit = paymentRequest.purpose === "deposit";
+    const updatedProofs = workingOrder.paymentProofs.map((proof) =>
+      proof.id === pendingProof.id ? { ...proof, status: "accepted" as const } : proof
+    );
+    const updatedRequests = workingOrder.paymentRequests.map((request) =>
+      request.id === paymentRequest.id ? { ...request, status: "confirmed" as const } : request
+    );
     const nextPaymentStatus = isDeposit ? "deposit_confirmed" : "paid";
-    const nextCommercialStatus = isDeposit ? "customer_accepted" : "locked";
 
     const updatedOrder: CustomerOrder = {
       ...workingOrder,
-      commercialStatus: nextCommercialStatus,
       paymentStatus: nextPaymentStatus,
       paymentProofs: updatedProofs,
+      paymentRequests: updatedRequests,
       comments: [
         {
           id: `c_dep_${Date.now()}`,
           author: currentUser?.name || "Kế toán",
           audience: "customer_visible",
-          message: `Kế toán đã đối soát ngân hàng thành công. Xác nhận nhận đủ số tiền: ${formatVnd(isDeposit ? currentQuote.depositAmount : currentQuote.finalTotal - currentQuote.depositAmount)}. Hóa đơn đang chuẩn bị xuất kho.`,
+          message: `Kế toán đã đối soát ngân hàng thành công. Xác nhận nhận đủ số tiền: ${formatVnd(paymentRequest.amount)}. Đơn hàng đang được chuyển sang bước xử lý tiếp theo.`,
           createdAt: new Date().toISOString()
         },
         ...workingOrder.comments
@@ -952,32 +1048,142 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       updatedAt: new Date().toISOString()
     };
 
-    await syncOrder(updatedOrder);
-    alert("Xác nhận đã khớp tiền trong tài khoản ngân hàng!");
+    if (await syncOrder(updatedOrder)) {
+      const ledgerPosted = await handlePostOrderAccounting("post_confirmed_payments", false);
+      alert(
+        ledgerPosted
+          ? "Đã xác nhận giao dịch và ghi nhận khoản thu vào sổ kế toán."
+          : "Đã xác nhận giao dịch, nhưng chưa ghi được sổ kế toán. Vui lòng xử lý lại tại màn hình Kế toán."
+      );
+    }
   }
 
-  // Attach GHN shipment details to order
-  async function attachShipment() {
+  async function rejectPaymentProof() {
     if (!workingOrder?.id) return;
-    const timeSuffix = new Date().toISOString().replace(/[^0-9]/g, "").slice(8, 14);
-    const trackingCode = `GHN-PTW-${workingOrder.number}-${timeSuffix}`.toUpperCase();
+    const pendingProof = workingOrder.paymentProofs.find(
+      (proof) =>
+        proof.status === "pending_admin_confirmation" &&
+        workingOrder.paymentRequests.some(
+          (request) => request.id === proof.paymentRequestId && request.status === "uploaded"
+        )
+    );
+    const paymentRequest = workingOrder.paymentRequests.find((request) => request.id === pendingProof?.paymentRequestId);
+    if (!pendingProof || !paymentRequest) {
+      alert("Không có minh chứng hợp lệ đang chờ duyệt.");
+      return;
+    }
+    if (!window.confirm("Từ chối minh chứng này? Khách hàng sẽ được yêu cầu tải lại chứng từ hợp lệ.")) {
+      return;
+    }
+
+    const requestStillValid = new Date(paymentRequest.expiresAt).getTime() > Date.now();
+    const nextPaymentStatus = paymentRequest.purpose === "deposit"
+      ? "deposit_requested"
+      : paymentRequest.purpose === "remaining"
+        ? "cod_remaining"
+        : "full_requested";
+    const updatedOrder: CustomerOrder = {
+      ...workingOrder,
+      paymentStatus: nextPaymentStatus,
+      paymentProofs: workingOrder.paymentProofs.map((proof) =>
+        proof.id === pendingProof.id ? { ...proof, status: "rejected" as const } : proof
+      ),
+      paymentRequests: workingOrder.paymentRequests.map((request) =>
+        request.id === paymentRequest.id
+          ? { ...request, status: requestStillValid ? "active" as const : "superseded" as const }
+          : request
+      ),
+      comments: [
+        {
+          id: `c_reject_payment_${Date.now()}`,
+          author: currentUser?.name || "Kế toán",
+          audience: "customer_visible",
+          message: requestStillValid
+            ? "Minh chứng thanh toán chưa đạt yêu cầu đối soát. Vui lòng kiểm tra và tải lại chứng từ đúng giao dịch."
+            : "Minh chứng thanh toán chưa đạt yêu cầu và mã thanh toán đã hết hạn. Bộ phận vận hành sẽ phát hành yêu cầu mới.",
+          createdAt: new Date().toISOString()
+        },
+        ...workingOrder.comments
+      ],
+      updatedAt: new Date().toISOString()
+    };
+    if (await syncOrder(updatedOrder)) {
+      alert(requestStillValid ? "Đã từ chối minh chứng; khách hàng có thể tải lại." : "Đã từ chối minh chứng; cần phát hành yêu cầu mới.");
+    }
+  }
+
+  async function reissuePaymentRequest() {
+    if (!workingOrder?.id) return;
+    if (!window.confirm("Phát hành mã thanh toán mới và vô hiệu hóa các mã cũ đã hết hạn?")) return;
+    try {
+      const response = await fetch("/api/orders/payment-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: workingOrder.id })
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; paymentRequest?: { reissued?: boolean } };
+      if (!response.ok) {
+        alert(payload.error || "Không thể phát hành lại yêu cầu thanh toán.");
+        return;
+      }
+      entityStore.invalidate("orders");
+      await fetchOrders();
+      alert(payload.paymentRequest?.reissued === false
+        ? "Yêu cầu thanh toán hiện tại vẫn còn hiệu lực."
+        : "Đã phát hành yêu cầu thanh toán mới và đồng bộ cho khách hàng.");
+    } catch {
+      alert("Lỗi kết nối khi phát hành lại yêu cầu thanh toán.");
+    }
+  }
+
+  async function advanceFulfillment(
+    nextStatus: FulfillmentStatus,
+    shipmentInput?: Pick<Shipment, "carrier" | "trackingCode" | "eta">
+  ) {
+    if (!workingOrder?.id) return;
+    if (nextStatus === "shipped" && (!shipmentInput?.carrier.trim() || !shipmentInput.trackingCode.trim())) {
+      alert("Cần nhập đơn vị vận chuyển và mã vận đơn thực tế trước khi xuất kho.");
+      return;
+    }
+
+    const statusLabels: Record<FulfillmentStatus, string> = {
+      not_started: "Chưa xử lý",
+      supplier_checking: "Đang kiểm hàng nhà cung cấp",
+      supplier_confirmed: "Nhà cung cấp đã xác nhận đủ hàng",
+      packing: "Đang đóng gói",
+      ready_to_ship: "Sẵn sàng bàn giao vận chuyển",
+      shipped: "Đã xuất kho và bàn giao vận chuyển",
+      delivered: "Khách đã nhận hàng"
+    };
+    const currentQuote = workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1];
+    const shippingFee = currentQuote?.adjustments.find((adjustment) => adjustment.type === "shipping_fee")?.amount || 0;
+    const shipment: Shipment | undefined = shipmentInput
+      ? {
+          carrier: shipmentInput.carrier.trim(),
+          trackingCode: shipmentInput.trackingCode.trim(),
+          shippingFee,
+          eta: shipmentInput.eta.trim(),
+          note: "Thông tin vận chuyển do nhân viên phụ trách xác nhận từ hãng vận chuyển."
+        }
+      : workingOrder.shipment;
 
     const updatedOrder: CustomerOrder = {
       ...workingOrder,
-      fulfillmentStatus: "shipped",
-      shipment: {
-        carrier: "Giao Hàng Nhanh (GHN Express)",
-        trackingCode,
-        shippingFee: workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1]?.adjustments.find(a => a.type === "shipping_fee")?.amount || 0,
-        eta: "2-3 ngày làm việc",
-        note: "Đã giao cho bưu tá GHN đóng gói, vận chuyển sỉ."
-      },
+      fulfillmentStatus: nextStatus,
+      fulfillmentGroups: workingOrder.fulfillmentGroups.map((group) => ({
+        ...group,
+        status: nextStatus,
+        internalNote: `${statusLabels[nextStatus]} bởi ${currentUser?.name || "nhân viên"}.`
+      })),
+      shipment,
       comments: [
         {
           id: `c_ship_${Date.now()}`,
           author: "Hệ thống",
           audience: "customer_visible",
-          message: `Đơn sỉ đã bàn giao đơn vị vận chuyển GHN Express thành công. Mã vận đơn: ${trackingCode}.`,
+          message: nextStatus === "shipped" && shipment
+            ? `${statusLabels[nextStatus]}. Đơn vị: ${shipment.carrier}. Mã vận đơn: ${shipment.trackingCode}.`
+            : `Cập nhật xử lý đơn hàng: ${statusLabels[nextStatus]}.`,
           createdAt: new Date().toISOString()
         },
         ...workingOrder.comments
@@ -985,47 +1191,18 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       updatedAt: new Date().toISOString()
     };
 
-    await syncOrder(updatedOrder);
-    alert(`Đã bàn giao GHN Express! Mã vận đơn: ${trackingCode}`);
-  }
-
-  // Handle warehouse stock reservation actions
-  async function handleStockReservationAction(action: string) {
-    if (!workingOrder?.id) return;
-    const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
-    const reasonMap: Record<string, string> = {
-      reserve_order: "Giữ chỗ kho tự động 72h cho đơn đại lý.",
-      release_order: "Nhả giữ hàng thủ công giải phóng tồn kho.",
-      expire_order: "Bút toán giữ hàng đã hết hiệu lực 72h.",
-      consume_order: "Xuất kho thực tế hoàn tất đơn sỉ."
-    };
-
-    try {
-      const res = await fetch("/api/admin/operations/reservations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action,
-          orderId: workingOrder.id,
-          expiresAt,
-          reason: reasonMap[action]
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || "Không thể xử lý giữ hàng.");
-        return;
-      }
+    if (await syncOrder(updatedOrder)) {
       await Promise.all([fetchOperationsOverview(), fetchReportsOverview()]);
-      alert(`Đã xử lý giữ hàng: ${data.result?.status || "ok"} (${data.result?.lineCount ?? 0} dòng).`);
-    } catch {
-      alert("Không thể kết nối máy chủ khi xử lý giữ hàng.");
+      alert(`Đã chuyển đơn sang: ${statusLabels[nextStatus]}.`);
     }
   }
 
   // Record accounting journal entries on server
-  async function handlePostOrderAccounting(action: "post_all" | "post_confirmed_payments") {
-    if (!workingOrder?.id) return;
+  async function handlePostOrderAccounting(
+    action: "post_all" | "post_confirmed_payments",
+    notify = true
+  ): Promise<boolean> {
+    if (!workingOrder?.id) return false;
     try {
       const res = await fetch("/api/admin/accounting/order-posting", {
         method: "POST",
@@ -1039,13 +1216,17 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.error || "Không thể ghi sổ kế toán cho đơn hàng.");
-        return;
+        if (notify) alert(data.error || "Không thể ghi sổ kế toán cho đơn hàng.");
+        return false;
       }
       await Promise.all([fetchAccountingOverview(), fetchAccountingJournalEntries(), fetchReportsOverview()]);
-      alert(`Đã ghi sổ: ${data.result?.createdEntries ?? 0} bút toán mới, ${data.result?.skippedEntries ?? 0} đã tồn tại.`);
+      if (notify) {
+        alert(`Đã ghi sổ: ${data.result?.createdEntries ?? 0} bút toán mới, ${data.result?.skippedEntries ?? 0} đã tồn tại.`);
+      }
+      return true;
     } catch {
-      alert("Không thể kết nối máy chủ khi ghi sổ kế toán.");
+      if (notify) alert("Không thể kết nối máy chủ khi ghi sổ kế toán.");
+      return false;
     }
   }
 
@@ -1097,6 +1278,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
 
   async function handleSubmitCartProposal() {
     try {
+      const { vndAmountSchema } = await import("@/lib/validation");
       if (cartItems.length === 0) throw new Error("Giỏ hàng chưa có sản phẩm.");
       cartItems.forEach((item) => {
         if (!Number.isInteger(item.quantity) || item.quantity <= 0 || item.quantity > 10000) {
@@ -1109,6 +1291,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
         return;
       }
     } catch (error) {
+      const { getValidationErrorMessage } = await import("@/lib/validation");
       alert(getValidationErrorMessage(error, "Dữ liệu giỏ hàng không hợp lệ."));
       return;
     }
@@ -1191,79 +1374,23 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     }
   }
 
-  async function handleBuyMore() {
-    setCartItems(workingOrder.items.map((item) => ({ ...item })));
-    setActiveTab("catalog");
-    const updatedOrder: CustomerOrder = {
-      ...workingOrder,
-      commercialStatus: "draft",
-      updatedAt: new Date().toISOString()
-    };
-    await syncOrder(updatedOrder);
-  }
-
   async function handleCustomerAcceptQuote() {
     if (!workingOrder?.id) return;
     const activeQuote = workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1];
     if (!activeQuote) return;
 
-    const isDeposit = workingOrder.paymentIntent === "deposit_cod";
-    const reqAmount = isDeposit
-      ? (activeQuote.depositAmount > 0 ? activeQuote.depositAmount : Math.round(activeQuote.finalTotal * 0.3))
-      : activeQuote.finalTotal;
-
     try {
-      let newRequest: PaymentRequest | null = null;
-      try {
-        const paymentResponse = await fetch("/api/orders/payment-request", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            orderId: workingOrder.id,
-            orderNumber: workingOrder.number,
-            quoteVersion: activeQuote.version,
-            amount: reqAmount,
-            purpose: isDeposit ? "deposit" : "full"
-          })
-        });
-        if (paymentResponse.ok) {
-          newRequest = (await paymentResponse.json()) as PaymentRequest;
-        }
-      } catch (err) {
-        console.warn("Lỗi gọi server payment-request, sử dụng fallback client", err);
-      }
-
-      if (!newRequest) {
-        const ref = `PTW-${workingOrder.number || "ORDER"}-${isDeposit ? "DEP" : "FULL"}`;
-        newRequest = {
-          id: `pay_req_${Date.now()}`,
-          quoteVersion: activeQuote.version,
-          amount: reqAmount,
-          purpose: isDeposit ? "deposit" : "full",
-          reference: ref,
-          qrPayload: `00020101021238540010A00000072701240006970422011219036888888880208QRIBFTTA5303704540${reqAmount}5802VN62${ref.length.toString().padStart(2, "0")}${ref}6304`,
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-          status: "active"
-        };
-      }
-
-      const updatedRequests = (workingOrder.paymentRequests || []).map((req) =>
-        req.status === "active" ? { ...req, status: "superseded" as const } : req
-      );
-
       const updatedOrder: CustomerOrder = {
         ...workingOrder,
         commercialStatus: "customer_accepted",
         acceptedQuoteId: activeQuote.id,
         acceptedQuoteVersion: activeQuote.version,
-        paymentStatus: isDeposit ? "deposit_requested" : "full_requested",
-        paymentRequests: [...updatedRequests, newRequest],
         comments: [
           {
             id: `c_acc_${Date.now()}`,
             author: workingOrder.customerName,
             audience: "customer_visible",
-            message: `Đại lý đã đồng ý bản báo giá số ${activeQuote.version} (Tổng tiền: ${formatVnd(activeQuote.finalTotal)}). Tiến hành thanh toán cọc ${formatVnd(reqAmount)}.`,
+            message: `Đại lý đã đồng ý bản báo giá số ${activeQuote.version} (Tổng tiền: ${formatVnd(activeQuote.finalTotal)}). Hệ thống đang phát hành yêu cầu thanh toán chính thức.`,
             createdAt: new Date().toISOString()
           },
           ...workingOrder.comments
@@ -1271,11 +1398,22 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
         updatedAt: new Date().toISOString()
       };
 
-      await syncOrder(updatedOrder);
-      alert("Đã chấp thuận báo giá! Vui lòng quét mã VietQR để thanh toán tiền cọc.");
+      const accepted = await syncOrder(updatedOrder);
+      if (accepted) {
+        alert("Đã chấp thuận báo giá! Yêu cầu thanh toán VietQR chính thức đã được phát hành.");
+      }
     } catch {
       alert("Lỗi kết nối khi chấp thuận báo giá.");
     }
+  }
+
+  function handlePayNowClick() {
+    const paymentPanel = document.getElementById("payment-request-panel");
+    if (!paymentPanel) {
+      alert("Yêu cầu thanh toán chưa sẵn sàng hoặc đã hết hạn. Vui lòng chờ bộ phận vận hành phát hành mã mới.");
+      return;
+    }
+    paymentPanel.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   async function handleCustomerRequestChange(reason: string) {
@@ -1346,6 +1484,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       return;
     }
 
+    const { getValidationErrorMessage, recipientSchema } = await import("@/lib/validation");
     const recipientValidation = recipientSchema.safeParse({ recipientName, recipientPhone, recipientAddress });
     if (!recipientValidation.success) {
       alert(getValidationErrorMessage(recipientValidation.error, "Thông tin giao nhận không hợp lệ."));
@@ -1360,31 +1499,6 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     const activeQuote = workingOrder.quoteVersions[workingOrder.quoteVersions.length - 1];
     if (!activeQuote) return;
 
-    const isDeposit = workingOrder.paymentIntent === "deposit_cod";
-    const reqAmount = isDeposit ? activeQuote.depositAmount : activeQuote.finalTotal;
-
-    const paymentResponse = await fetch("/api/orders/payment-request", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        orderId: workingOrder.id,
-        orderNumber: workingOrder.number,
-        quoteVersion: activeQuote.version,
-        amount: reqAmount,
-        purpose: isDeposit ? "deposit" : "full"
-      })
-    });
-    if (!paymentResponse.ok) {
-      const error = await paymentResponse.json().catch(() => ({}));
-      alert(error.error || "Không thể tạo yêu cầu thanh toán.");
-      return;
-    }
-    const newRequest = (await paymentResponse.json()) as PaymentRequest;
-
-    const updatedRequests = workingOrder.paymentRequests.map((req) =>
-      req.status === "active" ? { ...req, status: "superseded" as const } : req
-    );
-
     const updatedOrder: CustomerOrder = {
       ...workingOrder,
       recipientName: recipientValidation.data.recipientName,
@@ -1392,16 +1506,15 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       recipientAddress: recipientValidation.data.recipientAddress,
       customerTaxCode: customerTaxCode.trim(),
       customerNote: customerNote.trim(),
-      commercialStatus: "locked",
-      paymentStatus: isDeposit ? "deposit_requested" : "full_requested",
-      paymentRequests: [...updatedRequests, newRequest],
-      paymentProofs: workingOrder.paymentProofs,
+      commercialStatus: "customer_accepted",
+      acceptedQuoteId: activeQuote.id,
+      acceptedQuoteVersion: activeQuote.version,
       comments: [
         {
           id: `c_chk_${Date.now()}`,
           author: "Hệ thống",
           audience: "customer_visible",
-          message: `Đại lý đã khóa đơn để thanh toán. Người nhận: ${recipientName} (${recipientPhone}) - ${recipientAddress}. Số tiền chuyển khoản: ${formatVnd(reqAmount)}.`,
+          message: `Đại lý đã xác nhận báo giá và thông tin nhận hàng: ${recipientName} (${recipientPhone}) - ${recipientAddress}.`,
           createdAt: new Date().toISOString()
         },
         ...workingOrder.comments
@@ -1409,13 +1522,15 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       updatedAt: new Date().toISOString()
     };
 
-    await syncOrder(updatedOrder);
-    setShowCheckoutModal(false);
+    const accepted = await syncOrder(updatedOrder);
+    if (accepted) setShowCheckoutModal(false);
   }
 
   async function uploadPaymentProof(file: File) {
     if (!workingOrder?.id) return;
-    const request = [...workingOrder.paymentRequests].reverse().find((item) => item.status === "active");
+    const request = [...workingOrder.paymentRequests]
+      .reverse()
+      .find((item) => item.status === "active" && new Date(item.expiresAt).getTime() > Date.now());
     if (!request) {
       alert("Không tìm thấy yêu cầu thanh toán đang hoạt động.");
       return;
@@ -1549,7 +1664,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
               isAdmin={isAdmin}
               activeTab={activeTab}
               setActiveTab={setActiveTab}
-              setShowLoginModal={setShowLoginModal}
+              onRequireLogin={(tab) => {
+                setPendingPostLoginTab(tab);
+                setShowLoginModal(true);
+              }}
               cartItemsCount={cartItems.reduce((sum, item) => sum + item.quantity, 0)}
             />
           )}
@@ -1575,6 +1693,25 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
                 setModalQty(firstVariant?.minOrderQty || 1);
               }}
             />
+          )}
+
+          {!isLoggedIn && activeTab !== "catalog" && (
+            <section className="panel mx-auto max-w-xl p-8 text-center" role="status">
+              <h2 className="m-0 text-xl font-black text-slate-900">Vui lòng đăng nhập để tiếp tục</h2>
+              <p className="mt-2 text-sm text-slate-600">
+                Giỏ hàng, hồ sơ và tiến độ đơn chỉ hiển thị cho tài khoản đại lý đã được cấp quyền.
+              </p>
+              <button
+                type="button"
+                className="primary-button mt-4 min-h-11 justify-center"
+                onClick={() => {
+                  setPendingPostLoginTab(activeTab);
+                  setShowLoginModal(true);
+                }}
+              >
+                Đăng nhập cổng sỉ
+              </button>
+            </section>
           )}
 
         {activeTab === "cart" && mode === "customer" && (
@@ -1617,8 +1754,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
             mode={mode}
             workingOrder={workingOrder}
             allProducts={allProducts}
-            onPayNowClick={handleCustomerAcceptQuote}
-            onBuyMore={handleBuyMore}
+            onPayNowClick={handlePayNowClick}
             onUploadProof={uploadPaymentProof}
             onAcceptQuote={handleCustomerAcceptQuote}
             onRequestOrderChange={handleCustomerRequestChange}
@@ -1758,6 +1894,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
                                 <span className={`status-pill text-[9px] ${ord.paymentStatus === "paid" ? "success" : "warning"}`}>
                                   {ord.paymentStatus === "paid"
                                     ? "Đã thanh toán"
+                                    : ord.paymentStatus === "cod_remaining"
+                                      ? "Chờ thanh toán COD"
                                     : ord.paymentStatus === "deposit_confirmed"
                                       ? "Đã cọc 30%"
                                       : ord.paymentStatus.includes("uploaded")
@@ -1795,9 +1933,11 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
         {/* ADMIN TABS */}
         {activeTab === "admin" && isAdmin && (
           <AdminOrders
+            key={workingOrder.id}
             allOrders={allOrders}
             workingOrder={workingOrder}
             currentUser={currentUser}
+            currentUserPermissions={currentUser ? rolePermissions[currentUser.role] ?? [] : []}
             userList={userList}
             suppliers={suppliers}
             allProducts={allProducts}
@@ -1826,8 +1966,9 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
             handleAdminQtyChange={handleAdminQtyChange}
             handlePublishQuote={handlePublishQuote}
             confirmDeposit={confirmDeposit}
-            attachShipment={attachShipment}
-            handleStockReservationAction={handleStockReservationAction}
+            rejectPaymentProof={rejectPaymentProof}
+            reissuePaymentRequest={reissuePaymentRequest}
+            advanceFulfillment={advanceFulfillment}
             handlePostOrderAccounting={handlePostOrderAccounting}
             addComment={addComment}
           />
@@ -2074,6 +2215,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
                           className="primary-button font-bold text-xs py-3 px-6 flex-[2] justify-center bg-orange-500 hover:bg-orange-600 text-white rounded-xl cursor-pointer shadow-lg flex items-center gap-1.5"
                           onClick={() => {
                             setSelectedProduct(null);
+                            setPendingPostLoginTab("catalog");
                             setShowLoginModal(true);
                           }}
                         >
@@ -2153,7 +2295,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       {/* 5. CUTE CREDENTIALS LOGIN BOTTOMSHEET */}
       <BottomSheet
         isOpen={showLoginModal}
-        onClose={() => setShowLoginModal(false)}
+        onClose={() => {
+          setShowLoginModal(false);
+          setPendingPostLoginTab("catalog");
+        }}
         title="🐾 Đăng nhập Cổng Đại lý sỉ"
         subtitle="Vui lòng nhập tài khoản đại lý đã được Pet Travel cấp để xem giá sỉ và đặt hàng."
         maxWidth="max-w-sm"
@@ -2207,12 +2352,13 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       </BottomSheet>
 
       {/* 6. B2B WHOLESALE & CO-MARKETING PARTNER MODAL */}
-      <B2BPartnerModal
-        isOpen={showPartnerModal}
-        onClose={() => setShowPartnerModal(false)}
-      />
+      {showPartnerModal && (
+        <B2BPartnerModal
+          isOpen={showPartnerModal}
+          onClose={() => setShowPartnerModal(false)}
+        />
+      )}
     </main>
     </ToastProvider>
   );
 }
-

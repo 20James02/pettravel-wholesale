@@ -12,10 +12,7 @@ export async function GET() {
   } catch (error) {
     if (error instanceof Response) return error;
 
-    const message = error instanceof Error
-      ? error.message
-      : "Khong the doc du lieu ke toan.";
-
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("ACCOUNTING_OVERVIEW_FAILED", error);
+    return NextResponse.json({ error: "Không thể đọc dữ liệu kế toán." }, { status: 500 });
   }
 }

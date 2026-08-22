@@ -28,7 +28,7 @@ import {
   Edit3,
   History
 } from "lucide-react";
-import type { CustomerOrder, Supplier, Product, OrderItem } from "@/lib/domain";
+import type { CustomerOrder, FulfillmentStatus, Shipment, Supplier, Product, OrderItem, PermissionKey } from "@/lib/domain";
 import type { ApiUser } from "../../types";
 import { formatVnd } from "@/lib/money";
 import { OrderRevisionHistoryModal } from "../shared/OrderRevisionHistoryModal";
@@ -37,6 +37,7 @@ interface AdminOrdersProps {
   allOrders: CustomerOrder[];
   workingOrder: CustomerOrder;
   currentUser: ApiUser | null;
+  currentUserPermissions: PermissionKey[];
   userList?: ApiUser[];
   suppliers: Supplier[];
   allProducts: Product[];
@@ -65,9 +66,10 @@ interface AdminOrdersProps {
   handleAdminQtyChange: (itemId: string, qty: number) => void;
   handlePublishQuote: (customNote?: string) => void;
   confirmDeposit: () => void;
-  attachShipment: () => void;
-  handleStockReservationAction: (action: string) => void;
-  handlePostOrderAccounting: (action: "post_all" | "post_confirmed_payments") => void;
+  rejectPaymentProof: () => void;
+  reissuePaymentRequest: () => void;
+  advanceFulfillment: (nextStatus: FulfillmentStatus, shipment?: Pick<Shipment, "carrier" | "trackingCode" | "eta">) => void;
+  handlePostOrderAccounting: (action: "post_all" | "post_confirmed_payments") => Promise<boolean>;
   addComment: (audience: "customer_visible" | "internal", message: string) => void;
 }
 
@@ -75,6 +77,7 @@ export function AdminOrders({
   allOrders,
   workingOrder,
   currentUser,
+  currentUserPermissions,
   userList = [],
   suppliers = [],
   allProducts,
@@ -95,6 +98,9 @@ export function AdminOrders({
   handleAdminQtyChange,
   handlePublishQuote,
   confirmDeposit,
+  rejectPaymentProof,
+  reissuePaymentRequest,
+  advanceFulfillment,
   handlePostOrderAccounting
 }: AdminOrdersProps) {
   const addItemModalRef = useRef<HTMLDivElement>(null);
@@ -108,6 +114,15 @@ export function AdminOrders({
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [shipmentCarrier, setShipmentCarrier] = useState(() => workingOrder.shipment?.carrier ?? "");
+  const [shipmentTrackingCode, setShipmentTrackingCode] = useState(() => workingOrder.shipment?.trackingCode ?? "");
+  const [shipmentEta, setShipmentEta] = useState(() => workingOrder.shipment?.eta ?? "");
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Lock body scroll and active scroll to top when popup opens
   useEffect(() => {
@@ -200,6 +215,52 @@ export function AdminOrders({
     return activeOrder.quoteVersions[activeOrder.quoteVersions.length - 1];
   }, [activeOrder.quoteVersions]);
 
+  const pendingPaymentProof = useMemo(() => {
+    const uploadedRequestIds = new Set(
+      activeOrder.paymentRequests.filter((request) => request.status === "uploaded").map((request) => request.id)
+    );
+    return activeOrder.paymentProofs.find(
+      (proof) => proof.status === "pending_admin_confirmation" && uploadedRequestIds.has(proof.paymentRequestId)
+    );
+  }, [activeOrder.paymentProofs, activeOrder.paymentRequests]);
+
+  const activePaymentRequest = useMemo(
+    () => [...activeOrder.paymentRequests].reverse().find(
+      (request) => request.status === "active" && new Date(request.expiresAt).getTime() > nowMs
+    ),
+    [activeOrder.paymentRequests, nowMs]
+  );
+  const canReissuePaymentRequest = !pendingPaymentProof && !activePaymentRequest && [
+    "deposit_requested",
+    "deposit_uploaded",
+    "full_requested",
+    "full_uploaded",
+    "cod_remaining"
+  ].includes(activeOrder.paymentStatus);
+
+  const isPaymentConfirmed = ["deposit_confirmed", "paid"].includes(activeOrder.paymentStatus);
+  const fulfillmentSteps: FulfillmentStatus[] = [
+    "not_started",
+    "supplier_checking",
+    "supplier_confirmed",
+    "packing",
+    "ready_to_ship",
+    "shipped",
+    "delivered"
+  ];
+  const currentFulfillmentIndex = fulfillmentSteps.indexOf(activeOrder.fulfillmentStatus);
+  const nextFulfillmentStatus = currentFulfillmentIndex >= 0
+    ? fulfillmentSteps[currentFulfillmentIndex + 1]
+    : undefined;
+  const fulfillmentActionLabels: Partial<Record<FulfillmentStatus, string>> = {
+    supplier_checking: "Bắt đầu kiểm hàng NCC",
+    supplier_confirmed: "Xác nhận đủ hàng NCC",
+    packing: "Bắt đầu đóng gói",
+    ready_to_ship: "Xác nhận sẵn sàng giao",
+    shipped: "Xuất kho & bàn giao vận chuyển",
+    delivered: "Xác nhận khách đã nhận hàng"
+  };
+
   // Filter orders for the left pane
   const filteredOrders = useMemo(() => {
     if (darkTabFilter === "all") return allOrders;
@@ -218,20 +279,36 @@ export function AdminOrders({
     return ord.quoteVersions[ord.quoteVersions.length - 1];
   };
 
-  const isLockedByOther = useMemo(() => {
+  const permissionSet = useMemo(() => new Set(currentUserPermissions), [currentUserPermissions]);
+  const hasPermission = (permission: PermissionKey) =>
+    currentUser?.role === "super_admin" || permissionSet.has(permission);
+  const canQuote = hasPermission("order.quote");
+  const canAdjustQuote = hasPermission("order.adjust");
+  const canConfirmPayment = hasPermission("order.confirm_payment");
+  const canAdvanceFulfillment = hasPermission("order.ship");
+  const canPostAccounting = hasPermission("accounting.post");
+
+  const isQuoteLockedByOther = useMemo(() => {
     if (!activeOrder.id) return false;
     return (
       activeOrder.assignedStaffId &&
       activeOrder.assignedStaffId !== currentUser?.id &&
-      currentUser?.role !== "super_admin"
+      !["super_admin", "admin_manager"].includes(currentUser?.role ?? "")
     );
   }, [activeOrder.id, activeOrder.assignedStaffId, currentUser]);
+  const quoteEditingDisabled = Boolean(isQuoteLockedByOther) || !canQuote;
+  const adjustmentEditingDisabled = quoteEditingDisabled || !canAdjustQuote;
 
   // Financial totals
   const subtotal = quote ? quote.subtotal : activeOrder.items?.reduce((sum, i) => sum + i.quantity * i.unitPriceSnapshot, 0) || 0;
   const finalTotal = quote ? quote.finalTotal : subtotal;
   const depositRequired = quote ? quote.depositAmount : Math.round(finalTotal * 0.3);
-  const balanceDue = finalTotal - (activeOrder.paymentStatus === "deposit_confirmed" ? depositRequired : 0);
+  const confirmedPaidAmount = activeOrder.paymentStatus === "paid"
+    ? finalTotal
+    : activeOrder.paymentIntent === "deposit_cod" && ["deposit_confirmed", "cod_remaining", "full_uploaded"].includes(activeOrder.paymentStatus)
+      ? depositRequired
+      : 0;
+  const balanceDue = Math.max(0, finalTotal - confirmedPaidAmount);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -564,6 +641,8 @@ export function AdminOrders({
                     className="w-full bg-[#1e2440] border border-[#303960] rounded-xl py-1.5 px-2 text-white text-xs font-semibold focus:ring-1 focus:ring-indigo-500"
                     value={activeOrder.assignedStaffId || ""}
                     onChange={(e) => handleStaffSelect(e.target.value)}
+                    disabled={quoteEditingDisabled}
+                    title={quoteEditingDisabled ? "Bạn không có quyền nhận hoặc phân công phần báo giá này." : undefined}
                   >
                     <option value="">-- Chưa phân bổ --</option>
                     {staffList.map((staff) => (
@@ -585,7 +664,8 @@ export function AdminOrders({
                   <button
                     type="button"
                     onClick={onPublishQuoteWithNote}
-                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-600 hover:to-indigo-700 text-white font-black rounded-xl shadow flex items-center gap-2 cursor-pointer transition text-xs whitespace-nowrap"
+                    disabled={quoteEditingDisabled}
+                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-600 hover:to-indigo-700 text-white font-black rounded-xl shadow flex items-center gap-2 cursor-pointer transition text-xs whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Send size={14} /> Gửi xác nhận lại khách (Báo giá mới)
                   </button>
@@ -641,6 +721,8 @@ export function AdminOrders({
                       type="button"
                       className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1 cursor-pointer transition"
                       onClick={() => setIsAddItemModalOpen(true)}
+                      disabled={quoteEditingDisabled}
+                      title={quoteEditingDisabled ? "Bạn không có quyền chỉnh sửa phần báo giá này." : undefined}
                     >
                       <Plus size={14} />
                       <span>+ Thêm sản phẩm sỉ</span>
@@ -701,7 +783,7 @@ export function AdminOrders({
                                     type="button"
                                     className="w-5 h-5 rounded bg-white/10 hover:bg-white/20 text-white flex items-center justify-center font-bold cursor-pointer transition disabled:opacity-30"
                                     onClick={() => handleAdminQtyChange(item.id, Math.max(1, item.quantity - 1))}
-                                    disabled={item.quantity <= 1}
+                                    disabled={quoteEditingDisabled || item.quantity <= 1}
                                   >
                                     -
                                   </button>
@@ -711,6 +793,7 @@ export function AdminOrders({
                                     max="10000"
                                     className="w-12 text-center bg-transparent font-mono font-black text-white px-1 text-xs focus:outline-none focus:bg-white/10 rounded"
                                     value={item.quantity}
+                                    disabled={quoteEditingDisabled}
                                     onChange={(e) => {
                                       const val = parseInt(e.target.value, 10);
                                       if (!isNaN(val) && val > 0) {
@@ -722,6 +805,7 @@ export function AdminOrders({
                                     type="button"
                                     className="w-5 h-5 rounded bg-white/10 hover:bg-white/20 text-white flex items-center justify-center font-bold cursor-pointer transition"
                                     onClick={() => handleAdminQtyChange(item.id, item.quantity + 1)}
+                                    disabled={quoteEditingDisabled}
                                   >
                                     +
                                   </button>
@@ -777,6 +861,7 @@ export function AdminOrders({
                         className="w-full mt-1 bg-[#1e2440] border border-[#303960] rounded-xl py-1.5 px-3 text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500"
                         value={adminDiscount}
                         onChange={(e) => setAdminDiscount(Math.max(0, Number(e.target.value) || 0))}
+                        disabled={adjustmentEditingDisabled}
                       />
                     </div>
                     <div>
@@ -786,6 +871,7 @@ export function AdminOrders({
                         className="w-full mt-1 bg-[#1e2440] border border-[#303960] rounded-xl py-1.5 px-3 text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500"
                         value={adminShippingFee}
                         onChange={(e) => setAdminShippingFee(Math.max(0, Number(e.target.value) || 0))}
+                        disabled={adjustmentEditingDisabled}
                       />
                     </div>
                     <div>
@@ -794,6 +880,7 @@ export function AdminOrders({
                         className="w-full mt-1 bg-[#1e2440] border border-[#303960] rounded-xl py-1.5 px-3 text-white text-xs focus:ring-1 focus:ring-indigo-500"
                         value={shippingFeeOption}
                         onChange={(e) => setShippingFeeOption(e.target.value as "included" | "separate_cod")}
+                        disabled={adjustmentEditingDisabled}
                       >
                         <option value="included">Cộng vào đơn sỉ</option>
                         <option value="separate_cod">Thu riêng khi nhận hàng</option>
@@ -807,6 +894,7 @@ export function AdminOrders({
                         type="checkbox"
                         checked={isManagerApproved}
                         onChange={(e) => setIsManagerApproved(e.target.checked)}
+                        disabled={currentUser?.role !== "super_admin"}
                         className="rounded text-indigo-600 focus:ring-0"
                       />
                       <span>Super Admin: Tôi xác nhận phê duyệt chiết khấu đặc biệt này</span>
@@ -832,6 +920,78 @@ export function AdminOrders({
           ) : (
             <div className="h-full flex items-center justify-center text-sm text-gray-400">
               Chọn một đơn hàng từ danh sách bên trái để xem chi tiết
+            </div>
+          )}
+
+          {activeOrder.commercialStatus === "customer_accepted" && !isPaymentConfirmed && (
+            <div className="mt-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-2xl border border-sky-500/30 bg-sky-950/30 p-3.5">
+              <div className="flex items-start gap-2.5">
+                <FileText size={17} className="mt-0.5 text-sky-300" />
+                <div>
+                  <p className="m-0 text-xs font-extrabold text-sky-100">Minh chứng thanh toán</p>
+                  <p className="m-0 mt-1 text-[11px] text-sky-200/75">
+                    {pendingPaymentProof
+                      ? `${pendingPaymentProof.fileName} · Chờ kế toán đối soát với giao dịch ngân hàng`
+                      : "Chưa có minh chứng hợp lệ cho yêu cầu thanh toán đang chờ."}
+                  </p>
+                </div>
+              </div>
+              {pendingPaymentProof && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={`/api/uploads/private-download?orderId=${encodeURIComponent(activeOrder.id)}&proofId=${encodeURIComponent(pendingPaymentProof.id)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-sky-400/40 bg-sky-500/15 px-3 py-2 text-[11px] font-bold text-sky-100 hover:bg-sky-500/25"
+                  >
+                    <LinkIcon size={13} /> Mở minh chứng riêng tư
+                  </a>
+                  <button
+                    type="button"
+                    onClick={rejectPaymentProof}
+                    disabled={!canConfirmPayment}
+                    title={!canConfirmPayment ? "Thiếu quyền đối soát thanh toán." : undefined}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-rose-400/40 bg-rose-500/15 px-3 py-2 text-[11px] font-bold text-rose-100 hover:bg-rose-500/25 disabled:opacity-50"
+                  >
+                    <X size={13} /> Từ chối chứng từ
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isPaymentConfirmed && activeOrder.fulfillmentStatus === "ready_to_ship" && (
+            <div className="mt-4 grid grid-cols-1 gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-3.5 sm:grid-cols-3">
+              <label className="text-[10px] font-bold uppercase text-emerald-200">
+                Đơn vị vận chuyển
+                <input
+                  value={shipmentCarrier}
+                  onChange={(event) => setShipmentCarrier(event.target.value)}
+                  maxLength={160}
+                  placeholder="Ví dụ: GHN, Viettel Post"
+                  className="mt-1 w-full rounded-xl border border-emerald-400/30 bg-[#171d34] px-3 py-2 text-xs font-normal normal-case text-white"
+                />
+              </label>
+              <label className="text-[10px] font-bold uppercase text-emerald-200">
+                Mã vận đơn thực tế
+                <input
+                  value={shipmentTrackingCode}
+                  onChange={(event) => setShipmentTrackingCode(event.target.value)}
+                  maxLength={160}
+                  placeholder="Nhập mã từ hãng vận chuyển"
+                  className="mt-1 w-full rounded-xl border border-emerald-400/30 bg-[#171d34] px-3 py-2 text-xs font-normal normal-case text-white"
+                />
+              </label>
+              <label className="text-[10px] font-bold uppercase text-emerald-200">
+                Thời gian dự kiến
+                <input
+                  value={shipmentEta}
+                  onChange={(event) => setShipmentEta(event.target.value)}
+                  maxLength={80}
+                  placeholder="Ví dụ: 2-3 ngày làm việc"
+                  className="mt-1 w-full rounded-xl border border-emerald-400/30 bg-[#171d34] px-3 py-2 text-xs font-normal normal-case text-white"
+                />
+              </label>
             </div>
           )}
 
@@ -904,32 +1064,76 @@ export function AdminOrders({
               </button>
 
               {/* Primary White Action Pill Button */}
-              {activeOrder.commercialStatus === "submitted" || isOrderModified ? (
+              {activeOrder.commercialStatus === "draft" || activeOrder.commercialStatus === "submitted" || activeOrder.commercialStatus === "admin_review" || isOrderModified ? (
                 <button
                   type="button"
                   className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
                   onClick={onPublishQuoteWithNote}
-                  disabled={Boolean(isLockedByOther)}
+                  disabled={quoteEditingDisabled}
                 >
                   Publish Quote (Gửi Báo Giá)
                 </button>
-              ) : activeOrder.commercialStatus === "customer_accepted" ? (
+              ) : activeOrder.commercialStatus === "cancelled" ? (
+                <button type="button" className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6" disabled>
+                  Đơn hàng đã hủy
+                </button>
+              ) : activeOrder.commercialStatus === "quoted" ? (
+                <button type="button" className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6" disabled>
+                  Chờ khách xác nhận báo giá
+                </button>
+              ) : !isPaymentConfirmed && canReissuePaymentRequest ? (
+                <button
+                  type="button"
+                  className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
+                  onClick={reissuePaymentRequest}
+                  disabled={!canConfirmPayment}
+                >
+                  Phát hành lại yêu cầu thanh toán
+                </button>
+              ) : !isPaymentConfirmed ? (
                 <button
                   type="button"
                   className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
                   onClick={confirmDeposit}
-                  disabled={Boolean(isLockedByOther)}
+                  disabled={!canConfirmPayment || !pendingPaymentProof}
+                  title={!canConfirmPayment
+                    ? "Thiếu quyền đối soát thanh toán."
+                    : !pendingPaymentProof
+                      ? "Cần minh chứng thanh toán hợp lệ trước khi đối soát"
+                      : undefined}
                 >
-                  Confirm Deposit & ATP
+                  {pendingPaymentProof ? "Đối soát & xác nhận tiền" : "Chờ minh chứng thanh toán"}
+                </button>
+              ) : nextFulfillmentStatus ? (
+                <button
+                  type="button"
+                  className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
+                  onClick={() => {
+                    if (nextFulfillmentStatus === "shipped") {
+                      advanceFulfillment(nextFulfillmentStatus, {
+                        carrier: shipmentCarrier.trim(),
+                        trackingCode: shipmentTrackingCode.trim(),
+                        eta: shipmentEta.trim()
+                      });
+                      return;
+                    }
+                    advanceFulfillment(nextFulfillmentStatus);
+                  }}
+                  disabled={
+                    !canAdvanceFulfillment ||
+                    (nextFulfillmentStatus === "shipped" && (!shipmentCarrier.trim() || !shipmentTrackingCode.trim()))
+                  }
+                >
+                  {fulfillmentActionLabels[nextFulfillmentStatus] ?? "Chuyển bước xử lý"}
                 </button>
               ) : (
                 <button
                   type="button"
                   className="admin-pill-btn-white text-xs sm:text-sm py-2.5 px-6"
-                  onClick={() => handlePostOrderAccounting("post_all")}
-                  disabled={Boolean(isLockedByOther)}
+                  onClick={() => void handlePostOrderAccounting("post_all")}
+                  disabled={!canPostAccounting}
                 >
-                  Post Ledger & Complete
+                  Ghi sổ & hoàn tất đơn
                 </button>
               )}
             </div>

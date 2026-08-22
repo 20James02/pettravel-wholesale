@@ -3,6 +3,15 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from app.models.wholesale import Base
+from app.core.config import settings
+
+
+@pytest.fixture(autouse=True)
+def configured_test_payment(monkeypatch):
+    """Keep payment generation explicit and deterministic in tests."""
+    monkeypatch.setattr(settings, "PAYMENT_QR_BANK_CODE", "MB")
+    monkeypatch.setattr(settings, "PAYMENT_QR_ACCOUNT_NO", "0123456789")
+    monkeypatch.setattr(settings, "PAYMENT_QR_ACCOUNT_NAME", "PET TRAVEL WHOLESALE TEST")
 
 # Dùng SQLite in-memory cho async unit tests cô lập
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -43,6 +52,11 @@ async def canonical_db_session() -> AsyncSession:
             password_hash text,
             status text not null default 'invited',
             created_at timestamp not null default current_timestamp
+        )""",
+        """create table auth_rate_limit_buckets (
+            bucket_key text primary key, attempt_count integer not null,
+            window_expires_at timestamp not null,
+            updated_at timestamp not null default current_timestamp
         )""",
         "create table roles (id text primary key, key text not null unique, name text not null)",
         "create table permissions (key text primary key, description text not null)",

@@ -1,10 +1,11 @@
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.repositories.orders import OrderConflictError
+from app.repositories.orders import OrderConflictError, reissue_payment_request
 from app.repositories.order_read import (
     get_orders_revision,
     list_orders as read_orders,
@@ -15,6 +16,12 @@ from app.repositories.orders import save_order as write_order
 
 
 router = APIRouter()
+
+
+class ReissuePaymentRequestPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    order_id: str = Field(min_length=1, max_length=128)
 
 
 @router.get("/revision", response_model=Dict[str, str])
@@ -78,6 +85,26 @@ async def save_order(
     except ValueError as exc:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/payment-request/reissue", response_model=Dict[str, Any])
+async def reissue_order_payment_request(
+    payload: ReissuePaymentRequestPayload,
+    actor_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        payment_request = await reissue_payment_request(
+            db,
+            actor_id=actor_id,
+            order_id=payload.order_id,
+        )
+        return {"status": "success", "paymentRequest": payment_request}
+    except ValueError as exc:
+        await db.rollback()
+        detail = str(exc)
+        status_code = 409 if detail.startswith("PAYMENT_PROOF_PENDING_REVIEW") else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
 @router.get("/{order_id}/history", response_model=List[Dict[str, Any]])

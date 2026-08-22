@@ -1,12 +1,12 @@
 -- ============================================================================
 -- PET TRAVEL WHOLESALE — V13 MIGRATION: CANONICAL ORDER LIFECYCLE HARDENING
 -- Invariants:
--- 1. Preflight validation for dirty data (active orders, accepted quotes)
+-- 1. Preflight validation for dirty data (active orders, accepted quotes, revision duplicates)
 -- 2. Schema reconciliation (customer_tax_code, customer_note, variant_image, accepted_at)
--- 3. Auditability (order_revision_history with UNIQUE(order_id, revision_no))
+-- 3. Auditability (order_revision_history with explicit UNIQUE(order_id, revision_no) reconciliation)
 -- 4. Monotonic Real-time Sync (order_sync_revisions)
--- 5. One Active Order per Org (uq_customer_orders_active_org)
--- 6. Exactly One Accepted Quote per Order (uq_quote_versions_single_accepted)
+-- 5. One Active Order per Org (uq_customer_orders_active_org with drift detection)
+-- 6. Exactly One Accepted Quote per Order (uq_quote_versions_single_accepted with drift detection)
 -- 7. Immutability Guards (accepted quotes, quote adjustments, locked order items)
 -- ============================================================================
 
@@ -56,6 +56,26 @@ BEGIN
 END;
 $$;
 
+-- Check for duplicate revision_no if order_revision_history already exists
+DO $$
+DECLARE
+  v_dup_revs INT;
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'order_revision_history') THEN
+    SELECT COUNT(*) INTO v_dup_revs FROM (
+      SELECT order_id, revision_no
+      FROM public.order_revision_history
+      GROUP BY order_id, revision_no
+      HAVING COUNT(*) > 1
+    ) t;
+
+    IF v_dup_revs > 0 THEN
+      RAISE EXCEPTION 'V13_REVISION_DUPLICATES_FOUND: Duplicate revision_no found in order_revision_history (% duplicates).', v_dup_revs;
+    END IF;
+  END IF;
+END;
+$$;
+
 
 -- ── 2. SCHEMA RECONCILIATION ────────────────────────────────────────────────
 
@@ -86,12 +106,57 @@ CREATE TABLE IF NOT EXISTS public.order_revision_history (
   quote_snapshot JSONB NOT NULL DEFAULT '[]'::JSONB,
   shipping_snapshot JSONB NOT NULL DEFAULT '{}'::JSONB,
   note TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT uq_order_revision_no UNIQUE (order_id, revision_no)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_order_revision_history_order_rev
-  ON public.order_revision_history (order_id, revision_no DESC);
+-- Explicit constraint reconciliation for uq_order_revision_no
+DO $$
+DECLARE
+  v_dup_revs INT;
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'uq_order_revision_no'
+      AND conrelid = 'public.order_revision_history'::regclass
+  ) THEN
+    -- Check duplicate rows before applying unique constraint
+    SELECT COUNT(*) INTO v_dup_revs FROM (
+      SELECT order_id, revision_no
+      FROM public.order_revision_history
+      GROUP BY order_id, revision_no
+      HAVING COUNT(*) > 1
+    ) t;
+
+    IF v_dup_revs > 0 THEN
+      RAISE EXCEPTION 'V13_REVISION_DUPLICATES_FOUND: Duplicate revision_no found in order_revision_history (% duplicates).', v_dup_revs;
+    END IF;
+
+    ALTER TABLE public.order_revision_history
+      ADD CONSTRAINT uq_order_revision_no UNIQUE (order_id, revision_no);
+  END IF;
+END;
+$$;
+
+-- Index with drift detection for idx_order_revision_history_order_rev
+DO $$
+DECLARE
+  v_def TEXT;
+BEGIN
+  SELECT pg_get_indexdef(c.oid) INTO v_def
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public' AND c.relname = 'idx_order_revision_history_order_rev';
+
+  IF v_def IS NOT NULL THEN
+    IF v_def NOT LIKE '%order_id%' OR v_def NOT LIKE '%revision_no%' THEN
+      RAISE EXCEPTION 'V13_SCHEMA_DRIFT_DETECTED: Index idx_order_revision_history_order_rev exists with incompatible definition: %', v_def;
+    END IF;
+  ELSE
+    CREATE INDEX idx_order_revision_history_order_rev
+      ON public.order_revision_history (order_id, revision_no DESC);
+  END IF;
+END;
+$$;
 
 CREATE TABLE IF NOT EXISTS public.order_sync_revisions (
   scope_type TEXT NOT NULL,
@@ -101,19 +166,79 @@ CREATE TABLE IF NOT EXISTS public.order_sync_revisions (
   PRIMARY KEY (scope_type, scope_id)
 );
 
+-- Defense in depth for any direct Supabase/PostgREST access. The service role
+-- used by the BFF/backend continues to bypass RLS and performs its own checks.
+ALTER TABLE public.order_revision_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.order_sync_revisions ENABLE ROW LEVEL SECURITY;
 
--- ── 4. CONCURRENCY & UNIQUENESS HARD CONSTRAINTS ────────────────────────────
+DROP POLICY IF EXISTS "customers can read own order revision history" ON public.order_revision_history;
+CREATE POLICY "customers can read own order revision history"
+  ON public.order_revision_history FOR SELECT
+  USING (
+    public.current_app_user_has_role(ARRAY['super_admin', 'admin_manager', 'order_operator', 'accountant', 'warehouse'])
+    OR EXISTS (
+      SELECT 1
+      FROM public.customer_orders o
+      WHERE o.id = order_revision_history.order_id
+        AND o.organization_id = public.current_app_user_org_id()
+    )
+  );
+
+DROP POLICY IF EXISTS "users can read scoped order sync revisions" ON public.order_sync_revisions;
+CREATE POLICY "users can read scoped order sync revisions"
+  ON public.order_sync_revisions FOR SELECT
+  USING (
+    public.current_app_user_has_role(ARRAY['super_admin', 'admin_manager', 'order_operator', 'accountant', 'warehouse'])
+    OR (scope_type = 'organization' AND scope_id = public.current_app_user_org_id())
+  );
+
+
+-- ── 4. CONCURRENCY & UNIQUENESS HARD CONSTRAINTS WITH DRIFT DETECTION ───────
 
 -- Single Active Order per Organization
-CREATE UNIQUE INDEX IF NOT EXISTS uq_customer_orders_active_org
-  ON public.customer_orders (organization_id)
-  WHERE commercial_status NOT IN ('cancelled')
-    AND fulfillment_status NOT IN ('delivered');
+DO $$
+DECLARE
+  v_def TEXT;
+BEGIN
+  SELECT pg_get_indexdef(c.oid) INTO v_def
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public' AND c.relname = 'uq_customer_orders_active_org';
+
+  IF v_def IS NOT NULL THEN
+    IF v_def NOT LIKE '%organization_id%' OR v_def NOT LIKE '%commercial_status%' OR v_def NOT LIKE '%fulfillment_status%' THEN
+      RAISE EXCEPTION 'V13_SCHEMA_DRIFT_DETECTED: Index uq_customer_orders_active_org exists with incompatible definition: %', v_def;
+    END IF;
+  ELSE
+    CREATE UNIQUE INDEX uq_customer_orders_active_org
+      ON public.customer_orders (organization_id)
+      WHERE commercial_status NOT IN ('cancelled')
+        AND fulfillment_status NOT IN ('delivered');
+  END IF;
+END;
+$$;
 
 -- Exactly One Accepted Quote per Order
-CREATE UNIQUE INDEX IF NOT EXISTS uq_quote_versions_single_accepted
-  ON public.quote_versions (order_id)
-  WHERE status = 'accepted';
+DO $$
+DECLARE
+  v_def TEXT;
+BEGIN
+  SELECT pg_get_indexdef(c.oid) INTO v_def
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public' AND c.relname = 'uq_quote_versions_single_accepted';
+
+  IF v_def IS NOT NULL THEN
+    IF v_def NOT LIKE '%order_id%' OR v_def NOT LIKE '%accepted%' THEN
+      RAISE EXCEPTION 'V13_SCHEMA_DRIFT_DETECTED: Index uq_quote_versions_single_accepted exists with incompatible definition: %', v_def;
+    END IF;
+  ELSE
+    CREATE UNIQUE INDEX uq_quote_versions_single_accepted
+      ON public.quote_versions (order_id)
+      WHERE status = 'accepted';
+  END IF;
+END;
+$$;
 
 
 -- ── 5. IMMUTABILITY TRIGGERS ────────────────────────────────────────────────
@@ -161,6 +286,7 @@ SET search_path = ''
 AS $$
 DECLARE
   v_quote_status TEXT;
+  v_new_quote_status TEXT;
 BEGIN
   IF TG_OP = 'INSERT' THEN
     SELECT status INTO v_quote_status FROM public.quote_versions WHERE id = NEW.quote_id;
@@ -174,6 +300,10 @@ BEGIN
     SELECT status INTO v_quote_status FROM public.quote_versions WHERE id = OLD.quote_id;
     IF v_quote_status = 'accepted' THEN
       RAISE EXCEPTION 'ACCEPTED_QUOTE_ADJUSTMENT_IMMUTABLE: Cannot modify adjustments of an accepted quote version (quote_id: %).', OLD.quote_id;
+    END IF;
+    SELECT status INTO v_new_quote_status FROM public.quote_versions WHERE id = NEW.quote_id;
+    IF v_new_quote_status = 'accepted' THEN
+      RAISE EXCEPTION 'ACCEPTED_QUOTE_ADJUSTMENT_IMMUTABLE: Cannot move adjustments onto an accepted quote version (quote_id: %).', NEW.quote_id;
     END IF;
     RETURN NEW;
   END IF;

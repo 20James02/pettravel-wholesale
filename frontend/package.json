@@ -7,13 +7,15 @@
     "dev": "next dev",
     "prebuild": "node scripts/check-production-env.mjs --vercel-only",
     "build": "next build",
+    "postbuild": "node scripts/check-build-quality.mjs",
     "start": "next start",
     "lint": "eslint .",
     "type-check": "tsc --noEmit",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/server/accounting/engine.test.ts src/server/accounting/order-financials.test.ts src/server/authorization.test.ts src/server/order-authorization.test.ts src/lib/upload/image-upload-manager.test.ts",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/server/accounting/engine.test.ts src/server/accounting/order-financials.test.ts src/server/authorization.test.ts src/server/order-authorization.test.ts src/server/order-bff-acceptance.test.ts src/server/rate-limit.test.ts src/lib/upload/image-upload-manager.test.ts src/lib/validation.test.ts src/lib/motion/gsap-catalog-motion.test.ts src/features/pettravel/navigation-contract.test.ts",
     "preflight:production": "node scripts/check-production-env.mjs"
   },
   "dependencies": {
+    "gsap": "3.15.0",
     "lenis": "^1.3.26",
     "lucide-react": "^0.468.0",
     "next": "^16.2.10",

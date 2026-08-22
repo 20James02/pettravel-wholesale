@@ -7,7 +7,8 @@ from app.core.security import verify_password, get_password_hash, create_access_
 from app.core.config import settings
 from app.repositories.identity import get_user_by_email, get_user_by_email_or_phone
 from app.schemas.wholesale import UserCreate, UserResponse
-from pydantic import BaseModel
+from app.services.auth_rate_limit import consume_login_rate_limit, reset_login_rate_limit
+from pydantic import BaseModel, Field
 import uuid
 
 router = APIRouter()
@@ -15,9 +16,9 @@ router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
 
 class LoginJsonInput(BaseModel):
-    identifier: str | None = None
-    email: str | None = None
-    password: str
+    identifier: str | None = Field(default=None, max_length=180)
+    email: str | None = Field(default=None, max_length=180)
+    password: str = Field(min_length=8, max_length=128)
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
@@ -63,6 +64,13 @@ async def register(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+    rate_limit = await consume_login_rate_limit(db, form_data.username)
+    if not rate_limit.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Bạn đã thử đăng nhập quá nhiều lần. Vui lòng đợi rồi thử lại.",
+            headers={"Retry-After": str(rate_limit.retry_after_seconds)},
+        )
     user = await get_user_by_email_or_phone(db, form_data.username)
     if not user or not verify_password(form_data.password, user.get("password_hash") or ""):
         raise HTTPException(
@@ -81,6 +89,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
     access_token = create_access_token(
         subject=user["id"], expires_delta=access_token_expires
     )
+    await reset_login_rate_limit(db, form_data.username)
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/login-json")
@@ -90,6 +99,13 @@ async def login_json(payload: LoginJsonInput, db: AsyncSession = Depends(get_db)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Vui lòng cung cấp email hoặc số điện thoại đăng nhập."
+        )
+    rate_limit = await consume_login_rate_limit(db, identifier)
+    if not rate_limit.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Bạn đã thử đăng nhập quá nhiều lần. Vui lòng đợi rồi thử lại.",
+            headers={"Retry-After": str(rate_limit.retry_after_seconds)},
         )
     user = await get_user_by_email_or_phone(db, identifier)
     if not user or not verify_password(payload.password, user.get("password_hash") or ""):
@@ -108,6 +124,7 @@ async def login_json(payload: LoginJsonInput, db: AsyncSession = Depends(get_db)
     access_token = create_access_token(
         subject=user["id"], expires_delta=access_token_expires
     )
+    await reset_login_rate_limit(db, identifier)
     return {
         "access_token": access_token,
         "token_type": "bearer",

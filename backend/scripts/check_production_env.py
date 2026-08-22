@@ -137,9 +137,21 @@ def main() -> int:
         "R2_ACCESS_KEY_ID",
         "R2_SECRET_ACCESS_KEY",
         "R2_BUCKET",
+        "R2_PRIVATE_BUCKET",
         "R2_PUBLIC_BASE_URL",
     ):
         require_value(errors, key)
+    require_https_url(errors, "R2_PUBLIC_BASE_URL")
+    if value("R2_PRIVATE_BUCKET") == value("R2_BUCKET"):
+        errors.append("R2_PRIVATE_BUCKET must be different from R2_BUCKET")
+    for key in (
+        "PAYMENT_QR_BANK_CODE",
+        "PAYMENT_QR_ACCOUNT_NO",
+        "PAYMENT_QR_ACCOUNT_NAME",
+        "VIETQR_WEBHOOK_SECRET",
+        "PAYMENT_SYSTEM_ACTOR_ID",
+    ):
+        require_value(errors, key, 32 if key == "VIETQR_WEBHOOK_SECRET" else 1)
     if errors:
         for error in errors:
             print(f"ENV_PREFLIGHT_ERROR={error}", file=sys.stderr)

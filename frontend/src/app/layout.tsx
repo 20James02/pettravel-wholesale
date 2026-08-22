@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from "next";
+import { getSiteUrl } from "@/lib/site";
 import "./globals.css";
+
+const siteUrl = getSiteUrl();
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -9,12 +12,12 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://pettravel.vn"),
+  metadataBase: siteUrl,
   title: {
-    default: "Pet Travel Wholesale — Nền Tảng Phân Phối Sỉ Phụ Kiện Du Lịch Thú Cưng",
+    default: "Đặt Hàng Sỉ Phụ Kiện Thú Cưng | Pet Travel",
     template: "%s | Pet Travel Wholesale"
   },
-  description: "Hệ thống phân phối sỉ phụ kiện du lịch, túi vận chuyển thú cưng, bát ăn gấp gọn, khăn lau diệt khuẩn chuẩn quốc tế cho Đại lý, Pet Shop, Spa Grooming toàn quốc. Chiết khấu đến 45%, báo giá 2 chiều thời gian thực.",
+  description: "Nền tảng đặt hàng sỉ phụ kiện thú cưng cho đại lý, pet shop và spa: duyệt catalog, gửi yêu cầu báo giá, trao đổi và theo dõi đơn trực tuyến.",
   keywords: [
     "sỉ phụ kiện thú cưng",
     "bán buôn đồ dùng thú cưng",
@@ -36,10 +39,10 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "vi_VN",
-    url: "https://pettravel.vn",
+    url: siteUrl,
     siteName: "Pet Travel Wholesale Vietnam",
-    title: "Pet Travel Wholesale — Phân Phối Sỉ Phụ Kiện Du Lịch Thú Cưng Hàng Đầu",
-    description: "Nền tảng đặt hàng sỉ trực tuyến dành cho Pet Shop, Phòng khám thú y, Spa Grooming. Chiết khấu sỉ hấp dẫn, duyệt đơn thời gian thực, thanh toán VietQR tự động.",
+    title: "Đặt Hàng Sỉ Phụ Kiện Thú Cưng | Pet Travel",
+    description: "Duyệt catalog, gửi yêu cầu báo giá, trao đổi với đội vận hành và theo dõi đơn hàng sỉ trực tuyến.",
     images: [
       {
         url: "/product-bag.svg",
@@ -51,8 +54,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Pet Travel Wholesale — Phân Phối Sỉ Phụ Kiện Du Lịch Thú Cưng",
-    description: "Chiết khấu sỉ đến 45%, giao hàng nhanh toàn quốc, báo giá đa phiên bản và thanh toán VietQR 247.",
+    title: "Đặt Hàng Sỉ Phụ Kiện Thú Cưng | Pet Travel",
+    description: "Nền tảng báo giá và theo dõi đơn hàng sỉ dành cho đại lý, pet shop và spa thú cưng.",
     images: ["/product-bag.svg"],
   },
   robots: {
@@ -67,7 +70,7 @@ export const metadata: Metadata = {
     },
   },
   alternates: {
-    canonical: "https://pettravel.vn",
+    canonical: siteUrl,
   },
 };
 
@@ -76,66 +79,20 @@ const jsonLdSchema = {
   "@graph": [
     {
       "@type": "Organization",
-      "@id": "https://pettravel.vn/#organization",
+      "@id": `${siteUrl.href}#organization`,
       "name": "Pet Travel Wholesale Vietnam",
-      "url": "https://pettravel.vn",
-      "logo": "https://pettravel.vn/product-bag.svg",
-      "description": "Nền tảng phân phối sỉ phụ kiện du lịch thú cưng hàng đầu Việt Nam cho các đại lý, pet shop, phòng khám thú y.",
-      "contactPoint": {
-        "@type": "ContactPoint",
-        "telephone": "+84-988-888-888",
-        "contactType": "wholesale sales",
-        "areaServed": "VN",
-        "availableLanguage": ["Vietnamese", "English"]
-      },
-      "sameAs": [
-        "https://facebook.com/pettravelwholesale",
-        "https://zalo.me/pettravel"
-      ]
+      "url": siteUrl.href,
+      "logo": new URL("/product-bag.svg", siteUrl).href,
+      "description": "Nền tảng phân phối sỉ phụ kiện du lịch thú cưng cho đại lý, pet shop và cơ sở chăm sóc thú cưng tại Việt Nam."
     },
     {
       "@type": "WebSite",
-      "@id": "https://pettravel.vn/#website",
-      "url": "https://pettravel.vn",
+      "@id": `${siteUrl.href}#website`,
+      "url": siteUrl.href,
       "name": "Pet Travel Wholesale",
       "publisher": {
-        "@id": "https://pettravel.vn/#organization"
-      },
-      "potentialAction": {
-        "@type": "SearchAction",
-        "target": "https://pettravel.vn/?search={search_term_string}",
-        "query-input": "required name=search_term_string"
+        "@id": `${siteUrl.href}#organization`
       }
-    },
-    {
-      "@type": "FAQPage",
-      "@id": "https://pettravel.vn/#faq",
-      "mainEntity": [
-        {
-          "@type": "Question",
-          "name": "Chính sách chiết khấu sỉ của Pet Travel Wholesale như thế nào?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Pet Travel Wholesale áp dụng mức chiết khấu linh hoạt từ 25% đến 45% theo bậc đại lý Bạc, Vàng và Kim Cương cùng các chính sách hỗ trợ marketing đồng thương hiệu (Co-Marketing) độc quyền."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Số lượng đặt hàng tối thiểu (MOQ) là bao nhiêu?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "MOQ cho đơn hàng đầu tiên chỉ từ 5 sản phẩm/mẫu, tạo điều kiện thuận lợi cho các cửa hàng thú cưng và spa khởi nghiệp."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "Phương thức thanh toán và đặt cọc đơn hàng sỉ ra sao?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Đại lý đặt cọc 30% giá trị đơn hàng thông qua mã chuyển khoản VietQR Napas 247 khi xác nhận bản báo giá. 70% còn lại thanh toán khi nhận hàng (COD) hoặc công nợ bảo lãnh theo kỳ."
-          }
-        }
-      ]
     }
   ]
 };
@@ -150,7 +107,7 @@ export default function RootLayout({
       <head>
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdSchema) }}
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdSchema).replace(/</g, "\\u003c") }}
         />
       </head>
       <body className="min-h-screen bg-slate-50 text-slate-900 antialiased font-sans selection:bg-blue-500 selection:text-white">

@@ -4,6 +4,7 @@ import json
 import time
 import uuid
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,8 @@ class CatalogError(ValueError):
 
 _catalog_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 CATALOG_CACHE_TTL = 30.0  # 30 seconds
+MAX_PERSISTED_IMAGE_URL_LENGTH = 2_048
+DEFAULT_PRODUCT_IMAGE = "/product-food.svg"
 
 
 def invalidate_catalog_cache() -> None:
@@ -38,6 +41,48 @@ def _string_list(value: Any) -> list[str]:
             return [item.strip() for item in stripped.split(",") if item.strip()]
         return [str(item) for item in parsed] if isinstance(parsed, list) else []
     return []
+
+
+def _validate_persisted_image_url(value: Any, field_name: str) -> str:
+    clean_value = str(value or "").strip()
+    if not clean_value:
+        return ""
+    if len(clean_value) > MAX_PERSISTED_IMAGE_URL_LENGTH:
+        raise CatalogError(f"{field_name} vượt quá {MAX_PERSISTED_IMAGE_URL_LENGTH} ký tự.")
+    if any(ord(character) < 32 or ord(character) == 127 for character in clean_value):
+        raise CatalogError(f"{field_name} chứa ký tự điều khiển không hợp lệ.")
+
+    if clean_value.startswith("/"):
+        if clean_value.startswith("//") or "\\" in clean_value:
+            raise CatalogError(f"{field_name} không phải đường dẫn nội bộ hợp lệ.")
+        return clean_value
+
+    try:
+        parsed = urlsplit(clean_value)
+    except ValueError as exc:
+        raise CatalogError(f"{field_name} không phải URL hợp lệ.") from exc
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise CatalogError(f"{field_name} phải là đường dẫn nội bộ hoặc URL HTTPS đã tải lên.")
+    return clean_value
+
+
+def _safe_catalog_image_url(value: Any, fallback: str = DEFAULT_PRODUCT_IMAGE) -> str:
+    try:
+        return _validate_persisted_image_url(value, "Đường dẫn ảnh") or fallback
+    except (CatalogError, ValueError):
+        return fallback
+
+
+def _safe_catalog_gallery(value: Any) -> list[str]:
+    safe_images: list[str] = []
+    for raw_image in _string_list(value)[:12]:
+        try:
+            image = _validate_persisted_image_url(raw_image, "Ảnh bộ sưu tập")
+        except (CatalogError, ValueError):
+            continue
+        if image:
+            safe_images.append(image)
+    return safe_images
 
 
 async def list_products(db: AsyncSession, role: str) -> list[dict[str, Any]]:
@@ -92,8 +137,8 @@ async def list_products(db: AsyncSession, role: str) -> list[dict[str, Any]]:
                 "brand": row["brand"] or "Pet Travel",
                 "category": row["category"],
                 "description": row["description"],
-                "imageUrl": row["product_image_url"] or "/product-food.svg",
-                "images": _string_list(row["images"]),
+                "imageUrl": _safe_catalog_image_url(row["product_image_url"]),
+                "images": _safe_catalog_gallery(row["images"]),
                 "dimensions": row["dimensions"],
                 "weight": float(row["weight"] or 0),
                 "tags": _string_list(row["tags"]),
@@ -117,7 +162,7 @@ async def list_products(db: AsyncSession, role: str) -> list[dict[str, Any]]:
             "label": row["label"],
             "barcode": row["barcode"],
             "stock": int(row["stock_qty"] or 0),
-            "imageUrl": row["variant_image_url"] or "/product-food.svg",
+            "imageUrl": _safe_catalog_image_url(row["variant_image_url"]),
         }
 
         if role == "admin":
@@ -149,6 +194,24 @@ async def save_product_record(db: AsyncSession, payload: dict[str, Any]) -> str:
     if not code or not name or not category:
         raise CatalogError("Mã, tên và danh mục sản phẩm là bắt buộc.")
 
+    image_url = _validate_persisted_image_url(payload.get("imageUrl"), "Ảnh đại diện")
+    gallery_images = _string_list(payload.get("images"))
+    if len(gallery_images) > 12:
+        raise CatalogError("Mỗi sản phẩm tối đa 12 ảnh.")
+    gallery_images = [
+        _validate_persisted_image_url(image, "Ảnh bộ sưu tập") for image in gallery_images
+    ]
+    raw_variants = payload.get("variants") or []
+    if not isinstance(raw_variants, list):
+        raise CatalogError("Danh sách biến thể không hợp lệ.")
+    variant_image_urls: list[str] = []
+    for raw_variant in raw_variants:
+        if not isinstance(raw_variant, dict):
+            raise CatalogError("Dữ liệu biến thể không hợp lệ.")
+        variant_image_urls.append(
+            _validate_persisted_image_url(raw_variant.get("imageUrl"), "Ảnh biến thể")
+        )
+
     existing = (
         await db.execute(
             text("select id from products where id = :id or code = :code limit 1"),
@@ -163,8 +226,8 @@ async def save_product_record(db: AsyncSession, payload: dict[str, Any]) -> str:
         "brand": str(payload.get("brand") or "Pet Travel").strip(),
         "category": category,
         "description": payload.get("description"),
-        "image_url": payload.get("imageUrl"),
-        "images": _array_parameter(db, payload.get("images")),
+        "image_url": image_url,
+        "images": _array_parameter(db, gallery_images),
         "dimensions": payload.get("dimensions"),
         "weight": payload.get("weight") or 0,
         "tags": _array_parameter(db, payload.get("tags")),
@@ -198,7 +261,7 @@ async def save_product_record(db: AsyncSession, payload: dict[str, Any]) -> str:
         {"product_id": product_id},
     )
 
-    for raw_variant in payload.get("variants") or []:
+    for variant_index, raw_variant in enumerate(raw_variants):
         sku = str(raw_variant.get("sku") or "").strip()
         label = str(raw_variant.get("label") or "").strip()
         supplier_id = str(raw_variant.get("supplierId") or "").strip()
@@ -236,7 +299,7 @@ async def save_product_record(db: AsyncSession, payload: dict[str, Any]) -> str:
             "sku": sku,
             "label": label,
             "barcode": raw_variant.get("barcode"),
-            "image_url": raw_variant.get("imageUrl"),
+            "image_url": variant_image_urls[variant_index],
         }
         if existing_variant:
             await db.execute(

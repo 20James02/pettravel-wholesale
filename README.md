@@ -11,12 +11,24 @@ Nen tang ban si do thu cung cho Pet Travel: khach chi thay gia sau khi dang nhap
 
 ## Chay local
 
+Backend (PowerShell):
+
 ```powershell
-npm.cmd install
+cd backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+```
+
+Frontend (terminal khac):
+
+```powershell
+cd frontend
+npm.cmd ci
 npm.cmd run dev
 ```
 
-Mo `http://localhost:3000`. App hien co 3 che do demo: `Guest`, `User`, `Admin`.
+Mo `http://localhost:3000`. Tai khoan User/Admin phai ton tai trong database; public signup da tat.
 
 ## Bien moi truong
 
@@ -34,8 +46,6 @@ Frontend project can:
 - `BACKEND_INTERNAL_SECRET`
 - `JWT_SECRET`
 - `CRON_SECRET`
-- `PAYMENT_QR_ACCOUNT_NO`
-- `PAYMENT_QR_ACCOUNT_NAME`
 - `ALLOW_DEMO_DATA=false`
 - `ALLOW_RUNTIME_MIGRATIONS=false`
 - Tam thoi khi bootstrap owner: `ADMIN_BOOTSTRAP_EMAIL`, `ADMIN_BOOTSTRAP_TOKEN`
@@ -53,7 +63,13 @@ Backend project can:
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
 - `R2_BUCKET`
+- `R2_PRIVATE_BUCKET`
 - `R2_PUBLIC_BASE_URL`
+- `PAYMENT_QR_BANK_CODE`
+- `PAYMENT_QR_ACCOUNT_NO`
+- `PAYMENT_QR_ACCOUNT_NAME`
+- `VIETQR_WEBHOOK_SECRET`
+- `PAYMENT_SYSTEM_ACTOR_ID`
 - `ALLOW_DEMO_DATA=false`
 - `ALLOW_RUNTIME_MIGRATIONS=false`
 
@@ -62,11 +78,16 @@ Backend project can:
 ## Supabase
 
 1. Tao project Supabase.
-2. Chay SQL trong `supabase/schema.sql`.
-3. Bat RLS va review policy truoc khi mo production.
-4. Tao user bang Admin flow, khong mo public signup.
-5. Server dung `SUPABASE_SERVICE_ROLE_KEY` chi trong route/server action, khong dua xuong client.
-6. Khong bat `ALLOW_DEMO_DATA` hoac `ALLOW_RUNTIME_MIGRATIONS` tren production.
+2. Database moi: chay `supabase/schema.sql`, sau do chay tat ca file `supabase/update_*.sql` theo thu tu phien ban tang dan (`update_schema.sql`, V2 ... V15; neu cung phien ban thi theo ten file). `schema.sql` khong tu thay the cac migration operations/inventory lich su.
+3. Database dang hoat dong: backup/restore drill truoc, chi chay cac forward migration chua ap dung theo thu tu; khong chay rollback artifact nhu migration thuong.
+   - Truoc V14, doi soat moi `payment_request_id` chi co toi da mot `payment_proofs.status='pending_admin_confirmation'`. V14 se fail-closed neu du lieu cu bi trung de tranh tu dong xoa chung tu tai chinh.
+   - V15 tao `auth_rate_limit_buckets` cho rate limit dang nhap dung chung giua cac instance serverless. Bang chi luu SHA-256 digest, bat RLS va khong co policy truy cap tu browser.
+4. Bat RLS va review policy truoc khi mo production.
+5. Tao user bang Admin flow, khong mo public signup.
+6. Server dung database credential chi o backend/BFF, khong dua xuong client.
+7. Khong bat `ALLOW_DEMO_DATA` hoac `ALLOW_RUNTIME_MIGRATIONS` tren production.
+
+Backend la lop rate limit dang nhap authoritative dung PostgreSQL, nen van chan duoc brute force khi Vercel scale-out hoac cold start. Frontend BFF giu them limiter trong bo nho de cat request som; khong duoc coi limiter BFF la lop bao ve duy nhat.
 
 ### Kiem tra ket noi database
 
@@ -91,16 +112,40 @@ Ket noi PostgreSQL tu xa mac dinh dung `DB_SSL_MODE=require`, bat buoc ma hoa TL
 
 ## Cloudflare R2
 
-1. Tao bucket `pettravel-wholesale`.
-2. Tao R2 API token co quyen bucket toi thieu.
-3. Cau hinh CORS cho domain Vercel, cho `PUT`, `GET`, `HEAD`, header `Content-Type`, va expose `ETag`.
-4. Upload anh/chung tu dung `/api/uploads/presign`, URL het han sau 300 giay.
+1. Tao hai bucket rieng biet: `pettravel-wholesale` cho anh catalog cong khai va `pettravel-wholesale-private` cho minh chung thanh toan/hoa don. Khong bat public access cho bucket private.
+2. Tao R2 API token co quyen toi thieu tren dung hai bucket.
+3. Cau hinh CORS cho domain Vercel, cho `PUT`, `GET`, `HEAD`, header `Content-Type`, `Content-Length`, va expose `ETag`.
+4. Upload dung presigned URL 300 giay. Metadata minh chung chi duoc luu sau khi backend kiem tra object bang `HEAD`; tai xuong can quyen tren don hang va URL private chi ton tai 60 giay.
+5. Neu he thong cu tung luu minh chung trong bucket public, phai copy object sang bucket private, doi soat `HEAD`/checksum, cap nhat `storage_key`, sau do xoa ban public va purge cache truoc khi mo production. Khong chi doi bien moi truong ma bo lai object cu.
+
+### Chuyen anh catalog base64 cu len R2
+
+Code moi chi cho phep luu duong dan noi bo hoac URL HTTPS; `data:`, `blob:`, HTTP va URL co credentials bi tu choi o frontend lan backend. API doc catalog cung loc du lieu legacy khong an toan de tranh tra payload base64 lon.
+
+Luon chay dry-run truoc. Lenh chi doc PostgreSQL va tao manifest khong chua base64/secret:
+
+```powershell
+cd backend
+python .\scripts\migrate_legacy_catalog_images.py
+```
+
+Co the them `--env-file <FILE>` neu file do chua gia tri that; file Vercel da redacted/placeholder se bi tu choi. Neu public R2 URL local dang redacted, dry-run van dem va tinh hash bang domain `.invalid` khong routable; manifest khong luu URL preview nay.
+
+Review `legacyReferenceCount`, object key, SHA-256 va byte length trong `scratch/catalog-image-migration-*.json`. Chi khi da backup DB, xac minh bucket/domain R2 va co cua so van hanh moi apply voi dung count tu dry-run. Cau hinh env luc apply phai chua `R2_PUBLIC_BASE_URL` HTTPS that, hoac truyen `--public-base-url` cong khai:
+
+```powershell
+python .\scripts\migrate_legacy_catalog_images.py `
+  --apply `
+  --expected-legacy-references <COUNT_TU_DRY_RUN>
+```
+
+Apply la idempotent: object co key theo SHA-256, object ton tai phai khop size/MIME/hash, va DB chi cap nhat neu gia tri goc chua thay doi. Script khong xoa object. Neu credential database/R2 tung xuat hien trong source hoac log, phai rotate credential tai nha cung cap va cap nhat Vercel; chi xoa khoi file la chua du.
 
 ## Vercel
 
 1. Tao 2 Vercel project tu cung repo.
 2. Frontend project: root directory `frontend`, install `npm ci`, build `npm run build`.
-3. Backend project: root directory `backend`, Python runtime, build command `python scripts/check_production_env.py`.
+3. Backend project: root directory `backend`, Python runtime cai dependency tu `requirements.txt` da lock hash, build command `python scripts/check_production_env.py`.
 4. Them dung bien trong `docs/vercel-production-env.md` cho `Production` va `Preview`.
 5. Bat "Automatically expose System Environment Variables" neu muon xem `VERCEL_GIT_COMMIT_SHA` tren health endpoint; khong dua secret vao `NEXT_PUBLIC_*`.
 6. Sau khi thay doi env, redeploy de bien moi co tac dung.
@@ -116,7 +161,7 @@ Chay lenh nhieu lan va dung gia tri khac nhau cho `JWT_SECRET`, `BACKEND_INTERNA
 
 ## Checklist thu cong truoc deploy that
 
-1. Supabase SQL Editor: chay `supabase/schema.sql` tren project moi hoac tao migration rieng neu database da co bang.
+1. Supabase SQL Editor: project moi phai chay `supabase/schema.sql` va toan bo `update_*.sql` theo dung thu tu o muc Supabase; database hien huu chi ap dung forward migration chua chay sau khi co backup va schema audit.
 2. Supabase Table Editor: dam bao `roles`, `permissions`, `role_permissions` da co du lieu seed.
 3. Vercel env: them du cac bien trong `docs/vercel-production-env.md`; rieng `JWT_SECRET`, `BACKEND_INTERNAL_SECRET`, `CRON_SECRET`, `DATABASE_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` phai de dang secret/encrypted, khong dua vao client.
 4. Admin bootstrap: dat `ADMIN_BOOTSTRAP_EMAIL`, dat `ADMIN_BOOTSTRAP_TOKEN` random toi thieu 32 ky tu o frontend project, redeploy, sau do goi endpoint bootstrap mot lan:
@@ -138,8 +183,8 @@ Invoke-RestMethod `
 ```
 
 Sau khi login owner thanh cong, xoa `ADMIN_BOOTSTRAP_TOKEN` khoi Vercel env va redeploy.
-5. Cloudflare R2 CORS: cho domain Vercel production/preview duoc `PUT`, `GET`, `HEAD`; allowed headers toi thieu `Content-Type`, `Content-Length`; expose `ETag`.
-6. Verify live: login owner, tao user dai ly, tao san pham co variant, khach chot don, admin bao gia, tao QR, upload chung tu, admin xac nhan coc, gan van don.
+5. Cloudflare R2: bucket catalog co public custom domain; bucket chung tu phai private. CORS cho domain Vercel production/preview duoc `PUT`, `GET`, `HEAD`; allowed headers toi thieu `Content-Type`, `Content-Length`; expose `ETag`.
+6. Verify live: login owner, tao user dai ly, tao san pham co variant, khach chot don, admin bao gia, tao QR, upload chung tu, thu ca nhanh tu choi/tai lai va het han/phat hanh lai, admin xac nhan coc, di qua tung buoc fulfillment, nhap ma van don that, giao hang, thanh toan COD con lai va ghi so.
 7. Sau verify: dat `ALLOW_DEMO_DATA=false`, `ALLOW_RUNTIME_MIGRATIONS=false`, redeploy production.
 
 ## Nghiep vu chinh

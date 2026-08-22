@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
+import { readFileSync } from "node:fs";
 import {
   validateImageFile,
   MAX_PRODUCT_IMAGES,
@@ -56,5 +57,12 @@ describe("Image Upload Validation & Constraints", () => {
     assert.strictEqual(validateImageFile(validJpg).valid, true);
     assert.strictEqual(validateImageFile(validPng).valid, true);
     assert.strictEqual(validateImageFile(validWebp).valid, true);
+  });
+
+  it("never reports a local data URL as a persisted R2 upload", () => {
+    const source = readFileSync(new URL("./image-upload-manager.ts", import.meta.url), "utf8");
+    assert.ok(!source.includes("key: `local_"));
+    assert.ok(!source.includes("readAsDataURL(fileToUpload)"));
+    assert.ok(source.includes("throw new Error(\"Tải ảnh thất bại sau nhiều lần thử.\")"));
   });
 });

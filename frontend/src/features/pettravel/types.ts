@@ -66,3 +66,12 @@ export const ROUTE_TAB_MAP: Record<string, TabKey> = {
   "/admin/promotions": "admin_promotions",
   "/admin/users": "admin_users"
 };
+
+const CUSTOMER_TABS = new Set<TabKey>(["catalog", "cart", "order", "profile"]);
+
+export function resolvePostLoginTab(requested: TabKey | undefined, isAdmin: boolean): TabKey {
+  if (isAdmin) {
+    return requested && (requested.startsWith("admin") || requested === "settings") ? requested : "admin";
+  }
+  return requested && CUSTOMER_TABS.has(requested) ? requested : "catalog";
+}

@@ -6,12 +6,9 @@ from app.core.config import settings
 
 
 PUBLIC_API_PATHS = {
-    "/api/v1/auth/login",
-    "/api/v1/auth/login-json",
     "/api/v1/health",
     "/api/v1/categories",
     "/api/v1/products",
-    "/api/v1/uploads/presign",
     "/api/v1/orders/webhook/vietqr",
 }
 

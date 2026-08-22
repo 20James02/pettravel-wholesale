@@ -9,8 +9,6 @@ const serverEnvSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
   BACKEND_URL: z.string().url().optional(),
   BACKEND_INTERNAL_SECRET: z.string().min(32).optional(),
-  PAYMENT_QR_ACCOUNT_NO: z.string().optional(),
-  PAYMENT_QR_ACCOUNT_NAME: z.string().optional(),
   ADMIN_BOOTSTRAP_EMAIL: z.string().email().optional(),
   ADMIN_BOOTSTRAP_TOKEN: z.string().min(32).optional(),
   JWT_SECRET: z.string().min(32).optional(),
