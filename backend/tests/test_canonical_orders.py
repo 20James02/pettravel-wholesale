@@ -63,6 +63,18 @@ async def test_create_order_uses_server_catalog_snapshot_and_generated_number(ca
     )
     await canonical_db_session.commit()
 
+    with pytest.raises(ValueError, match="SUPPLIER_REQUIRED"):
+        await save_order(
+            canonical_db_session,
+            actor_id="user_1",
+            order={
+                "id": "order_missing_supplier",
+                "paymentIntent": "deposit_cod",
+                "items": [{"variantSku": "SKU-1", "quantity": 2}],
+            },
+        )
+    await canonical_db_session.rollback()
+
     with pytest.raises(ValueError, match="không đáp ứng MOQ"):
         await save_order(
             canonical_db_session,

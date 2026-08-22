@@ -32,6 +32,11 @@ import {
 import type { CustomerOrder, FulfillmentStatus, Shipment, Supplier, Product, OrderItem, PermissionKey } from "@/lib/domain";
 import type { ApiUser } from "../../types";
 import { formatVnd } from "@/lib/money";
+import {
+  MAX_ORDER_ITEM_QUANTITY,
+  addOrMergeAdminOrderItem,
+  removeAdminOrderItem
+} from "@/lib/order-admin-items";
 import { OrderRevisionHistoryModal } from "../shared/OrderRevisionHistoryModal";
 
 interface AdminOrdersProps {
@@ -65,6 +70,7 @@ interface AdminOrdersProps {
   setWorkingOrder: (order: CustomerOrder) => void;
   syncOrder?: (order: CustomerOrder) => Promise<boolean>;
   handleAdminQtyChange: (itemId: string, qty: number) => void;
+  handleAdminItemsChange: (items: OrderItem[]) => void;
   handlePublishQuote: (customNote?: string) => Promise<boolean>;
   confirmDeposit: () => void;
   rejectPaymentProof: () => void;
@@ -92,11 +98,13 @@ export function AdminOrders({
   isManagerApproved,
   setIsManagerApproved,
   isOrderModified,
+  isOrderFrozen,
   requiresManagerApproval,
   selectOrder,
   setWorkingOrder,
   syncOrder,
   handleAdminQtyChange,
+  handleAdminItemsChange,
   handlePublishQuote,
   confirmDeposit,
   rejectPaymentProof,
@@ -298,7 +306,7 @@ export function AdminOrders({
       !["super_admin", "admin_manager"].includes(currentUser?.role ?? "")
     );
   }, [activeOrder.id, activeOrder.assignedStaffId, currentUser]);
-  const quoteEditingDisabled = Boolean(isQuoteLockedByOther) || !canQuote;
+  const quoteEditingDisabled = isOrderFrozen || Boolean(isQuoteLockedByOther) || !canQuote;
   const adjustmentEditingDisabled = quoteEditingDisabled || !canAdjustQuote;
 
   // Financial totals
@@ -319,6 +327,7 @@ export function AdminOrders({
 
   // Add Item to Order Handler
   const handleAddItemToOrder = () => {
+    if (quoteEditingDisabled) return;
     const prod = allProducts.find((p) => p.id === selectedProductId);
     if (!prod) {
       alert("Vui lòng chọn sản phẩm!");
@@ -330,36 +339,32 @@ export function AdminOrders({
       return;
     }
 
-    const newItem: OrderItem = {
-      id: `item_${Date.now()}`,
-      productCode: prod.code,
-      productName: prod.name,
-      variantSku: variant.sku,
-      variantLabel: variant.label,
-      variantImage: variant.imageUrl || prod.imageUrl || "/product-food.svg",
-      unitPriceSnapshot: variant.wholesalePrice || 100000,
-      quantity: addItemQty,
-      supplierId: variant.supplierId || "sup_pettravel"
-    };
-
-    const updatedItems = [...(activeOrder.items || []), newItem];
-    setWorkingOrder({
-      ...activeOrder,
-      items: updatedItems
-    });
-
-    setIsAddItemModalOpen(false);
-    showToast(`Đã thêm ${addItemQty} × ${variant.label} vào đơn hàng!`);
+    try {
+      const updatedItems = addOrMergeAdminOrderItem(
+        activeOrder.items || [],
+        prod,
+        variant,
+        addItemQty,
+        `item_${crypto.randomUUID()}`
+      );
+      handleAdminItemsChange(updatedItems);
+      setIsAddItemModalOpen(false);
+      showToast(`Đã thêm ${addItemQty} × ${variant.label} vào đơn hàng!`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Không thể thêm sản phẩm vào đơn hàng.");
+    }
   };
 
   // Remove Item from Order Handler
   const handleRemoveItemFromOrder = (itemId: string) => {
-    const updatedItems = (activeOrder.items || []).filter((i) => i.id !== itemId);
-    setWorkingOrder({
-      ...activeOrder,
-      items: updatedItems
-    });
-    showToast("Đã xóa sản phẩm khỏi đơn hàng!");
+    if (quoteEditingDisabled) return;
+    try {
+      const updatedItems = removeAdminOrderItem(activeOrder.items || [], itemId);
+      handleAdminItemsChange(updatedItems);
+      showToast("Đã xóa sản phẩm khỏi đơn hàng!");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Không thể xóa sản phẩm khỏi đơn hàng.");
+    }
   };
 
   // Publish Quote with Customer Note
@@ -830,9 +835,10 @@ export function AdminOrders({
                               <td className="py-3 px-3 text-center">
                                 <button
                                   type="button"
-                                  className="w-7 h-7 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center cursor-pointer transition"
-                                  title="Xóa sản phẩm"
+                                  className="w-7 h-7 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center cursor-pointer transition disabled:cursor-not-allowed disabled:opacity-30"
+                                  title={activeOrder.items.length <= 1 ? "Đơn hàng phải còn ít nhất một sản phẩm." : "Xóa sản phẩm"}
                                   onClick={() => handleRemoveItemFromOrder(item.id)}
+                                  disabled={quoteEditingDisabled || activeOrder.items.length <= 1}
                                 >
                                   <Trash2 size={13} />
                                 </button>
@@ -1279,9 +1285,17 @@ export function AdminOrders({
                 <input
                   type="number"
                   min="1"
+                  max={MAX_ORDER_ITEM_QUANTITY}
                   className="w-full mt-1 bg-[#1c223c] border border-[#2c365c] rounded-xl py-2 px-3 text-white text-xs font-mono"
                   value={addItemQty}
-                  onChange={(e) => setAddItemQty(Math.max(1, Number(e.target.value) || 1))}
+                  onChange={(e) => {
+                    const nextQuantity = Number(e.target.value);
+                    setAddItemQty(
+                      Number.isSafeInteger(nextQuantity)
+                        ? Math.max(1, Math.min(MAX_ORDER_ITEM_QUANTITY, nextQuantity))
+                        : 1
+                    );
+                  }}
                 />
               </div>
             </div>
@@ -1296,8 +1310,9 @@ export function AdminOrders({
               </button>
               <button
                 type="button"
-                className="admin-pill-btn-primary py-2 px-5 text-xs cursor-pointer"
+                className="admin-pill-btn-primary py-2 px-5 text-xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={handleAddItemToOrder}
+                disabled={quoteEditingDisabled}
               >
                 Thêm vào đơn hàng
               </button>

@@ -291,7 +291,10 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     if (workingOrder.assignedStaffId && !isOwner && !isSuperAdmin) {
       return true; // Frozen if locked by another operator
     }
-    return ["locked", "completed"].includes(workingOrder.commercialStatus);
+    return (
+      ["customer_accepted", "locked", "cancelled"].includes(workingOrder.commercialStatus) ||
+      workingOrder.items.some((item) => item.locked === true)
+    );
   }, [workingOrder, currentUser]);
 
   const requiresManagerApproval = useMemo(() => {
@@ -953,11 +956,23 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     setIsOrderModified(true);
   }
 
+  function handleAdminItemsChange(nextItems: OrderItem[]) {
+    if (isOrderFrozen) return;
+    const clonedItems = nextItems.map((item) => ({ ...item }));
+    setAdminOrderItems(clonedItems);
+    setWorkingOrder((prev) => ({ ...prev, items: clonedItems }));
+    setIsOrderModified(true);
+  }
+
   // Publish quote to customer for acceptance
   async function handlePublishQuote(customNote?: string): Promise<boolean> {
     if (!workingOrder?.id) return false;
     try {
-      const itemsToQuote = adminOrderItems.length > 0 ? adminOrderItems : (workingOrder.items || []);
+      const itemsToQuote = adminOrderItems.map((item) => ({ ...item }));
+      if (itemsToQuote.length === 0) {
+        alert("Đơn hàng phải có ít nhất một sản phẩm trước khi phát hành báo giá.");
+        return false;
+      }
       const subtotal = itemsToQuote.reduce((sum, item) => sum + item.quantity * item.unitPriceSnapshot, 0);
       const adjustments = [];
       if (adminDiscount > 0) {
@@ -1275,7 +1290,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     productName: string,
     variantLabel: string,
     price: number,
-    supplierId: string,
+    supplierId: string | undefined,
     qty: number = 1,
     variantImage?: string
   ) {
@@ -1311,7 +1326,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       selectedProduct.name,
       activeVariant.label,
       activeVariant.wholesalePrice ?? 0,
-      activeVariant.supplierId || "sup_pettravel",
+      activeVariant.supplierId,
       modalQty,
       variantImage
     );
@@ -1430,8 +1445,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     paymentPanel.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  async function handleCustomerRequestChange(reason: string) {
-    if (!workingOrder?.id) return;
+  async function handleCustomerRequestChange(reason: string): Promise<boolean> {
+    if (!workingOrder?.id) return false;
     const updatedOrder: CustomerOrder = {
       ...workingOrder,
       commercialStatus: "admin_review",
@@ -1449,8 +1464,11 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       updatedAt: new Date().toISOString()
     };
 
-    await syncOrder(updatedOrder);
-    alert("Đã gửi yêu cầu điều chỉnh thành công! Nhân viên Pet Travel sẽ kiểm tra và xuất lại báo giá mới.");
+    const saved = await syncOrder(updatedOrder);
+    if (saved) {
+      alert("Đã gửi yêu cầu điều chỉnh thành công! Nhân viên Pet Travel sẽ kiểm tra và xuất lại báo giá mới.");
+    }
+    return saved;
   }
 
   async function handleUpdateRecipientInfo(info: {
@@ -1459,8 +1477,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     recipientAddress: string;
     customerTaxCode: string;
     customerNote: string;
-  }) {
-    if (!workingOrder?.id) return;
+  }): Promise<boolean> {
+    if (!workingOrder?.id) return false;
     const updatedOrder: CustomerOrder = {
       ...workingOrder,
       recipientName: info.recipientName,
@@ -1490,6 +1508,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       setCustomerNote(info.customerNote);
       alert("Đã cập nhật thông tin giao nhận thành công!");
     }
+    return ok;
   }
 
   async function handleConfirmCheckout() {
@@ -1540,84 +1559,92 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     if (accepted) setShowCheckoutModal(false);
   }
 
-  async function uploadPaymentProof(file: File) {
-    if (!workingOrder?.id) return;
+  async function uploadPaymentProof(file: File): Promise<boolean> {
+    if (!workingOrder?.id) return false;
     const request = [...workingOrder.paymentRequests]
       .reverse()
       .find((item) => item.status === "active" && new Date(item.expiresAt).getTime() > Date.now());
     if (!request) {
       alert("Không tìm thấy yêu cầu thanh toán đang hoạt động.");
-      return;
+      return false;
     }
 
     const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
     if (!allowedTypes.has(file.type) || file.size <= 0 || file.size > 10 * 1024 * 1024) {
       alert("Chỉ chấp nhận JPG, PNG, WebP hoặc PDF không quá 10MB.");
-      return;
+      return false;
     }
 
-    const presignResponse = await fetch("/api/uploads/presign", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        orderId: workingOrder.id,
-        fileName: file.name,
-        contentType: file.type,
-        fileSizeBytes: file.size,
-        purpose: "payment-proof"
-      })
-    });
-    if (!presignResponse.ok) {
-      alert("Không thể chuẩn bị vùng lưu minh chứng.");
-      return;
-    }
-    const upload = (await presignResponse.json()) as { key: string; uploadUrl: string };
-    const uploadResponse = await fetch(upload.uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Type": file.type },
-      body: file
-    });
-    if (!uploadResponse.ok) {
-      alert("Tải minh chứng lên thất bại. Vui lòng thử lại.");
-      return;
-    }
-
-    const nextStatus = request.purpose === "deposit" ? "deposit_uploaded" : "full_uploaded";
-
-    const updatedOrder: CustomerOrder = {
-      ...workingOrder,
-      paymentStatus: nextStatus,
-      paymentRequests: workingOrder.paymentRequests.map((item) =>
-        item.id === request.id ? { ...item, status: "uploaded" as const } : item
-      ),
-      paymentProofs: [
-        {
-          id: `proof_${crypto.randomUUID()}`,
-          paymentRequestId: request.id,
+    try {
+      const presignResponse = await fetch("/api/uploads/presign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: workingOrder.id,
           fileName: file.name,
-          storageKey: upload.key,
           contentType: file.type,
           fileSizeBytes: file.size,
-          uploadedAt: new Date().toISOString(),
-          status: "pending_admin_confirmation" as const
-        },
-        ...workingOrder.paymentProofs
-      ],
-      comments: [
-        {
-          id: `c_proof_${Date.now()}`,
-          author: workingOrder.customerName,
-          audience: "customer_visible",
-          message: "Đại lý đã tải minh chứng chuyển khoản. Kế toán đang chờ đối soát.",
-          createdAt: new Date().toISOString()
-        },
-        ...workingOrder.comments
-      ],
-      updatedAt: new Date().toISOString()
-    };
+          purpose: "payment-proof"
+        })
+      });
+      if (!presignResponse.ok) {
+        alert("Không thể chuẩn bị vùng lưu minh chứng.");
+        return false;
+      }
+      const upload = (await presignResponse.json()) as { key: string; uploadUrl: string };
+      const uploadResponse = await fetch(upload.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file
+      });
+      if (!uploadResponse.ok) {
+        alert("Tải minh chứng lên thất bại. Vui lòng thử lại.");
+        return false;
+      }
 
-    await syncOrder(updatedOrder);
-    alert("Đã tải minh chứng chuyển khoản. Kế toán sẽ đối soát trước khi xác nhận.");
+      const nextStatus = request.purpose === "deposit" ? "deposit_uploaded" : "full_uploaded";
+
+      const updatedOrder: CustomerOrder = {
+        ...workingOrder,
+        paymentStatus: nextStatus,
+        paymentRequests: workingOrder.paymentRequests.map((item) =>
+          item.id === request.id ? { ...item, status: "uploaded" as const } : item
+        ),
+        paymentProofs: [
+          {
+            id: `proof_${crypto.randomUUID()}`,
+            paymentRequestId: request.id,
+            fileName: file.name,
+            storageKey: upload.key,
+            contentType: file.type,
+            fileSizeBytes: file.size,
+            uploadedAt: new Date().toISOString(),
+            status: "pending_admin_confirmation" as const
+          },
+          ...workingOrder.paymentProofs
+        ],
+        comments: [
+          {
+            id: `c_proof_${Date.now()}`,
+            author: workingOrder.customerName,
+            audience: "customer_visible",
+            message: "Đại lý đã tải minh chứng chuyển khoản. Kế toán đang chờ đối soát.",
+            createdAt: new Date().toISOString()
+          },
+          ...workingOrder.comments
+        ],
+        updatedAt: new Date().toISOString()
+      };
+
+      const saved = await syncOrder(updatedOrder);
+      if (saved) {
+        alert("Đã tải minh chứng chuyển khoản. Kế toán sẽ đối soát trước khi xác nhận.");
+      }
+      return saved;
+    } catch {
+      alert("Không thể tải minh chứng. Vui lòng kiểm tra kết nối và thử lại.");
+      return false;
+    }
   }
 
   // Chat message creation
@@ -1972,6 +1999,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
             setWorkingOrder={setWorkingOrder}
             syncOrder={syncOrder}
             handleAdminQtyChange={handleAdminQtyChange}
+            handleAdminItemsChange={handleAdminItemsChange}
             handlePublishQuote={handlePublishQuote}
             confirmDeposit={confirmDeposit}
             rejectPaymentProof={rejectPaymentProof}

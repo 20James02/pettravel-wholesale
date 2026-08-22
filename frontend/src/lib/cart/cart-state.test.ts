@@ -30,6 +30,10 @@ describe("customer cart persistence", () => {
     ]);
 
     assert.deepEqual(restoreCartItems(validCart), JSON.parse(validCart));
+    const customerSafeCart = JSON.stringify([
+      { ...JSON.parse(validCart)[0], supplierId: undefined }
+    ]);
+    assert.deepEqual(restoreCartItems(customerSafeCart), JSON.parse(customerSafeCart));
     assert.deepEqual(restoreCartItems("not-json"), []);
     assert.deepEqual(restoreCartItems(JSON.stringify([{ variantSku: "P-001-CAM", quantity: -1 }])), []);
   });

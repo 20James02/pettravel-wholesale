@@ -16,7 +16,6 @@ class GuestVariantDTO(BaseModel):
 class CustomerVariantDTO(GuestVariantDTO):
     wholesalePrice: int = Field(..., ge=0)
     minOrderQty: int = Field(1, ge=1)
-    supplierId: str = "sup_pettravel"
 
 
 class AdminVariantDTO(CustomerVariantDTO):

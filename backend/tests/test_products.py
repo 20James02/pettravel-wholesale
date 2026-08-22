@@ -52,7 +52,7 @@ async def test_catalog_reads_canonical_products_variants_and_supplier_offers(can
             "imageUrl": "/blue.webp",
         }
     ]
-    assert customer[0]["variants"][0]["supplierId"] == "sup_pettravel"
+    assert "supplierId" not in customer[0]["variants"][0]
     assert guest[0]["variants"] == [
         {
             "id": "var_1",

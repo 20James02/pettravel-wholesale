@@ -8,14 +8,20 @@ export function normalizeOrderQuoteFinancials(order: CustomerOrder, policy: Admi
     ...order,
     quoteVersions: order.quoteVersions.map((quote) => {
       const snapshot = calculateFinancialSnapshot({
-        lines: order.items.map((item) => ({
-          id: item.id,
-          productCode: item.productCode,
-          variantSku: item.variantSku,
-          supplierId: item.supplierId,
-          quantity: item.quantity,
-          unitPriceVnd: item.unitPriceSnapshot
-        })),
+        lines: order.items.map((item) => {
+          const supplierId = item.supplierId?.trim();
+          if (!supplierId) {
+            throw new Error(`Dòng hàng ${item.variantSku} chưa có nhà cung cấp hợp lệ.`);
+          }
+          return {
+            id: item.id,
+            productCode: item.productCode,
+            variantSku: item.variantSku,
+            supplierId,
+            quantity: item.quantity,
+            unitPriceVnd: item.unitPriceSnapshot
+          };
+        }),
         adjustments: quote.adjustments.map((adjustment) => ({
           id: adjustment.id,
           type: adjustment.type,

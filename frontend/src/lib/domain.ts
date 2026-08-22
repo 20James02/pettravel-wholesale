@@ -128,7 +128,8 @@ export interface OrderItem {
   variantImage?: string;
   quantity: number;
   unitPriceSnapshot: number;
-  supplierId: string;
+  supplierId?: string;
+  locked?: boolean;
 }
 
 export interface QuoteAdjustment {
@@ -177,11 +178,11 @@ export interface PaymentProof {
 
 export interface FulfillmentGroup {
   id: string;
-  supplierId: string;
-  supplierName: string;
+  supplierId?: string;
+  supplierName?: string;
   status: FulfillmentStatus;
   itemIds: string[];
-  internalNote: string;
+  internalNote?: string;
 }
 
 export interface Shipment {

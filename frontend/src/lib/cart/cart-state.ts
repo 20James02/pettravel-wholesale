@@ -30,7 +30,7 @@ function isCartItem(value: unknown): value is OrderItem {
     typeof item.unitPriceSnapshot === "number" &&
     Number.isFinite(item.unitPriceSnapshot) &&
     item.unitPriceSnapshot >= 0 &&
-    isNonEmptyString(item.supplierId) &&
+    (item.supplierId === undefined || isNonEmptyString(item.supplierId)) &&
     (item.variantImage === undefined || typeof item.variantImage === "string")
   );
 }

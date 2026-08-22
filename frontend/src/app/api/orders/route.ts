@@ -47,7 +47,7 @@ const adminOrderItemSchema = z.object({
   variantImage: z.string().trim().nullish(),
   quantity: z.number().int("Số lượng phải là số nguyên.").positive("Số lượng phải lớn hơn 0.").max(10_000),
   unitPriceSnapshot: z.number().int().nonnegative("Đơn giá phải là số không âm."),
-  supplierId: z.string().nullish()
+  supplierId: z.string().trim().min(1, "Nhà cung cấp không hợp lệ.")
 });
 
 const adminQuoteAdjustmentSchema = z.object({
@@ -113,6 +113,14 @@ async function buildCustomerItems(
     if (!product || !variant) {
       throw new Error(`SKU không hợp lệ hoặc không khả dụng: ${item.variantSku}`);
     }
+    const wholesalePrice = variant.wholesalePrice;
+    const supplierId = variant.supplierId?.trim();
+    if (!Number.isSafeInteger(wholesalePrice) || (wholesalePrice ?? -1) < 0) {
+      throw new Error(`SKU chưa có giá sỉ hợp lệ: ${item.variantSku}`);
+    }
+    if (!supplierId) {
+      throw new Error(`SKU chưa được gắn nhà cung cấp: ${item.variantSku}`);
+    }
 
     return {
       id: `oi_${Date.now()}_${index}`,
@@ -122,8 +130,8 @@ async function buildCustomerItems(
       variantLabel: variant.label,
       variantImage: variant.imageUrl || product.imageUrl || "/product-food.svg",
       quantity: item.quantity,
-      unitPriceSnapshot: variant.wholesalePrice ?? 0,
-      supplierId: variant.supplierId || "sup_pettravel"
+      unitPriceSnapshot: wholesalePrice as number,
+      supplierId
     };
   });
 }
@@ -131,16 +139,10 @@ async function buildCustomerItems(
 function sanitizeOrderForCustomer(order: CustomerOrder): CustomerOrder {
   return {
     ...order,
-    items: order.items.map((item) => ({
-      ...item,
-      supplierId: "sup_pettravel"
-    })),
-    fulfillmentGroups: order.fulfillmentGroups.map((group) => ({
-      ...group,
-      supplierId: "sup_pettravel",
-      supplierName: "Pet Travel",
-      internalNote: ""
-    })),
+    items: order.items.map(({ supplierId: _supplierId, ...item }) => item),
+    fulfillmentGroups: order.fulfillmentGroups.map(
+      ({ supplierId: _supplierId, supplierName: _supplierName, internalNote: _internalNote, ...group }) => group
+    ),
     comments: order.comments.filter((c) => c.audience !== "internal")
   };
 }

@@ -149,7 +149,11 @@ async def save_order(
 
     for index, item in enumerate(items):
         sku = str(item.get("variantSku") or "")
-        supplier_id = str(item.get("supplierId") or "")
+        supplier_id = str(item.get("supplierId") or "").strip()
+        if not supplier_id:
+            raise ValueError(
+                f"SUPPLIER_REQUIRED: Phân loại {sku or index + 1} chưa có nhà cung cấp hợp lệ."
+            )
         quantity = int(item.get("quantity") or 0)
         catalog = (
             await db.execute(
@@ -767,7 +771,11 @@ async def _update_order(
         for index, item in enumerate(incoming_items):
             item_id = str(item.get("id") or f"item_{uuid.uuid4().hex}_{index}")
             sku = str(item.get("variantSku") or item.get("sku") or "")
-            supplier_id = str(item.get("supplierId") or item.get("supplier_id") or "sup_pettravel")
+            supplier_id = str(item.get("supplierId") or item.get("supplier_id") or "").strip()
+            if not supplier_id:
+                raise ValueError(
+                    f"SUPPLIER_REQUIRED: Phân loại {sku or index + 1} chưa có nhà cung cấp hợp lệ."
+                )
             quantity = int(item.get("quantity") or 1)
 
             # Authoritative pricing lookup (Fail-closed, no fallback to client unitPriceSnapshot)

@@ -168,11 +168,11 @@ async def list_products(db: AsyncSession, role: str) -> list[dict[str, Any]]:
         if role == "admin":
             variant_dict["wholesalePrice"] = int(row["wholesale_price"] or 0)
             variant_dict["minOrderQty"] = int(row["min_order_qty"] or 1)
-            variant_dict["supplierId"] = str(row["supplier_id"]) if row["supplier_id"] else "sup_pettravel"
+            if row["supplier_id"]:
+                variant_dict["supplierId"] = str(row["supplier_id"])
         elif role == "customer":
             variant_dict["wholesalePrice"] = int(row["wholesale_price"] or 0)
             variant_dict["minOrderQty"] = int(row["min_order_qty"] or 1)
-            variant_dict["supplierId"] = "sup_pettravel"
         # For role == 'guest', wholesalePrice, minOrderQty, and supplierId are strictly omitted.
 
         product["variants"].append(variant_dict)

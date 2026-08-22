@@ -16,16 +16,12 @@ function sanitizeProductsForResponse(products: Product[], role: "guest" | "custo
   return products.map((product) => ({
     ...product,
     variants: product.variants.map((variant) => {
+      const copy = { ...variant };
+      delete copy.supplierId;
       if (role === "guest") {
-        const copy = { ...variant };
         delete copy.wholesalePrice;
-        delete copy.supplierId;
-        return copy;
       }
-      return {
-        ...variant,
-        supplierId: "sup_pettravel"
-      };
+      return copy;
     })
   }));
 }

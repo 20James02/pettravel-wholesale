@@ -356,7 +356,7 @@ export function AdminInventory({
         wholesalePrice: Number(v.wholesalePrice) || 0,
         minOrderQty: Number(v.minOrderQty) || 1,
         stock: Number(v.stock) || 0,
-        supplierId: formProductSupplier || v.supplierId || suppliers[0]?.id || "sup_pettravel"
+        supplierId: formProductSupplier || v.supplierId || suppliers[0]?.id || ""
       }))
     };
 
@@ -592,20 +592,11 @@ export function AdminInventory({
                     {
                       id: `v_${Date.now()}_1`,
                       sku: "",
-                      label: "Túi 1.5kg",
-                      wholesalePrice: 150000,
-                      minOrderQty: 10,
-                      stock: 100,
-                      supplierId: suppliers[0]?.id || "sup_pettravel"
-                    },
-                    {
-                      id: `v_${Date.now()}_2`,
-                      sku: "",
-                      label: "Túi 5kg",
-                      wholesalePrice: 420000,
-                      minOrderQty: 5,
-                      stock: 50,
-                      supplierId: suppliers[0]?.id || "sup_pettravel"
+                      label: "",
+                      wholesalePrice: 0,
+                      minOrderQty: 1,
+                      stock: 0,
+                      supplierId: suppliers[0]?.id || ""
                     }
                   ])
                 );
@@ -1613,11 +1604,11 @@ export function AdminInventory({
                         {
                           id: `v_${Date.now()}_${prev.length + 1}`,
                           sku: "",
-                          label: "Phân loại mới",
-                          wholesalePrice: 100000,
-                          minOrderQty: 10,
-                          stock: 10,
-                          supplierId: formProductSupplier || suppliers[0]?.id || "sup_pettravel"
+                          label: "",
+                          wholesalePrice: 0,
+                          minOrderQty: 1,
+                          stock: 0,
+                          supplierId: formProductSupplier || suppliers[0]?.id || ""
                         }
                       ])
                     );

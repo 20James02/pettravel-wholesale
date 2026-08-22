@@ -34,4 +34,17 @@ describe("two-way quote confirmation pending states", () => {
     assert.ok(orderTimelineSource.includes("animate-spin"));
     assert.ok(appSource.includes("async function handleCustomerAcceptQuote(): Promise<boolean>"));
   });
+
+  it("keeps customer updates and payment proof uploads pending until persistence succeeds", () => {
+    assert.ok(orderTimelineSource.includes("onUploadProof: (file: File) => Promise<boolean>"));
+    assert.ok(orderTimelineSource.includes("const [isUploadingProof, setIsUploadingProof]"));
+    assert.ok(orderTimelineSource.includes("Đang tải và xác nhận minh chứng..."));
+    assert.ok(orderTimelineSource.includes("onRequestOrderChange?: (reason: string) => Promise<boolean>"));
+    assert.ok(orderTimelineSource.includes("const [isRequestingChange, setIsRequestingChange]"));
+    assert.ok(orderTimelineSource.includes("Đang gửi yêu cầu..."));
+    assert.ok(orderTimelineSource.includes("const saved = await onUpdateRecipientInfo"));
+    assert.ok(orderTimelineSource.includes("if (saved) setIsEditRecipientOpen(false)"));
+    assert.ok(appSource.includes("async function handleCustomerRequestChange(reason: string): Promise<boolean>"));
+    assert.ok(appSource.includes("async function uploadPaymentProof(file: File): Promise<boolean>"));
+  });
 });

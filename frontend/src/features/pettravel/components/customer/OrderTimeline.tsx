@@ -32,16 +32,16 @@ interface OrderTimelineProps {
   workingOrder: CustomerOrder;
   allProducts?: Product[];
   onPayNowClick: () => void;
-  onUploadProof: (file: File) => void;
+  onUploadProof: (file: File) => Promise<boolean>;
   onAcceptQuote?: () => Promise<boolean>;
-  onRequestOrderChange?: (reason: string) => void;
+  onRequestOrderChange?: (reason: string) => Promise<boolean>;
   onUpdateRecipientInfo?: (info: {
     recipientName: string;
     recipientPhone: string;
     recipientAddress: string;
     customerTaxCode: string;
     customerNote: string;
-  }) => Promise<void>;
+  }) => Promise<boolean>;
 }
 
 export function OrderTimeline({
@@ -58,6 +58,7 @@ export function OrderTimeline({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [isAcceptingQuote, setIsAcceptingQuote] = useState<boolean>(false);
+  const [isUploadingProof, setIsUploadingProof] = useState<boolean>(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
@@ -91,14 +92,19 @@ export function OrderTimeline({
   // Modal request change state
   const [isRequestChangeOpen, setIsRequestChangeOpen] = useState(false);
   const [changeReason, setChangeReason] = useState("");
+  const [isRequestingChange, setIsRequestingChange] = useState(false);
 
   // Modal order revision history state
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
 
-  const copyToClipboard = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedKey(key);
-    setTimeout(() => setCopiedKey(null), 2000);
+  const copyToClipboard = async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2000);
+    } catch {
+      alert("Không thể sao chép tự động. Vui lòng sao chép thủ công.");
+    }
   };
 
   // Lấy bản báo giá mới nhất của đơn hàng
@@ -175,15 +181,15 @@ export function OrderTimeline({
     setIsSavingRecipient(true);
     try {
       if (onUpdateRecipientInfo) {
-        await onUpdateRecipientInfo({
+        const saved = await onUpdateRecipientInfo({
           recipientName: editName.trim(),
           recipientPhone: editPhone.trim(),
           recipientAddress: editAddress.trim(),
           customerTaxCode: editTaxCode.trim(),
           customerNote: editNote.trim()
         });
+        if (saved) setIsEditRecipientOpen(false);
       }
-      setIsEditRecipientOpen(false);
     } catch {
       alert("Không thể lưu thông tin nhận hàng. Vui lòng thử lại.");
     } finally {
@@ -191,16 +197,32 @@ export function OrderTimeline({
     }
   };
 
-  const handleSendChangeRequest = () => {
+  const handleSendChangeRequest = async () => {
     if (!changeReason.trim()) {
       alert("Vui lòng nhập nội dung hoặc lý do bạn cần điều chỉnh đơn sỉ.");
       return;
     }
-    if (onRequestOrderChange) {
-      onRequestOrderChange(changeReason.trim());
+    if (!onRequestOrderChange || isRequestingChange) return;
+    setIsRequestingChange(true);
+    try {
+      const sent = await onRequestOrderChange(changeReason.trim());
+      if (sent) {
+        setIsRequestChangeOpen(false);
+        setChangeReason("");
+      }
+    } finally {
+      setIsRequestingChange(false);
     }
-    setIsRequestChangeOpen(false);
-    setChangeReason("");
+  };
+
+  const handleUploadProof = async (file: File) => {
+    if (isUploadingProof) return;
+    setIsUploadingProof(true);
+    try {
+      await onUploadProof(file);
+    } finally {
+      setIsUploadingProof(false);
+    }
   };
 
   const canEditShipping = !["customer_accepted", "locked", "cancelled"].includes(workingOrder.commercialStatus)
@@ -597,16 +619,20 @@ export function OrderTimeline({
                 {/* Nút gửi ảnh xác nhận chuyển khoản hỗ trợ mở camera trực tiếp */}
                 {activeReq.status === "active" && (
                   <label
-                    className="tab-button text-xs py-3 w-full justify-center bg-orange-500 text-white border-orange-600 hover:bg-orange-600 cursor-pointer font-bold rounded-2xl mt-1 flex items-center gap-2 shadow-md"
+                    className={`tab-button text-xs py-3 w-full justify-center bg-orange-500 text-white border-orange-600 font-bold rounded-2xl mt-1 flex items-center gap-2 shadow-md ${isUploadingProof ? "cursor-wait opacity-70" : "hover:bg-orange-600 cursor-pointer"}`}
+                    aria-disabled={isUploadingProof}
+                    aria-busy={isUploadingProof}
                   >
-                    <Camera size={16} /> Tải ảnh, PDF / Chụp minh chứng chuyển khoản
+                    {isUploadingProof ? <LoaderCircle size={16} className="animate-spin" /> : <Camera size={16} />}
+                    {isUploadingProof ? "Đang tải và xác nhận minh chứng..." : "Tải ảnh, PDF / Chụp minh chứng chuyển khoản"}
                     <input
                       type="file"
                       accept="image/jpeg,image/png,image/webp,application/pdf"
                       className="sr-only"
+                      disabled={isUploadingProof}
                       onChange={(event) => {
                         const file = event.target.files?.[0];
-                        if (file) onUploadProof(file);
+                        if (file) void handleUploadProof(file);
                         event.currentTarget.value = "";
                       }}
                     />
@@ -666,7 +692,9 @@ export function OrderTimeline({
       {/* Modal Chỉnh Sửa Thông Tin Nhận Hàng */}
       <Modal
         isOpen={isEditRecipientOpen}
-        onClose={() => setIsEditRecipientOpen(false)}
+        onClose={() => {
+          if (!isSavingRecipient) setIsEditRecipientOpen(false);
+        }}
         title="Chỉnh sửa thông tin giao nhận & Xuất HĐ"
       >
         <div className="flex flex-col gap-3.5 text-xs">
@@ -739,8 +767,9 @@ export function OrderTimeline({
               className="primary-button text-xs py-2.5 px-5 font-bold bg-orange-500 text-white rounded-xl cursor-pointer flex items-center gap-1.5 shadow-md disabled:opacity-50"
               onClick={handleSaveRecipient}
               disabled={isSavingRecipient}
+              aria-busy={isSavingRecipient}
             >
-              <Check size={14} />
+              {isSavingRecipient ? <LoaderCircle size={14} className="animate-spin" /> : <Check size={14} />}
               <span>{isSavingRecipient ? "Đang lưu..." : "Lưu thay đổi"}</span>
             </button>
           </div>
@@ -750,7 +779,9 @@ export function OrderTimeline({
       {/* Modal Yêu Cầu Sửa Đơn Sỉ Cho Khách */}
       <Modal
         isOpen={isRequestChangeOpen}
-        onClose={() => setIsRequestChangeOpen(false)}
+        onClose={() => {
+          if (!isRequestingChange) setIsRequestChangeOpen(false);
+        }}
         title="Yêu cầu điều chỉnh đơn hàng sỉ"
       >
         <div className="flex flex-col gap-3.5 text-xs">
@@ -774,16 +805,19 @@ export function OrderTimeline({
               type="button"
               className="tab-button text-xs py-2.5 px-4 cursor-pointer font-bold rounded-xl"
               onClick={() => setIsRequestChangeOpen(false)}
+              disabled={isRequestingChange}
             >
               Đóng
             </button>
             <button
               type="button"
-              className="primary-button text-xs py-2.5 px-5 font-bold bg-amber-500 hover:bg-amber-600 text-white rounded-xl cursor-pointer flex items-center gap-1.5 shadow-md"
+              className="primary-button text-xs py-2.5 px-5 font-bold bg-amber-500 hover:bg-amber-600 text-white rounded-xl cursor-pointer flex items-center gap-1.5 shadow-md disabled:cursor-wait disabled:opacity-60"
               onClick={handleSendChangeRequest}
+              disabled={isRequestingChange}
+              aria-busy={isRequestingChange}
             >
-              <RotateCcw size={14} />
-              <span>Gửi yêu cầu điều chỉnh</span>
+              {isRequestingChange ? <LoaderCircle size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+              <span>{isRequestingChange ? "Đang gửi yêu cầu..." : "Gửi yêu cầu điều chỉnh"}</span>
             </button>
           </div>
         </div>
