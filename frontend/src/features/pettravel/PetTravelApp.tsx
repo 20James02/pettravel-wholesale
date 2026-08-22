@@ -1648,8 +1648,8 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   }
 
   // Chat message creation
-  async function addComment(audience: "customer_visible" | "internal", message: string) {
-    if (!workingOrder?.id || !message.trim()) return;
+  async function addComment(audience: "customer_visible" | "internal", message: string): Promise<boolean> {
+    if (!workingOrder?.id || !message.trim()) return false;
 
     const newComment = {
       id: `c_msg_${Date.now()}`,
@@ -1665,7 +1665,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
       updatedAt: new Date().toISOString()
     };
 
-    await syncOrder(updatedOrder);
+    return syncOrder(updatedOrder);
   }
 
   return (

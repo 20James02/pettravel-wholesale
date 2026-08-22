@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { MessageCircle, MessageSquare, Send, X, ShieldAlert } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { LoaderCircle, MessageCircle, MessageSquare, Send, X, ShieldAlert } from "lucide-react";
 import type { CustomerOrder, OrderComment } from "@/lib/domain";
 import { BottomSheet } from "../ui/BottomSheet";
 
@@ -16,7 +16,7 @@ interface ChatPopupProps {
   setChatInput: (val: string) => void;
   isInternalComment: boolean;
   setIsInternalComment: (val: boolean) => void;
-  onSendComment: (message: string, isInternal: boolean) => void;
+  onSendComment: (message: string, isInternal: boolean) => Promise<boolean>;
 }
 
 export function ChatPopup({
@@ -33,16 +33,23 @@ export function ChatPopup({
   onSendComment
 }: ChatPopupProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isSending, setIsSending] = useState(false);
 
   // Lọc comment tùy thuộc vào quyền Admin
   const visibleComments = comments.filter((comment) => {
     return isAdmin || comment.audience === "customer_visible";
   });
 
-  const handleSend = () => {
-    if (!chatInput.trim()) return;
-    onSendComment(chatInput.trim(), isInternalComment);
-    setChatInput("");
+  const handleSend = async () => {
+    const message = chatInput.trim();
+    if (!message || isSending) return;
+    setIsSending(true);
+    try {
+      const sent = await onSendComment(message, isInternalComment);
+      if (sent) setChatInput("");
+    } finally {
+      setIsSending(false);
+    }
   };
 
   // Tự động cuộn xuống tin nhắn mới nhất
@@ -141,6 +148,7 @@ export function ChatPopup({
                   type="checkbox"
                   className="rounded border-orange-200 text-orange-500 focus:ring-orange-500"
                   checked={isInternalComment}
+                  disabled={isSending}
                   onChange={(e) => setIsInternalComment(e.target.checked)}
                 />
                 <span>Ghi chú nội bộ Pet Travel</span>
@@ -153,18 +161,21 @@ export function ChatPopup({
                 className="text-input text-xs py-2 px-3 flex-1 rounded-xl"
                 placeholder="Nhập lời nhắn cho đơn này..."
                 value={chatInput}
+                disabled={isSending}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSend();
+                  if (e.key === "Enter") void handleSend();
                 }}
               />
               <button
                 type="button"
-                className="primary-button text-xs py-2 px-4 shrink-0 min-h-[38px] rounded-xl font-bold bg-orange-500 hover:bg-orange-600 text-white cursor-pointer active:scale-95 transition flex items-center gap-1"
-                onClick={handleSend}
+                className="primary-button text-xs py-2 px-4 shrink-0 min-h-[38px] rounded-xl font-bold bg-orange-500 hover:bg-orange-600 text-white cursor-pointer active:scale-95 transition flex items-center gap-1 disabled:cursor-wait disabled:opacity-60"
+                onClick={() => void handleSend()}
+                disabled={isSending || !chatInput.trim()}
+                aria-busy={isSending}
               >
-                <Send size={13} />
-                <span>Gửi</span>
+                {isSending ? <LoaderCircle size={13} className="animate-spin" /> : <Send size={13} />}
+                <span>{isSending ? "Đang gửi..." : "Gửi"}</span>
               </button>
             </div>
           </div>
@@ -236,6 +247,7 @@ export function ChatPopup({
                     type="checkbox"
                     className="rounded border-orange-200 text-orange-500 focus:ring-orange-500"
                     checked={isInternalComment}
+                    disabled={isSending}
                     onChange={(e) => setIsInternalComment(e.target.checked)}
                   />
                   <span>Ghi chú nội bộ Pet Travel</span>
@@ -248,18 +260,21 @@ export function ChatPopup({
                   className="text-input text-sm py-2.5 px-3 flex-1 rounded-xl"
                   placeholder="Nhập lời nhắn trao đổi..."
                   value={chatInput}
+                  disabled={isSending}
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSend();
+                    if (e.key === "Enter") void handleSend();
                   }}
                 />
                 <button
                   type="button"
-                  className="primary-button text-xs py-2.5 px-4 shrink-0 rounded-xl font-bold bg-orange-500 hover:bg-orange-600 text-white cursor-pointer active:scale-95 transition flex items-center gap-1 shadow-md"
-                  onClick={handleSend}
+                  className="primary-button text-xs py-2.5 px-4 shrink-0 rounded-xl font-bold bg-orange-500 hover:bg-orange-600 text-white cursor-pointer active:scale-95 transition flex items-center gap-1 shadow-md disabled:cursor-wait disabled:opacity-60"
+                  onClick={() => void handleSend()}
+                  disabled={isSending || !chatInput.trim()}
+                  aria-busy={isSending}
                 >
-                  <Send size={14} />
-                  <span>Gửi</span>
+                  {isSending ? <LoaderCircle size={14} className="animate-spin" /> : <Send size={14} />}
+                  <span>{isSending ? "Đang gửi..." : "Gửi"}</span>
                 </button>
               </div>
             </div>

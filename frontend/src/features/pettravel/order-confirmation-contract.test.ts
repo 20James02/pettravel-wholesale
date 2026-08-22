@@ -11,6 +11,10 @@ const orderTimelineSource = readFileSync(
   new URL("./components/customer/OrderTimeline.tsx", import.meta.url),
   "utf8"
 );
+const chatPopupSource = readFileSync(
+  new URL("./components/shared/ChatPopup.tsx", import.meta.url),
+  "utf8"
+);
 
 describe("two-way quote confirmation pending states", () => {
   it("keeps every admin publish button disabled with a visible loader until the request settles", () => {
@@ -46,5 +50,14 @@ describe("two-way quote confirmation pending states", () => {
     assert.ok(orderTimelineSource.includes("if (saved) setIsEditRecipientOpen(false)"));
     assert.ok(appSource.includes("async function handleCustomerRequestChange(reason: string): Promise<boolean>"));
     assert.ok(appSource.includes("async function uploadPaymentProof(file: File): Promise<boolean>"));
+  });
+
+  it("keeps the chat draft until the message is persisted", () => {
+    assert.ok(chatPopupSource.includes("onSendComment: (message: string, isInternal: boolean) => Promise<boolean>"));
+    assert.ok(chatPopupSource.includes("const [isSending, setIsSending]"));
+    assert.ok(chatPopupSource.includes("const sent = await onSendComment"));
+    assert.ok(chatPopupSource.includes('if (sent) setChatInput("")'));
+    assert.ok(chatPopupSource.includes("Đang gửi..."));
+    assert.ok(appSource.includes("message: string): Promise<boolean>"));
   });
 });

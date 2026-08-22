@@ -77,7 +77,7 @@ interface AdminOrdersProps {
   reissuePaymentRequest: () => void;
   advanceFulfillment: (nextStatus: FulfillmentStatus, shipment?: Pick<Shipment, "carrier" | "trackingCode" | "eta">) => void;
   handlePostOrderAccounting: (action: "post_all" | "post_confirmed_payments") => Promise<boolean>;
-  addComment: (audience: "customer_visible" | "internal", message: string) => void;
+  addComment: (audience: "customer_visible" | "internal", message: string) => Promise<boolean>;
 }
 
 export function AdminOrders({

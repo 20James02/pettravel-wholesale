@@ -139,10 +139,18 @@ async function buildCustomerItems(
 function sanitizeOrderForCustomer(order: CustomerOrder): CustomerOrder {
   return {
     ...order,
-    items: order.items.map(({ supplierId: _supplierId, ...item }) => item),
-    fulfillmentGroups: order.fulfillmentGroups.map(
-      ({ supplierId: _supplierId, supplierName: _supplierName, internalNote: _internalNote, ...group }) => group
-    ),
+    items: order.items.map((item) => {
+      const safeItem = { ...item };
+      delete safeItem.supplierId;
+      return safeItem;
+    }),
+    fulfillmentGroups: order.fulfillmentGroups.map((group) => {
+      const safeGroup = { ...group };
+      delete safeGroup.supplierId;
+      delete safeGroup.supplierName;
+      delete safeGroup.internalNote;
+      return safeGroup;
+    }),
     comments: order.comments.filter((c) => c.audience !== "internal")
   };
 }
