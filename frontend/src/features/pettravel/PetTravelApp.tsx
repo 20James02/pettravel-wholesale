@@ -24,6 +24,11 @@ import { formatVnd } from "@/lib/money";
 import type { AppMode, TabKey, ApiUser } from "./types";
 import { TAB_ROUTE_MAP, ROUTE_TAB_MAP, resolvePostLoginTab } from "./types";
 import { entityStore } from "@/lib/cache/entity-store";
+import {
+  catalogCacheKey,
+  resolveCatalogAccessScope,
+  type CatalogAccessScope
+} from "@/lib/cache/catalog-access";
 import { scheduleIdlePrediction } from "@/lib/prefetch/prefetch-engine";
 
 // Import custom subcomponents
@@ -164,6 +169,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isProductsLoading, setIsProductsLoading] = useState<boolean>(true);
   const [currentUser, setCurrentUser] = useState<ApiUser | null>(null);
+  const [isSessionResolved, setIsSessionResolved] = useState<boolean>(false);
 
   // Data lists
   const [allProducts, setAllProducts] = useState<Product[]>([]);
@@ -259,6 +265,9 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
   // Compute states
   const isLoggedIn = currentUser !== null;
   const isAdmin = currentUser?.isAdmin || false;
+  const catalogAccessScope = resolveCatalogAccessScope(currentUser);
+  const catalogAccessScopeRef = useRef<CatalogAccessScope>(catalogAccessScope);
+  catalogAccessScopeRef.current = catalogAccessScope;
 
   const isAnyModalOpen = Boolean(
     selectedProduct ||
@@ -351,6 +360,7 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
         setActiveTab("catalog");
         setShowLoginModal(true);
       }
+      if (!cancelled) setIsSessionResolved(true);
     }
     loadUser();
 
@@ -382,22 +392,34 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
 
   // --- API FETCH HELPERS (useCallback + SWR entityStore to prevent re-creation and avoid blocking spinners) ---
   const fetchProducts = useCallback(async () => {
+    const requestedScope = catalogAccessScope;
     try {
-      const { data } = await entityStore.swrFetch("products", async () => {
+      const { data } = await entityStore.swrFetch(catalogCacheKey(requestedScope), async () => {
         const res = await fetch("/api/products");
         if (!res.ok) throw new Error();
-        const json = await res.json();
+        const json = (await res.json()) as { products?: Product[]; role?: CatalogAccessScope };
+        if (json.role !== requestedScope) {
+          throw new Error("Catalog access scope does not match the active session.");
+        }
         const list = (json.products ?? []) as Product[];
-        entityStore.setProducts(list);
+        if (catalogAccessScopeRef.current === requestedScope) {
+          entityStore.setProducts(list);
+        }
         return list;
       }, (fresh) => {
-        setAllProducts(fresh);
+        if (catalogAccessScopeRef.current === requestedScope) {
+          setAllProducts(fresh);
+        }
       });
-      setAllProducts(data);
+      if (catalogAccessScopeRef.current === requestedScope) {
+        setAllProducts(data);
+      }
     } catch { /* silent */ } finally {
-      setIsProductsLoading(false);
+      if (catalogAccessScopeRef.current === requestedScope) {
+        setIsProductsLoading(false);
+      }
     }
-  }, []);
+  }, [catalogAccessScope]);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -611,12 +633,20 @@ export function PetTravelApp({ initialTab }: PetTravelAppProps = {}) {
     }
   }, []);
 
-  // Fetch standard public catalog data on start and on auth change
+  // Categories are public and do not depend on session resolution.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchProducts();
     fetchCategories();
-  }, [fetchProducts, fetchCategories]);
+  }, [fetchCategories]);
+
+  // Fetch catalog only after auth is resolved. The access-scoped cache key makes
+  // login/logout transitions fetch the correct price projection immediately.
+  useEffect(() => {
+    if (!isSessionResolved) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsProductsLoading(true);
+    void fetchProducts();
+  }, [isSessionResolved, fetchProducts]);
 
   // On-demand lazy loading router per active tab
   useEffect(() => {
